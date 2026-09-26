@@ -316,7 +316,7 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
     {
         const int bytesPerSecond = 48000 * 2 * sizeof(short);
         const double maxQueuedSeconds = 0.06;
-        var clock = Stopwatch.StartNew();
+        var clock = new Stopwatch();
         var submittedBytes = 0L;
         var buffer = new byte[4096];
         var carried = 0;
@@ -331,6 +331,9 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
             var available = count + carried;
             var complete = available & ~3;
             if (complete == 0) { carried = available; continue; }
+            // Seeking may spend seconds decoding before the first PCM arrives.
+            // Start pacing at that first frame, so decoder startup cannot build playback credit.
+            if (!clock.IsRunning) clock.Start();
             var due = (submittedBytes + complete) / (double)bytesPerSecond - maxQueuedSeconds;
             var wait = due - clock.Elapsed.TotalSeconds;
             if (wait > 0) await Task.Delay(TimeSpan.FromSeconds(wait), token).ConfigureAwait(false);

@@ -10,6 +10,17 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Threading;
 
+if (args is ["seek-pacing-test"])
+{
+    await MeterSeekRegressionTests.PacingAsync();
+    return 0;
+}
+if (args is ["seek-meter-test", var seekRoot])
+{
+    MeterSeekRegressionTests.Disc(seekRoot);
+    return 0;
+}
+
 if (args is ["reading-tests"])
 {
     await ReadingRegressionTests.RunAsync();

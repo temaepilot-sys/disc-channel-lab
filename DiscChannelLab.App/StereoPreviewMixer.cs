@@ -26,7 +26,7 @@ public static class StereoPreviewMixer
         var right = new double[channels.Count];
         var targetLeft = new double[channels.Count];
         var targetRight = new double[channels.Count];
-        var clock = Stopwatch.StartNew();
+        var clock = new Stopwatch();
         var carried = 0;
         var submittedFrames = 0L;
         var rampFrames = 0;
@@ -44,6 +44,8 @@ public static class StereoPreviewMixer
             var frames = available / frameBytes;
             if (frames == 0) { carried = available; continue; }
             var complete = frames * frameBytes;
+            // Decoder startup/seek time must not become a burst of queued audio.
+            if (!clock.IsRunning) clock.Start();
             var wait = (submittedFrames + frames) / (double)sampleRate - maxQueuedSeconds - clock.Elapsed.TotalSeconds;
             if (wait > 0) await Task.Delay(TimeSpan.FromSeconds(wait), token).ConfigureAwait(false);
 

@@ -6,6 +6,12 @@ DiscChannelLab is a Windows app that helps people explore multichannel audio. It
 
 The app reads supported, unprotected Blu-ray, DVD-Audio, and DVD-Video sources through .NET 10 and FFmpeg. It does not implement copy-protection removal or its own decoder for a branded audio format. It does not claim certification or affiliation with any audio-format owner.
 
+## Screenshot
+
+![DiscChannelLab in English](docs/screenshots/english.png)
+
+[Japanese UI screenshot](docs/screenshots/japanese.png)
+
 ## Features
 
 - Inspect titles, chapters, tracks, audio streams, and channel layouts.

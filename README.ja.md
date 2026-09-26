@@ -6,6 +6,12 @@ DiscChannelLab は、多チャンネル音声を調べるための Windows ア�
 
 .NET 10 と FFmpeg を使い、保護されていない対応 Blu-ray、DVD-Audio、DVD-Video を読みます。コピー保護の解除や、特定の音声規格の独自復号機能は実装していません。音声規格の認証や提携をうたうものではありません。
 
+## スクリーンショット
+
+![DiscChannelLab の日本語画面](docs/screenshots/japanese.png)
+
+[英語の画面](docs/screenshots/english.png)
+
 ## 主な機能
 
 - タイトル、チャプター、曲、音声ストリーム、チャンネル配置の確認。

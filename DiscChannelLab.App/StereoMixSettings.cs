@@ -2,7 +2,7 @@ using System.Globalization;
 
 namespace Disc2Flac;
 
-/// <summary>Relative channel weights; pan's less-than operator normalizes each output channel.</summary>
+/// <summary>Relative channel weights with a fixed gain based on the default mix.</summary>
 public sealed record StereoMixSettings(double Center, double Surround, double Lfe, double Front = 1)
 {
     public static StereoMixSettings Default { get; } = new(1 / Math.Sqrt(2), 1 / Math.Sqrt(2), 0);
@@ -50,24 +50,39 @@ public sealed record StereoMixSettings(double Center, double Surround, double Lf
         if (!Valid(Front) || !Valid(Center) || !Valid(Surround) || !Valid(Lfe))
             throw new ArgumentOutOfRangeException(nameof(Center), "ミックス比率は0～100%で指定してください。");
         var channels = Layouts[stream.ChannelLayout].Split(' ');
-        var left = Terms(channels, "FL", ["BL", "SL", "TFL"], "FLC");
-        var right = Terms(channels, "FR", ["BR", "SR", "TFR"], "FRC");
-        return $"pan=stereo|FL<{left}|FR<{right}";
+        var left = Terms(channels, "FL", ["BL", "SL", "TFL"], "FLC",
+            ReferenceTotal(channels, left: true));
+        var right = Terms(channels, "FR", ["BR", "SR", "TFR"], "FRC",
+            ReferenceTotal(channels, left: false));
+        return $"pan=stereo|FL={left}|FR={right}";
     }
 
-    private string Terms(string[] channels, string front, string[] surrounds, string wide)
+    internal static double ReferenceTotal(IReadOnlyList<string> channels, bool left)
     {
-        var parts = new List<string> { $"{Format(Front)}*{front}" };
-        if (channels.Contains(wide)) parts.Add($"{Format(0.5 * Front)}*{wide}");
-        if (Center > 0 && channels.Contains("FC")) parts.Add($"{Format(Center)}*FC");
+        var surrounds = left ? new[] { "BL", "SL", "TFL" } : new[] { "BR", "SR", "TFR" };
+        var wide = left ? "FLC" : "FRC";
+        var total = Default.Front;
+        if (channels.Contains(wide)) total += 0.5 * Default.Front;
+        if (channels.Contains("FC")) total += Default.Center;
+        if (surrounds.Any(channels.Contains)) total += Default.Surround;
+        if (channels.Contains("BC")) total += Default.Surround / 2;
+        if (channels.Contains("LFE")) total += Default.Lfe;
+        return total;
+    }
+
+    private string Terms(string[] channels, string front, string[] surrounds, string wide, double divisor)
+    {
+        var parts = new List<string> { $"{Format(Front / divisor)}*{front}" };
+        if (channels.Contains(wide)) parts.Add($"{Format(0.5 * Front / divisor)}*{wide}");
+        if (Center > 0 && channels.Contains("FC")) parts.Add($"{Format(Center / divisor)}*FC");
         var presentSurrounds = surrounds.Where(channels.Contains).ToArray();
         if (Surround > 0)
         {
             foreach (var channel in presentSurrounds)
-                parts.Add($"{Format(Surround / presentSurrounds.Length)}*{channel}");
-            if (channels.Contains("BC")) parts.Add($"{Format(Surround / 2)}*BC");
+                parts.Add($"{Format(Surround / presentSurrounds.Length / divisor)}*{channel}");
+            if (channels.Contains("BC")) parts.Add($"{Format(Surround / 2 / divisor)}*BC");
         }
-        if (Lfe > 0 && channels.Contains("LFE")) parts.Add($"{Format(Lfe)}*LFE");
+        if (Lfe > 0 && channels.Contains("LFE")) parts.Add($"{Format(Lfe / divisor)}*LFE");
         return string.Join('+', parts);
     }
 

@@ -132,15 +132,13 @@ public static class StereoPreviewMixer
                 case "FRC": right[i] = 0.5 * state.Mix.Front; break;
             }
         }
-        Normalize(left);
-        Normalize(right);
+        Scale(left, StereoMixSettings.ReferenceTotal(channels, left: true));
+        Scale(right, StereoMixSettings.ReferenceTotal(channels, left: false));
     }
 
-    private static void Normalize(double[] weights)
+    private static void Scale(double[] weights, double divisor)
     {
-        var total = weights.Sum();
-        if (total > 0)
-            for (var i = 0; i < weights.Length; i++) weights[i] /= total;
+        for (var i = 0; i < weights.Length; i++) weights[i] /= divisor;
     }
 
     private static short Clip(double value) =>

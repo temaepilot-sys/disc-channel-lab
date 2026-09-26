@@ -299,7 +299,7 @@
                             <DockPanel Margin="0,0,0,5">
                                 <Button DockPanel.Dock="Right" Content="{local:Loc Key='デフォルトに戻す'}"
                                         Click="ResetStereoMix_Click" Margin="8,0,0,0"/>
-                                <TextBlock Text="{local:Loc Key='各チャンネルの比率を設定。出力は自動正規化します。'}"
+                                <TextBlock Text="{local:Loc Key='バーは聴感カーブ、数値は実際の比率です。'}"
                                            FontSize="11" Foreground="{DynamicResource MutedBrush}"
                                            VerticalAlignment="Center" TextWrapping="Wrap"/>
                             </DockPanel>
@@ -315,7 +315,7 @@
                                 <Slider x:Name="FrontMixSlider" Minimum="0" Maximum="100" TickFrequency="1"
                                         ValueChanged="MixSlider_ValueChanged"
                                         PreviewMouseLeftButtonUp="MixSlider_MouseUp" PreviewKeyUp="MixSlider_KeyUp"
-                                        Value="{Binding FrontMixPercent, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                        Value="{Binding FrontMixSliderPercent, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
                             </DockPanel>
                             <DockPanel Margin="0,0,0,3">
                                 <TextBlock DockPanel.Dock="Left" Text="{local:Loc Key='センター'}" Width="82"/>
@@ -329,7 +329,7 @@
                                 <Slider x:Name="CenterMixSlider" Minimum="0" Maximum="100" TickFrequency="1"
                                         ValueChanged="MixSlider_ValueChanged"
                                         PreviewMouseLeftButtonUp="MixSlider_MouseUp" PreviewKeyUp="MixSlider_KeyUp"
-                                        Value="{Binding CenterMixPercent, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                        Value="{Binding CenterMixSliderPercent, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
                             </DockPanel>
                             <DockPanel Margin="0,0,0,3">
                                 <TextBlock DockPanel.Dock="Left" Text="{local:Loc Key='サラウンド'}" Width="82"/>
@@ -343,7 +343,7 @@
                                 <Slider x:Name="SurroundMixSlider" Minimum="0" Maximum="100" TickFrequency="1"
                                         ValueChanged="MixSlider_ValueChanged"
                                         PreviewMouseLeftButtonUp="MixSlider_MouseUp" PreviewKeyUp="MixSlider_KeyUp"
-                                        Value="{Binding SurroundMixPercent, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                        Value="{Binding SurroundMixSliderPercent, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
                             </DockPanel>
                             <DockPanel>
                                 <TextBlock DockPanel.Dock="Left" Text="LFE" Width="82"/>
@@ -357,7 +357,7 @@
                                 <Slider x:Name="LfeMixSlider" Minimum="0" Maximum="100" TickFrequency="1"
                                         ValueChanged="MixSlider_ValueChanged"
                                         PreviewMouseLeftButtonUp="MixSlider_MouseUp" PreviewKeyUp="MixSlider_KeyUp"
-                                        Value="{Binding LfeMixPercent, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                        Value="{Binding LfeMixSliderPercent, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
                             </DockPanel>
                         </StackPanel>
                     </Expander>

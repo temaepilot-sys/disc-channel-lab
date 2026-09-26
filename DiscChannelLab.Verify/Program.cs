@@ -59,6 +59,19 @@ if (args is ["live-mix-test"])
         silentLeft, silentRight);
     if (silentLeft.Any(x => x != 0) || silentRight.Any(x => x != 0))
         throw new InvalidDataException("Muting every mix group did not produce silence.");
+    var fullLeft = new double[names.Count];
+    var fullRight = new double[names.Count];
+    var halfLeft = new double[names.Count];
+    var halfRight = new double[names.Count];
+    StereoPreviewMixer.BuildWeights(names, new PreviewMixState(new StereoMixSettings(1, 0, 0, 1), null),
+        fullLeft, fullRight);
+    StereoPreviewMixer.BuildWeights(names, new PreviewMixState(new StereoMixSettings(0.5, 0, 0, 1), null),
+        halfLeft, halfRight);
+    var frontIndex = names.ToList().IndexOf("FL");
+    var centerIndex = names.ToList().IndexOf("FC");
+    if (Math.Abs(fullLeft[frontIndex] - halfLeft[frontIndex]) > 1e-12 ||
+        Math.Abs(fullLeft[centerIndex] / 2 - halfLeft[centerIndex]) > 1e-12)
+        throw new InvalidDataException("Changing center level also changed another group's gain.");
     Console.WriteLine("Live stereo mix changed audible PCM without restarting playback.");
     return 0;
 }
@@ -96,12 +109,14 @@ if (args is ["mix-ui-test"])
                 var muted = typeof(MainViewModel).GetProperty($"{name}MixMuted")!;
                 slider.Value = 12.5;
                 slider.GetBindingExpression(Slider.ValueProperty)!.UpdateSource();
-                if (Math.Abs((double)level.GetValue(model)! - 12.5) > 0.001)
+                if (Math.Abs((double)level.GetValue(model)! - 1.5625) > 0.001)
                     throw new InvalidDataException($"{name} slider did not update the mix level.");
                 input.Text = "35.5";
                 Pump(250);
                 if (Math.Abs((double)level.GetValue(model)! - 35.5) > 0.001)
                     throw new InvalidDataException($"{name} numeric input did not update the mix level.");
+                if (Math.Abs(slider.Value - 100 * Math.Sqrt(0.355)) > 0.01)
+                    throw new InvalidDataException($"{name} slider did not follow numeric input.");
                 mute.IsChecked = true;
                 mute.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent, mute));
                 if ((bool)muted.GetValue(model)! != true)
@@ -142,6 +157,10 @@ if (args is ["mix-controls-test"])
         model.CenterMixPercent = 82.5;
         model.SurroundMixPercent = 35.25;
         model.LfeMixPercent = 20;
+        model.CenterMixSliderPercent = 50;
+        if (model.CenterMixPercent != 25 || model.CenterMixSliderPercent != 50)
+            throw new InvalidDataException("Perceptual mix slider did not map 50% to 25% gain.");
+        model.CenterMixPercent = 82.5;
         model.FrontMixMuted = true;
         model.CenterMixMuted = true;
         model.SurroundMixMuted = true;

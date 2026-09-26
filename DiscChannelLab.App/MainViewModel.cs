@@ -141,10 +141,14 @@ public sealed class MainViewModel : INotifyPropertyChanged
     }
     public bool CanChoosePreviewChannel => !IsBusy && PreviewChannels.Count > 1;
     public bool CanDownmixStereo => SelectedStream is { } stream && StereoMixSettings.Supports(stream) && !IsBusy;
-    public double FrontMixPercent { get => _frontMixPercent; set => Set(ref _frontMixPercent, ClampPercent(value)); }
-    public double CenterMixPercent { get => _centerMixPercent; set { if (Set(ref _centerMixPercent, ClampPercent(value))) Changed(nameof(CenterMixText)); } }
-    public double SurroundMixPercent { get => _surroundMixPercent; set { if (Set(ref _surroundMixPercent, ClampPercent(value))) Changed(nameof(SurroundMixText)); } }
-    public double LfeMixPercent { get => _lfeMixPercent; set { if (Set(ref _lfeMixPercent, ClampPercent(value))) Changed(nameof(LfeMixText)); } }
+    public double FrontMixPercent { get => _frontMixPercent; set { if (Set(ref _frontMixPercent, ClampPercent(value))) Changed(nameof(FrontMixSliderPercent)); } }
+    public double CenterMixPercent { get => _centerMixPercent; set { if (Set(ref _centerMixPercent, ClampPercent(value))) { Changed(nameof(CenterMixSliderPercent)); Changed(nameof(CenterMixText)); } } }
+    public double SurroundMixPercent { get => _surroundMixPercent; set { if (Set(ref _surroundMixPercent, ClampPercent(value))) { Changed(nameof(SurroundMixSliderPercent)); Changed(nameof(SurroundMixText)); } } }
+    public double LfeMixPercent { get => _lfeMixPercent; set { if (Set(ref _lfeMixPercent, ClampPercent(value))) { Changed(nameof(LfeMixSliderPercent)); Changed(nameof(LfeMixText)); } } }
+    public double FrontMixSliderPercent { get => MixSliderPosition(FrontMixPercent); set => FrontMixPercent = MixSliderGain(value); }
+    public double CenterMixSliderPercent { get => MixSliderPosition(CenterMixPercent); set => CenterMixPercent = MixSliderGain(value); }
+    public double SurroundMixSliderPercent { get => MixSliderPosition(SurroundMixPercent); set => SurroundMixPercent = MixSliderGain(value); }
+    public double LfeMixSliderPercent { get => MixSliderPosition(LfeMixPercent); set => LfeMixPercent = MixSliderGain(value); }
     public bool FrontMixMuted { get => _frontMixMuted; set => Set(ref _frontMixMuted, value); }
     public bool CenterMixMuted { get => _centerMixMuted; set => Set(ref _centerMixMuted, value); }
     public bool SurroundMixMuted { get => _surroundMixMuted; set => Set(ref _surroundMixMuted, value); }
@@ -156,6 +160,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
         SurroundMixMuted ? 0 : SurroundMixPercent / 100, LfeMixMuted ? 0 : LfeMixPercent / 100,
         FrontMixMuted ? 0 : FrontMixPercent / 100);
     private static double ClampPercent(double value) => Math.Clamp(double.IsFinite(value) ? value : 0, 0, 100);
+    private static double MixSliderPosition(double actualPercent) => 100 * Math.Sqrt(actualPercent / 100);
+    private static double MixSliderGain(double sliderPercent) => 100 * VolumeCurve.Gain(ClampPercent(sliderPercent), perceived: true);
     public string Status { get => LanguageService.T(_status); private set => Set(ref _status, value); }
     public string SavedFolder { get => _savedFolder; private set { if (Set(ref _savedFolder, value)) Changed(nameof(CanOpenSavedFolder)); } }
     public bool CanOpenSavedFolder => !string.IsNullOrWhiteSpace(SavedFolder);

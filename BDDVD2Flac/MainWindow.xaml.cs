@@ -37,7 +37,8 @@ public partial class MainWindow : Window
 
     private void UpdatePlaylistDropDownWidth()
     {
-        var width = Math.Clamp(ActualWidth * 0.48, 450, 570);
+        var width = Math.Min(Math.Max(PlaylistCombo.ActualWidth, ActualWidth - 72),
+            SystemParameters.WorkArea.Width - 64);
         var style = new Style(typeof(ComboBoxItem));
         style.BasedOn = (Style)Application.Current.FindResource(typeof(ComboBoxItem));
         style.Setters.Add(new Setter(FrameworkElement.WidthProperty, width));

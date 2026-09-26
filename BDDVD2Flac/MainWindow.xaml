@@ -61,8 +61,8 @@
                               SelectionChanged="Playlist_SelectionChanged"
                               MinHeight="32" Margin="0,0,0,12">
                         <ComboBox.ToolTip>
-                            <ToolTip MaxWidth="480">
-                                <TextBlock Text="{Binding SelectedPlaylist.DisplayName}" TextWrapping="Wrap" MaxWidth="450"/>
+                            <ToolTip MaxWidth="760">
+                                <TextBlock Text="{Binding SelectedPlaylist.DisplayName}" TextWrapping="Wrap" MaxWidth="730"/>
                             </ToolTip>
                         </ComboBox.ToolTip>
                         <ComboBox.ItemTemplate>
@@ -77,14 +77,15 @@
                                     <TextBlock Text="{Binding TitleLabel}" FontWeight="SemiBold" VerticalAlignment="Center"/>
                                     <TextBlock Grid.Column="1" Text="{Binding DurationLabel}" VerticalAlignment="Center"/>
                                     <TextBlock Grid.Column="2" Text="{Binding ChapterCountLabel}" VerticalAlignment="Center"/>
-                                    <TextBlock Grid.Column="3" Text="{Binding ChapterSummaryPreview}" TextTrimming="CharacterEllipsis"
-                                               TextWrapping="NoWrap" VerticalAlignment="Center">
-                                        <TextBlock.ToolTip>
-                                            <ToolTip MaxWidth="480">
-                                                <TextBlock Text="{Binding ChapterSummary}" TextWrapping="Wrap" MaxWidth="450"/>
-                                            </ToolTip>
-                                        </TextBlock.ToolTip>
-                                    </TextBlock>
+                                    <StackPanel Grid.Column="3" MinWidth="0" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding TitleName}" FontWeight="SemiBold"
+                                                   TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
+                                                   ToolTip="{Binding TitleName}"/>
+                                        <TextBlock Text="{Binding ChapterSummary}" FontSize="12"
+                                                   Foreground="{DynamicResource MutedBrush}"
+                                                   TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
+                                                   ToolTip="{Binding ChapterSummary}"/>
+                                    </StackPanel>
                                 </Grid>
                             </DataTemplate>
                         </ComboBox.ItemTemplate>

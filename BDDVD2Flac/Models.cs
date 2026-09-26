@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using System.Globalization;
 using System.Runtime.CompilerServices;
 
 namespace Disc2Flac;
@@ -43,7 +42,6 @@ public sealed class PlaylistInfo : INotifyPropertyChanged
             _chapterTitles = value;
             Changed(nameof(ChapterTitles));
             Changed(nameof(ChapterSummary));
-            Changed(nameof(ChapterSummaryPreview));
             Changed(nameof(DisplayName));
         }
     }
@@ -82,15 +80,6 @@ public sealed class PlaylistInfo : INotifyPropertyChanged
                 : LanguageService.T(IsRepeatedShortClipLoop ? "短いクリップの繰り返し" : "名称未設定");
         }
     }
-    public string ChapterSummaryPreview
-    {
-        get
-        {
-            var summary = ChapterSummary;
-            var info = new StringInfo(summary);
-            return info.LengthInTextElements > 19 ? info.SubstringByTextElements(0, 19) + "…" : summary;
-        }
-    }
     public string DisplayName => $"{(Format == DiscFormat.DvdAudio ? $"DVD-Audio {DvdAudio?.TitleSet:00}/{DvdAudio?.TitleNumber:00}" : Format == DiscFormat.DvdVideo ? $"DVD-Video {DvdVideoTitle:00}" : DisplayNumber)} · {DurationLabel} · {ChapterCountLabel} · {TitleName} · {ChapterSummary}";
     public override string ToString() => DisplayName;
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -98,7 +87,6 @@ public sealed class PlaylistInfo : INotifyPropertyChanged
     {
         Changed(nameof(ChapterCountLabel));
         Changed(nameof(ChapterSummary));
-        Changed(nameof(ChapterSummaryPreview));
         Changed(nameof(DisplayName));
     }
     private void Changed(string name) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));

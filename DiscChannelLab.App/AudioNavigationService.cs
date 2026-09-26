@@ -126,7 +126,8 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
                      "-fflags", "nobuffer", "-flags", "low_delay", "-probesize", "32", "-max_delay", "0",
                      "-f", "s16le", "-sample_rate", "48000", "-ch_layout", "stereo", "-i", "pipe:0" })
             playInfo.ArgumentList.Add(argument);
-        log.Write($"DVD PREVIEW {playlist.DisplayName} {startTicks / 45000d:0.###}-{endTicks / 45000d:0.###}");
+        log.Write($"DVD PREVIEW {playlist.DisplayName} {startTicks / 45000d:0.###}-{endTicks / 45000d:0.###} " +
+                  $"channel={soloChannel ?? "stereo"} mix={mix.Center:0.###}/{mix.Surround:0.###}/{mix.Lfe:0.###}");
         using var player = new Process { StartInfo = playInfo };
         using var decoder = new Process { StartInfo = decodeInfo };
         if (!player.Start()) throw new IOException("音声プレーヤーを起動できません。");
@@ -231,7 +232,8 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
             "-sample_rate", "48000", "-ch_layout", "stereo", "-i", "pipe:0"
         }) playInfo.ArgumentList.Add(argument);
 
-        log.Write($"PREVIEW {Path.GetFileName(sourcePath)} seek={Seconds(seekTicks)} duration={Seconds(durationTicks)}");
+        log.Write($"PREVIEW {Path.GetFileName(sourcePath)} seek={Seconds(seekTicks)} duration={Seconds(durationTicks)} " +
+                  $"channel={soloChannel ?? "stereo"} mix={mix.Center:0.###}/{mix.Surround:0.###}/{mix.Lfe:0.###}");
         using var player = new Process { StartInfo = playInfo };
         using var decoder = new Process { StartInfo = decodeInfo };
         if (!player.Start()) throw new IOException("音声プレーヤーを起動できません。");

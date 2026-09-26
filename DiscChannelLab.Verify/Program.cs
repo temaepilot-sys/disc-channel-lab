@@ -9,6 +9,68 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Threading;
 
+if (args is ["mix-ui-test"])
+{
+    Exception? failure = null;
+    var thread = new Thread(() =>
+    {
+        MainWindow? window = null;
+        try
+        {
+            var app = new App();
+            app.InitializeComponent();
+            window = new MainWindow();
+            var loaded = typeof(MainWindow).GetMethod("Window_Loaded", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            window.Loaded -= (RoutedEventHandler)Delegate.CreateDelegate(typeof(RoutedEventHandler), window, loaded);
+            window.Show();
+            var model = (MainViewModel)window.DataContext;
+            model.PreviewChannels.Add(new ChannelChoice(null, "Stereo mix"));
+            model.PreviewChannels.Add(new ChannelChoice("FC", "Center"));
+            model.SelectedPreviewChannel = model.PreviewChannels[1];
+            var firstSlider = (Slider)window.FindName("CenterMixSlider")!;
+            firstSlider.Value = 12.5;
+            var frame = new DispatcherFrame();
+            var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
+            timer.Tick += (_, _) => { timer.Stop(); frame.Continue = false; };
+            timer.Start();
+            Dispatcher.PushFrame(frame);
+            if (model.SelectedPreviewChannel?.Code is not null)
+                throw new InvalidDataException("Slider change did not activate the stereo mix.");
+            model.SelectedPreviewChannel = model.PreviewChannels[1];
+            foreach (var name in new[] { "Center", "Surround", "Lfe" })
+            {
+                var slider = (Slider)window.FindName($"{name}MixSlider")!;
+                var input = (TextBox)window.FindName($"{name}MixInput")!;
+                var mute = (CheckBox)window.FindName($"{name}MixMute")!;
+                var level = typeof(MainViewModel).GetProperty($"{name}MixPercent")!;
+                var muted = typeof(MainViewModel).GetProperty($"{name}MixMuted")!;
+                slider.Value = 12.5;
+                slider.GetBindingExpression(Slider.ValueProperty)!.UpdateSource();
+                if (Math.Abs((double)level.GetValue(model)! - 12.5) > 0.001)
+                    throw new InvalidDataException($"{name} slider did not update the mix level.");
+                input.Text = "35.5";
+                input.GetBindingExpression(TextBox.TextProperty)!.UpdateSource();
+                if (Math.Abs((double)level.GetValue(model)! - 35.5) > 0.001)
+                    throw new InvalidDataException($"{name} numeric input did not update the mix level.");
+                mute.IsChecked = true;
+                mute.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent, mute));
+                if ((bool)muted.GetValue(model)! != true)
+                    throw new InvalidDataException($"{name} mute did not apply.");
+            }
+            if (model.SelectedPreviewChannel?.Code is not null)
+                throw new InvalidDataException("Mix adjustment did not switch preview to stereo mix.");
+            Console.WriteLine("Mix UI bindings, mute, and preview selection passed.");
+        }
+        catch (Exception ex) { failure = ex; }
+        finally { window?.Close(); }
+    });
+    thread.SetApartmentState(ApartmentState.STA);
+    thread.Start();
+    thread.Join();
+    if (failure is not null) throw failure;
+    return 0;
+}
+
 if (args is ["mix-controls-test"])
 {
     var model = new MainViewModel();
@@ -20,21 +82,59 @@ if (args is ["mix-controls-test"])
         model.CenterMixPercent = 82.5;
         model.SurroundMixPercent = 35.25;
         model.LfeMixPercent = 20;
-        model.CenterMixOff = true;
-        model.SurroundMixOff = true;
-        model.LfeMixOff = true;
+        model.CenterMixMuted = true;
+        model.SurroundMixMuted = true;
+        model.LfeMixMuted = true;
         if (ActiveMix() != new StereoMixSettings(0, 0, 0) || model.CenterMixPercent != 82.5)
-            throw new InvalidDataException("Off switches did not mute while retaining entered levels.");
-        model.SurroundMixOff = false;
+            throw new InvalidDataException("Mute switches did not retain entered levels.");
+        model.SurroundMixMuted = false;
         if (ActiveMix().Surround != 0.3525)
             throw new InvalidDataException("Restoring a channel did not restore its entered level.");
         await model.ResetStereoMixAsync();
         if (ActiveMix() != StereoMixSettings.Default ||
-            model.CenterMixOff || model.SurroundMixOff || model.LfeMixOff)
+            model.CenterMixMuted || model.SurroundMixMuted || model.LfeMixMuted)
             throw new InvalidDataException("Mix defaults were not restored.");
-        Console.WriteLine("Mix level, off switches, and reset passed.");
+        Console.WriteLine("Mix levels, mute switches, and reset passed.");
     }
     finally { model.DetachLanguage(); }
+    return 0;
+}
+
+if (args is ["mix-playback-test", var mixSource])
+{
+    Environment.SetEnvironmentVariable("SDL_AUDIODRIVER", "dummy");
+    var model = new MainViewModel();
+    try
+    {
+        const string appliedMix = "channel=stereo mix=0/";
+        var priorStarts = File.Exists(model.LogPath)
+            ? File.ReadLines(model.LogPath).Count(line => line.Contains(appliedMix, StringComparison.Ordinal)) : 0;
+        await model.OpenSourceAsync(mixSource);
+        if (!model.CanPlay || !model.CanDownmixStereo || model.PreviewChannels.Count < 2)
+            throw new InvalidDataException($"A playable multichannel title is required: {model.Status}");
+        model.SelectedPreviewChannel = model.PreviewChannels.First(x => x.Code is not null);
+        await model.TogglePlaybackAsync();
+        model.CenterMixPercent = 0;
+        model.SelectedPreviewChannel = model.PreviewChannels[0];
+        await model.ApplyStereoMixAsync().WaitAsync(TimeSpan.FromSeconds(20));
+        var activeMix = (StereoMixSettings)typeof(MainViewModel)
+            .GetField("_activePlaybackMix", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(model)!;
+        if (!model.IsPlaying || activeMix.Center != 0 || model.SelectedPreviewChannel?.Code is not null)
+            throw new InvalidDataException("The changed stereo mix did not reach playback.");
+        var startedWithNewMix = false;
+        for (var i = 0; i < 150; i++)
+        {
+            var starts = File.ReadLines(model.LogPath)
+                .Count(line => line.Contains(appliedMix, StringComparison.Ordinal));
+            if (starts > priorStarts) { startedWithNewMix = true; break; }
+            await Task.Delay(100);
+        }
+        if (!startedWithNewMix || !model.IsPlaying)
+            throw new InvalidDataException($"The player did not start with the updated mix: {model.Status}");
+        Console.WriteLine("Changed stereo mix reached the running player.");
+    }
+    finally { model.StopPlayback(); model.DetachLanguage(); }
     return 0;
 }
 

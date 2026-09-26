@@ -54,10 +54,11 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private double _centerMixPercent = 100 / Math.Sqrt(2);
     private double _surroundMixPercent = 100 / Math.Sqrt(2);
     private double _lfeMixPercent;
-    private bool _centerMixOff;
-    private bool _surroundMixOff;
-    private bool _lfeMixOff;
+    private bool _centerMixMuted;
+    private bool _surroundMixMuted;
+    private bool _lfeMixMuted;
     private StereoMixSettings? _activePlaybackMix;
+    private string? _activePreviewChannel;
     private bool _suspendEditSave;
 
     public ObservableCollection<string> Sources { get; } = [];
@@ -140,14 +141,14 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public double CenterMixPercent { get => _centerMixPercent; set { if (Set(ref _centerMixPercent, ClampPercent(value))) Changed(nameof(CenterMixText)); } }
     public double SurroundMixPercent { get => _surroundMixPercent; set { if (Set(ref _surroundMixPercent, ClampPercent(value))) Changed(nameof(SurroundMixText)); } }
     public double LfeMixPercent { get => _lfeMixPercent; set { if (Set(ref _lfeMixPercent, ClampPercent(value))) Changed(nameof(LfeMixText)); } }
-    public bool CenterMixOff { get => _centerMixOff; set => Set(ref _centerMixOff, value); }
-    public bool SurroundMixOff { get => _surroundMixOff; set => Set(ref _surroundMixOff, value); }
-    public bool LfeMixOff { get => _lfeMixOff; set => Set(ref _lfeMixOff, value); }
+    public bool CenterMixMuted { get => _centerMixMuted; set => Set(ref _centerMixMuted, value); }
+    public bool SurroundMixMuted { get => _surroundMixMuted; set => Set(ref _surroundMixMuted, value); }
+    public bool LfeMixMuted { get => _lfeMixMuted; set => Set(ref _lfeMixMuted, value); }
     public string CenterMixText => $"{CenterMixPercent:0}%";
     public string SurroundMixText => $"{SurroundMixPercent:0}%";
     public string LfeMixText => $"{LfeMixPercent:0}%";
-    private StereoMixSettings CurrentMix => new(CenterMixOff ? 0 : CenterMixPercent / 100,
-        SurroundMixOff ? 0 : SurroundMixPercent / 100, LfeMixOff ? 0 : LfeMixPercent / 100);
+    private StereoMixSettings CurrentMix => new(CenterMixMuted ? 0 : CenterMixPercent / 100,
+        SurroundMixMuted ? 0 : SurroundMixPercent / 100, LfeMixMuted ? 0 : LfeMixPercent / 100);
     private static double ClampPercent(double value) => Math.Clamp(double.IsFinite(value) ? value : 0, 0, 100);
     public string Status { get => LanguageService.T(_status); private set => Set(ref _status, value); }
     public string SavedFolder { get => _savedFolder; private set { if (Set(ref _savedFolder, value)) Changed(nameof(CanOpenSavedFolder)); } }
@@ -734,18 +735,22 @@ public sealed class MainViewModel : INotifyPropertyChanged
         var disc = _disc;
         var playlist = _loadedPlaylist;
         var mix = CurrentMix;
+        var previewChannel = SelectedPreviewChannel?.Code;
         _activePlaybackMix = mix;
+        _activePreviewChannel = previewChannel;
         var start = track.StartTicks + (long)Math.Round(PreviewSeconds * 45000, MidpointRounding.AwayFromZero);
         var session = new CancellationTokenSource();
         _playback = session;
         ResetMeterLevels();
         IsPlaying = true;
         Status = $"{track.Title} を再生しています";
-        _playbackTask = RunPlaybackAsync(session, disc, playlist, stream, track, start, mix, version);
+        _playbackTask = RunPlaybackAsync(session, disc, playlist, stream, track, start,
+            mix, previewChannel, version);
     }
 
     private async Task RunPlaybackAsync(CancellationTokenSource session, DiscAnalysis disc, PlaylistInfo playlist,
-        AudioStreamInfo stream, TrackRow track, long startTicks, StereoMixSettings mix, int version)
+        AudioStreamInfo stream, TrackRow track, long startTicks, StereoMixSettings mix,
+        string? previewChannel, int version)
     {
         var completed = false;
         var uiContext = SynchronizationContext.Current;
@@ -760,7 +765,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
                         _playClockBase = (positionTicks - track.StartTicks) / 45000d;
                         _playClock.Restart();
                     }, null);
-                }, () => VolumeCurve.Gain(Volume, PerceivedVolume), mix, SelectedPreviewChannel?.Code,
+                }, () => VolumeCurve.Gain(Volume, PerceivedVolume), mix, previewChannel,
                 (segmentStart, seconds, peaks, rms) => uiContext?.Post(_ =>
                 {
                     if (ReferenceEquals(_playback, session) && version == _transportVersion)
@@ -851,7 +856,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     public async Task ApplyStereoMixAsync()
     {
-        if (!IsPlaying || SelectedPreviewChannel?.Code is not null || CurrentMix == _activePlaybackMix) return;
+        if (!IsPlaying) return;
+        if (CurrentMix == _activePlaybackMix && SelectedPreviewChannel?.Code == _activePreviewChannel) return;
         AdvancePlaybackClock();
         await SeekAsync(PreviewSeconds);
     }
@@ -861,9 +867,9 @@ public sealed class MainViewModel : INotifyPropertyChanged
         CenterMixPercent = StereoMixSettings.Default.Center * 100;
         SurroundMixPercent = StereoMixSettings.Default.Surround * 100;
         LfeMixPercent = StereoMixSettings.Default.Lfe * 100;
-        CenterMixOff = false;
-        SurroundMixOff = false;
-        LfeMixOff = false;
+        CenterMixMuted = false;
+        SurroundMixMuted = false;
+        LfeMixMuted = false;
         await ApplyStereoMixAsync();
     }
 

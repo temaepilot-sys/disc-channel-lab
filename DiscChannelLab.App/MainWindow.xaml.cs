@@ -14,8 +14,10 @@ namespace Disc2Flac;
 public partial class MainWindow : Window
 {
     private readonly MainViewModel _model;
+    private bool _switchingMixPreview;
     private readonly DispatcherTimer _driveTimer = new() { Interval = TimeSpan.FromSeconds(3) };
     private readonly DispatcherTimer _playTimer = new() { Interval = TimeSpan.FromMilliseconds(30) };
+    private readonly DispatcherTimer _mixTimer = new() { Interval = TimeSpan.FromMilliseconds(180) };
 
     public MainWindow()
     {
@@ -26,6 +28,7 @@ public partial class MainWindow : Window
         LanguageCombo.SelectedIndex = LanguageService.Instance.IsJapanese ? 1 : 0;
         _driveTimer.Tick += async (_, _) => await _model.DetectInsertedDiscAsync();
         _playTimer.Tick += (_, _) => _model.AdvancePlaybackClock();
+        _mixTimer.Tick += async (_, _) => { _mixTimer.Stop(); await ApplyMixControlAsync(); };
         AddHandler(PreviewMouseLeftButtonDownEvent, new MouseButtonEventHandler(Tracks_PreviewMouseLeftButtonDown), true);
         PlayerSeekSlider.AddHandler(PreviewMouseLeftButtonDownEvent, new MouseButtonEventHandler(SeekSlider_MouseDown), true);
         AddHandler(PreviewMouseLeftButtonUpEvent, new MouseButtonEventHandler(SeekSlider_MouseUp), true);
@@ -68,6 +71,7 @@ public partial class MainWindow : Window
         CommitTrackEdits();
         _driveTimer.Stop();
         _playTimer.Stop();
+        _mixTimer.Stop();
         _model.Cancel();
         _model.DetachLanguage();
     }
@@ -155,7 +159,8 @@ public partial class MainWindow : Window
     private async void Play_Click(object sender, RoutedEventArgs e) => await _model.TogglePlaybackAsync();
     private async void PreviewChannel_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_model is null || _model.IsRefreshingLanguage || sender is not ComboBox box) return;
+        if (_model is null || _model.IsRefreshingLanguage || _switchingMixPreview ||
+            sender is not ComboBox box) return;
         _model.SelectedPreviewChannel = box.SelectedItem as ChannelChoice;
         await _model.ChangePreviewChannelAsync();
     }
@@ -183,31 +188,83 @@ public partial class MainWindow : Window
         return null;
     }
 
-    private async void MixSlider_MouseUp(object sender, MouseButtonEventArgs e) => await _model.ApplyStereoMixAsync();
+    private void MixSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (_model is null || !IsLoaded || _model.IsRefreshingLanguage) return;
+        _mixTimer.Stop();
+        _mixTimer.Start();
+    }
+
+    private async void MixSlider_MouseUp(object sender, MouseButtonEventArgs e)
+    {
+        _mixTimer.Stop();
+        await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Background);
+        if (sender is Slider slider) slider.GetBindingExpression(Slider.ValueProperty)?.UpdateSource();
+        await ApplyMixControlAsync();
+    }
 
     private async void MixSlider_KeyUp(object sender, KeyEventArgs e)
     {
-        if (IsSeekKey(e.Key)) await _model.ApplyStereoMixAsync();
+        if (!IsSeekKey(e.Key)) return;
+        await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Background);
+        if (sender is Slider slider) slider.GetBindingExpression(Slider.ValueProperty)?.UpdateSource();
+        await ApplyMixControlAsync();
     }
 
     private async void MixInput_LostFocus(object sender, RoutedEventArgs e)
     {
         if (sender is not TextBox input) return;
         input.GetBindingExpression(TextBox.TextProperty)?.UpdateSource();
-        if (!Validation.GetHasError(input)) await _model.ApplyStereoMixAsync();
+        if (!Validation.GetHasError(input)) await ApplyMixControlAsync();
     }
 
     private async void MixInput_KeyDown(object sender, KeyEventArgs e)
     {
         if (e.Key != Key.Enter || sender is not TextBox input) return;
         input.GetBindingExpression(TextBox.TextProperty)?.UpdateSource();
-        if (!Validation.GetHasError(input)) await _model.ApplyStereoMixAsync();
+        if (!Validation.GetHasError(input)) await ApplyMixControlAsync();
         e.Handled = true;
     }
 
-    private async void MixOff_Click(object sender, RoutedEventArgs e) => await _model.ApplyStereoMixAsync();
+    private async void MixMute_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not CheckBox mute) return;
+        var checkedState = mute.IsChecked == true;
+        switch (mute.Tag as string)
+        {
+            case "Center": _model.CenterMixMuted = checkedState; break;
+            case "Surround": _model.SurroundMixMuted = checkedState; break;
+            case "LFE": _model.LfeMixMuted = checkedState; break;
+        }
+        mute.GetBindingExpression(ToggleButton.IsCheckedProperty)?.UpdateSource();
+        await ApplyMixControlAsync();
+    }
 
-    private async void ResetStereoMix_Click(object sender, RoutedEventArgs e) => await _model.ResetStereoMixAsync();
+    private async void ResetStereoMix_Click(object sender, RoutedEventArgs e)
+    {
+        SelectStereoMixPreview();
+        await _model.ResetStereoMixAsync();
+    }
+
+    private async Task ApplyMixControlAsync()
+    {
+        _mixTimer.Stop();
+        SelectStereoMixPreview();
+        await _model.ApplyStereoMixAsync();
+    }
+
+    private void SelectStereoMixPreview()
+    {
+        if (_model.SelectedPreviewChannel?.Code is null || _model.PreviewChannels.Count == 0) return;
+        _switchingMixPreview = true;
+        try
+        {
+            var stereo = _model.PreviewChannels[0];
+            PreviewChannelCombo.SelectedItem = stereo;
+            _model.SelectedPreviewChannel = stereo;
+        }
+        finally { _switchingMixPreview = false; }
+    }
 
     private void StopPlayback_Click(object sender, RoutedEventArgs e) => _model.StopPlayback();
     private async void FindSilence_Click(object sender, RoutedEventArgs e) => await _model.FindSilenceAsync();

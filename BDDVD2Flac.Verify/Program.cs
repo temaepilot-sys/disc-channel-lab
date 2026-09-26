@@ -375,7 +375,7 @@ if (args is ["meter-test"])
         "-hide_banner", "-nostdin", "-v", "info", "-f", "lavfi", "-i",
         "aevalsrc=sin(440*2*PI*t)|0|0|0|0|0:s=48000:d=0.3:c=5.1",
         "-filter_complex",
-        "[0:0]asplit=2[levels_in][play_in];[levels_in]aresample=48000,atrim=end_sample=14400,asetpts=PTS-STARTPTS,asetnsamples=n=4800:p=0,astats=metadata=1:reset=1:measure_perchannel=Peak_level+RMS_level:measure_overall=none,ametadata=mode=print,anullsink;[play_in]anull[audio_out]",
+        "[0:0]asplit=2[levels_in][play_in];[levels_in]aresample=48000,atrim=end_sample=14400,asetpts=PTS-STARTPTS,asetnsamples=n=960:p=0,astats=metadata=1:reset=1:measure_perchannel=Peak_level+RMS_level:measure_overall=none,ametadata=mode=print,anullsink;[play_in]anull[audio_out]",
         "-map", "[audio_out]", "-f", "null", "NUL"
     }) info.ArgumentList.Add(argument);
     using var process = Process.Start(info) ?? throw new IOException("FFmpeg did not start.");
@@ -383,11 +383,11 @@ if (args is ["meter-test"])
     while ((line = await process.StandardError.ReadLineAsync()) is not null) parser.Consume(line);
     parser.Flush();
     await process.WaitForExitAsync();
-    if (process.ExitCode != 0 || frames.Count < 3 ||
+    if (process.ExitCode != 0 || frames.Count < 15 ||
         frames.Any(frame => frame.Start != 45000 || frame.Peaks.Length != 6 ||
             frame.Peaks[0] < -1 || !double.IsFinite(frame.Rms[0]) ||
             frame.Peaks.Skip(1).Any(double.IsFinite)) ||
-        Math.Abs(frames[1].Seconds - frames[0].Seconds - 0.1) > 0.001)
+        Math.Abs(frames[1].Seconds - frames[0].Seconds - AudioNavigationService.MeterWindowSeconds) > 0.001)
         throw new InvalidDataException("Per-channel peak/RMS metering did not match the 5.1 test signal.");
     Console.WriteLine($"Meter verified: {frames.Count} frames, first channel active, five channels silent");
     return 0;
@@ -578,13 +578,20 @@ if (args[0] is "convert-bd-stereo" or "convert-bd-individual" or "preview-bd" or
         var navigation = new AudioNavigationService(paths, runner, probe, log);
         var playbackTimer = Stopwatch.StartNew();
         double? decoderStartedAfter = null;
+        var maxAudioClock = 0d;
+        var meterFrameCount = 0;
         await navigation.PlayAsync(disc, selectedPlaylist, selectedStream, first,
             first + 2 * 45000, CancellationToken.None,
             segmentStarted: _ => decoderStartedAfter ??= playbackTimer.Elapsed.TotalSeconds,
             volume: () => 1.5,
-            soloChannel: args[0].EndsWith("-solo", StringComparison.Ordinal) ? "FC" : null);
+            soloChannel: args[0].EndsWith("-solo", StringComparison.Ordinal) ? "FC" : null,
+            channelLevels: (_, _, _, _) => meterFrameCount++,
+            playbackPosition: (_, seconds) => maxAudioClock = Math.Max(maxAudioClock, seconds));
+        if (decoderStartedAfter is null || maxAudioClock < 1.5 || meterFrameCount < 50)
+            throw new InvalidDataException($"Playback clock or channel meters were unavailable: {maxAudioClock:0.00}s, {meterFrameCount} frames.");
         Console.WriteLine($"BD preview completed: {selectedPlaylist.DisplayName} / {selectedStream.DisplayName}; " +
-            $"decoder started at {decoderStartedAfter:0.00}s, completed in {playbackTimer.Elapsed.TotalSeconds:0.00}s");
+            $"first PCM at {decoderStartedAfter:0.00}s, audio clock {maxAudioClock:0.00}s, " +
+            $"meter frames {meterFrameCount}, completed in {playbackTimer.Elapsed.TotalSeconds:0.00}s");
         return 0;
     }
     if (args.Length < 3) return 2;

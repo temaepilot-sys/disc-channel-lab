@@ -747,15 +747,32 @@ public sealed class MainViewModel : INotifyPropertyChanged
             await _navigation.PlayAsync(disc, playlist, stream, startTicks, track.EndTicks, session.Token,
                 positionTicks =>
                 {
-                    if (!ReferenceEquals(_playback, session) || !IsPlaying) return;
-                    _playClockBase = (positionTicks - track.StartTicks) / 45000d;
-                    _playClock.Restart();
+                    uiContext?.Post(_ =>
+                    {
+                        if (!ReferenceEquals(_playback, session) || !IsPlaying || version != _transportVersion) return;
+                        _playClockBase = (positionTicks - track.StartTicks) / 45000d;
+                        _playClock.Restart();
+                    }, null);
                 }, () => VolumeCurve.Gain(Volume, PerceivedVolume), mix, SelectedPreviewChannel?.Code,
                 (segmentStart, seconds, peaks, rms) => uiContext?.Post(_ =>
                 {
                     if (ReferenceEquals(_playback, session) && version == _transportVersion)
-                        QueueMeterFrame((segmentStart - track.StartTicks) / 45000d + seconds, peaks, rms);
-                }, null));
+                        QueueMeterFrame((segmentStart - track.StartTicks) / 45000d + seconds +
+                            AudioNavigationService.MeterWindowSeconds / 2, peaks, rms);
+                }, null),
+                (segmentStart, seconds) =>
+                {
+                    var sampledAt = Stopwatch.GetTimestamp();
+                    uiContext?.Post(_ =>
+                    {
+                        if (!ReferenceEquals(_playback, session) || !IsPlaying || version != _transportVersion ||
+                            !_playClock.IsRunning) return;
+                        _playClockBase = Math.Clamp((segmentStart - track.StartTicks) / 45000d + seconds +
+                            Stopwatch.GetElapsedTime(sampledAt).TotalSeconds, 0, PreviewMax);
+                        _playClock.Restart();
+                        AdvancePlaybackClock();
+                    }, null);
+                });
             if (ReferenceEquals(_playback, session) && IsPlaying)
             {
                 completed = true;
@@ -804,7 +821,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     private void ApplyMeterFrames()
     {
-        while (_meterFrames.TryPeek(out var frame) && frame.Position <= PreviewSeconds + 0.05)
+        while (_meterFrames.TryPeek(out var frame) && frame.Position <= PreviewSeconds)
         {
             _meterFrames.Dequeue();
             for (var i = 0; i < Math.Min(ChannelMeters.Count, frame.Peaks.Length); i++)

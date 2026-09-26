@@ -17,7 +17,7 @@ The app reads supported, unprotected Blu-ray, DVD-Audio, and DVD-Video sources t
 - Inspect titles, chapters, tracks, audio streams, and channel layouts.
 - Preview audio with play/pause, previous/next track, seeking, and volume control.
 - Preview volume uses a quadratic low-volume curve by default, with a linear-gain option for analysis. Both keep 100% at unity and 200% at twice the amplitude. Hover over the slider for actual gain and dB; changes ramp over 10 ms.
-- See each input channel's peak level during playback, before stereo mixing and volume adjustment. Hover over a meter to see its peak and RMS values in dBFS.
+- See each input channel's peak level during playback, before stereo mixing and volume adjustment. The meters use 20 ms analysis windows and follow the audio player's clock. Hover over a meter to see its peak and RMS values in dBFS.
 - Start in dark mode and English by default. Use the **Language** menu for Japanese and the **Dark mode** checkbox for a light theme; both choices are saved for the next launch.
 - Select tracks or chapters and adjust split points in 0.1-second steps.
 - Export multichannel FLAC, a configurable stereo mix, or one mono FLAC per source channel.

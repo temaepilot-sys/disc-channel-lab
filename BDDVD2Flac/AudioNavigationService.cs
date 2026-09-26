@@ -9,7 +9,9 @@ namespace Disc2Flac;
 public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner, FfprobeService probe, AppLog log)
 {
     private static readonly Regex SilenceEvent = new(@"silence_(start|end):\s*([0-9]+(?:\.[0-9]+)?)", RegexOptions.Compiled);
-    private const string MeterFilter = "asetnsamples=n=4800:p=0,astats=metadata=1:reset=1:measure_perchannel=Peak_level+RMS_level:measure_overall=none,ametadata=mode=print";
+    internal const double MeterWindowSeconds = 0.02;
+    private const string MeterFilter = "asetnsamples=n=960:p=0,astats=metadata=1:reset=1:measure_perchannel=Peak_level+RMS_level:measure_overall=none,ametadata=mode=print";
+    private static readonly Regex PlayerClock = new(@"^\s*(-?\d+(?:\.\d+)?)\s+M-A:", RegexOptions.Compiled);
     private readonly Dictionary<string, AudioStreamInfo> _clipCache = new(StringComparer.OrdinalIgnoreCase);
     private bool? _meterFiltersAvailable;
 
@@ -19,7 +21,8 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
     public async Task PlayAsync(DiscAnalysis disc, PlaylistInfo playlist, AudioStreamInfo stream,
         long startTicks, long endTicks, CancellationToken token, Action<long>? segmentStarted = null,
         Func<double>? volume = null, StereoMixSettings? mix = null, string? soloChannel = null,
-        Action<long, double, double[], double[]>? channelLevels = null)
+        Action<long, double, double[], double[]>? channelLevels = null,
+        Action<long, double>? playbackPosition = null)
     {
         var ffplay = paths.Ffplay ?? throw new FileNotFoundException("再生用の ffplay.exe が見つかりません。");
         mix ??= StereoMixSettings.Default;
@@ -27,7 +30,7 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
         if (playlist.Format != DiscFormat.BluRay)
         {
             await PlayDvdAsync(ffplay, disc, playlist, stream, startTicks, endTicks,
-                token, segmentStarted, volume ?? (() => 1), mix, soloChannel, channelLevels);
+                token, segmentStarted, volume ?? (() => 1), mix, soloChannel, channelLevels, playbackPosition);
             return;
         }
         foreach (var segment in PlaylistSegments.ForRange(playlist, startTicks, endTicks))
@@ -36,7 +39,7 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
             var (sourcePath, seekTicks) = await GetSourceAsync(disc, stream, segment, token);
             await PlaySegmentAsync(ffplay, sourcePath, stream, seekTicks, segment.EndTicks - segment.StartTicks,
                 token, () => segmentStarted?.Invoke(segment.StartTicks), volume ?? (() => 1), mix, soloChannel,
-                segment.StartTicks, channelLevels);
+                segment.StartTicks, channelLevels, playbackPosition);
         }
     }
 
@@ -62,7 +65,7 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
     private async Task PlayDvdAsync(string ffplay, DiscAnalysis disc, PlaylistInfo playlist,
         AudioStreamInfo stream, long startTicks, long endTicks, CancellationToken token,
         Action<long>? segmentStarted, Func<double> volume, StereoMixSettings mix, string? soloChannel,
-        Action<long, double, double[], double[]>? channelLevels)
+        Action<long, double, double[], double[]>? channelLevels, Action<long, double>? playbackPosition)
     {
         var inputArgs = new List<string>();
         Func<Stream, CancellationToken, Task>? writeInput = null;
@@ -117,7 +120,8 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
             UseShellExecute = false, CreateNoWindow = true,
             RedirectStandardInput = true, RedirectStandardError = true
         };
-        foreach (var argument in new[] { "-nodisp", "-autoexit", "-nostats", "-loglevel", "error",
+        foreach (var argument in new[] { "-nodisp", "-autoexit", playbackPosition is null ? "-nostats" : "-stats",
+                     "-loglevel", playbackPosition is null ? "error" : "info",
                      "-fflags", "nobuffer", "-flags", "low_delay", "-probesize", "32", "-max_delay", "0",
                      "-f", "s16le", "-sample_rate", "48000", "-ch_layout", "stereo", "-i", "pipe:0" })
             playInfo.ArgumentList.Add(argument);
@@ -138,10 +142,11 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
             var decodeError = channelLevels is null
                 ? decoder.StandardError.ReadToEndAsync(token)
                 : ReadLevelLogAsync(decoder.StandardError, stream.Channels, startTicks, channelLevels, token);
-            var playError = player.StandardError.ReadToEndAsync(token);
+            var playError = playbackPosition is null ? player.StandardError.ReadToEndAsync(token)
+                : ReadPlayerClockAsync(player.StandardError, startTicks, playbackPosition, token);
             var inputTask = writeInput is null ? Task.CompletedTask : FeedAsync();
-            segmentStarted?.Invoke(startTicks);
-            try { await CopyPcmWithVolumeAsync(decoder.StandardOutput.BaseStream, player.StandardInput.BaseStream, volume, token); }
+            try { await CopyPcmWithVolumeAsync(decoder.StandardOutput.BaseStream, player.StandardInput.BaseStream,
+                volume, token, () => segmentStarted?.Invoke(startTicks)); }
             finally { player.StandardInput.Close(); }
             await inputTask;
             await decoder.WaitForExitAsync(token);
@@ -169,7 +174,7 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
     private async Task PlaySegmentAsync(string ffplay, string sourcePath, AudioStreamInfo stream, long seekTicks,
         long durationTicks, CancellationToken token, Action onStarted, Func<double> volume,
         StereoMixSettings mix, string? soloChannel, long segmentStartTicks,
-        Action<long, double, double[], double[]>? channelLevels)
+        Action<long, double, double[], double[]>? channelLevels, Action<long, double>? playbackPosition)
     {
         var samples = (long)Math.Round(durationTicks * 48000d / 45000d, MidpointRounding.AwayFromZero);
         var filter = $"aresample=48000:osf=s16,atrim=end_sample={samples},asetpts=PTS-STARTPTS";
@@ -203,7 +208,8 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
         };
         foreach (var argument in new[]
         {
-            "-nodisp", "-autoexit", "-nostats", "-loglevel", "error",
+            "-nodisp", "-autoexit", playbackPosition is null ? "-nostats" : "-stats",
+            "-loglevel", playbackPosition is null ? "error" : "info",
             "-fflags", "nobuffer", "-flags", "low_delay", "-probesize", "32", "-max_delay", "0", "-f", "s16le",
             "-sample_rate", "48000", "-ch_layout", "stereo", "-i", "pipe:0"
         }) playInfo.ArgumentList.Add(argument);
@@ -223,12 +229,13 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
                 try { if (!player.HasExited) player.Kill(entireProcessTree: true); } catch (InvalidOperationException) { }
             });
             token.ThrowIfCancellationRequested();
-            onStarted();
             var decodeError = channelLevels is null
                 ? decoder.StandardError.ReadToEndAsync(token)
                 : ReadLevelLogAsync(decoder.StandardError, stream.Channels, segmentStartTicks, channelLevels, token);
-            var playError = player.StandardError.ReadToEndAsync(token);
-            try { await CopyPcmWithVolumeAsync(decoder.StandardOutput.BaseStream, player.StandardInput.BaseStream, volume, token); }
+            var playError = playbackPosition is null ? player.StandardError.ReadToEndAsync(token)
+                : ReadPlayerClockAsync(player.StandardError, segmentStartTicks, playbackPosition, token);
+            try { await CopyPcmWithVolumeAsync(decoder.StandardOutput.BaseStream, player.StandardInput.BaseStream,
+                volume, token, onStarted); }
             finally { player.StandardInput.Close(); }
             await decoder.WaitForExitAsync(token);
             await player.WaitForExitAsync(token);
@@ -258,8 +265,27 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
         return diagnostics.ToString();
     }
 
+    private static async Task<string> ReadPlayerClockAsync(StreamReader reader, long segmentStartTicks,
+        Action<long, double> onPosition, CancellationToken token)
+    {
+        var diagnostics = new StringBuilder();
+        string? line;
+        while ((line = await reader.ReadLineAsync(token).ConfigureAwait(false)) is not null)
+        {
+            var match = PlayerClock.Match(line);
+            if (match.Success && double.TryParse(match.Groups[1].Value, NumberStyles.Float,
+                    CultureInfo.InvariantCulture, out var seconds) && double.IsFinite(seconds))
+            {
+                onPosition(segmentStartTicks, Math.Max(0, seconds));
+                continue;
+            }
+            if (diagnostics.Length < 16000) diagnostics.AppendLine(line);
+        }
+        return diagnostics.ToString();
+    }
+
     public static async Task CopyPcmWithVolumeAsync(Stream source, Stream destination, Func<double> volume,
-        CancellationToken token)
+        CancellationToken token, Action? firstWrite = null)
     {
         const int bytesPerSecond = 48000 * 2 * sizeof(short);
         const double maxQueuedSeconds = 0.06;
@@ -271,6 +297,7 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
         var targetGain = currentGain;
         var rampFrames = 0;
         var rampStep = 0d;
+        var started = false;
         int count;
         while ((count = await source.ReadAsync(buffer.AsMemory(carried), token).ConfigureAwait(false)) > 0)
         {
@@ -305,6 +332,7 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
                 }
             }
             await destination.WriteAsync(buffer.AsMemory(0, complete), token).ConfigureAwait(false);
+            if (!started) { started = true; firstWrite?.Invoke(); }
             submittedBytes += complete;
             carried = available - complete;
             if (carried != 0) buffer.AsSpan(complete, carried).CopyTo(buffer);

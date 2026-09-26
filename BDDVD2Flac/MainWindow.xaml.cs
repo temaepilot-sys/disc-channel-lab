@@ -15,7 +15,7 @@ public partial class MainWindow : Window
 {
     private readonly MainViewModel _model;
     private readonly DispatcherTimer _driveTimer = new() { Interval = TimeSpan.FromSeconds(3) };
-    private readonly DispatcherTimer _playTimer = new() { Interval = TimeSpan.FromMilliseconds(100) };
+    private readonly DispatcherTimer _playTimer = new() { Interval = TimeSpan.FromMilliseconds(30) };
 
     public MainWindow()
     {

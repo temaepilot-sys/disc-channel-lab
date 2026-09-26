@@ -1,7 +1,7 @@
 using System.Windows;
 using System.Runtime.CompilerServices;
 
-[assembly: InternalsVisibleTo("BDDVD2Flac.Verify")]
+[assembly: InternalsVisibleTo("DiscChannelLab.Verify")]
 
 [assembly:ThemeInfo(
     ResourceDictionaryLocation.None,            //where theme specific resource dictionaries are located

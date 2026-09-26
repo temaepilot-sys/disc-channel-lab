@@ -9,6 +9,62 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Threading;
 
+if (args is ["mix-controls-test"])
+{
+    var model = new MainViewModel();
+    try
+    {
+        StereoMixSettings ActiveMix() => (StereoMixSettings)typeof(MainViewModel)
+            .GetProperty("CurrentMix", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(model)!;
+        model.CenterMixPercent = 82.5;
+        model.SurroundMixPercent = 35.25;
+        model.LfeMixPercent = 20;
+        model.CenterMixOff = true;
+        model.SurroundMixOff = true;
+        model.LfeMixOff = true;
+        if (ActiveMix() != new StereoMixSettings(0, 0, 0) || model.CenterMixPercent != 82.5)
+            throw new InvalidDataException("Off switches did not mute while retaining entered levels.");
+        model.SurroundMixOff = false;
+        if (ActiveMix().Surround != 0.3525)
+            throw new InvalidDataException("Restoring a channel did not restore its entered level.");
+        await model.ResetStereoMixAsync();
+        if (ActiveMix() != StereoMixSettings.Default ||
+            model.CenterMixOff || model.SurroundMixOff || model.LfeMixOff)
+            throw new InvalidDataException("Mix defaults were not restored.");
+        Console.WriteLine("Mix level, off switches, and reset passed.");
+    }
+    finally { model.DetachLanguage(); }
+    return 0;
+}
+
+if (args is ["auto-advance-test", var playbackSource])
+{
+    Environment.SetEnvironmentVariable("SDL_AUDIODRIVER", "dummy");
+    var model = new MainViewModel();
+    try
+    {
+        await model.OpenSourceAsync(playbackSource);
+        if (model.Tracks.Count < 2 || !model.CanPlay)
+            throw new InvalidDataException($"At least two playable tracks are required: {model.Status}");
+        var first = model.Tracks[0];
+        model.SelectedTrack = first;
+        model.PreviewSeconds = Math.Max(0, model.PreviewMax - 1);
+        await model.TogglePlaybackAsync();
+        for (var i = 0; i < 300 && model.SelectedTrack == first; i++)
+        {
+            await Task.Delay(100);
+            model.AdvancePlaybackClock();
+        }
+        if (model.SelectedTrack != model.Tracks[1] || !model.IsPlaying)
+            throw new InvalidDataException($"Continuous play stopped at {model.SelectedTrack?.Number} " +
+                $"({model.PreviewSeconds:0.###}/{model.PreviewMax:0.###} s): {model.Status}");
+        Console.WriteLine("Continuous play advanced to the next track.");
+    }
+    finally { model.StopPlayback(); model.DetachLanguage(); }
+    return 0;
+}
+
 if (args is ["disc-selection-test", var verifyPath, var expectedIdText])
 {
     Exception? failure = null;
@@ -507,7 +563,7 @@ if (args is ["mix-layouts"])
 
 if (args.Length < 2 || args[0] is not ("scan" or "ui-scan" or "ui-channel" or "preview" or "preview-video" or "preview-solo" or "preview-video-solo" or "silence" or "convert" or "convert-video" or "convert-stereo" or "convert-video-stereo" or "convert-individual" or "convert-video-individual" or "convert-bd-stereo" or "convert-bd-individual" or "preview-bd" or "preview-bd-solo"))
 {
-    Console.Error.WriteLine("Usage: BDDVD2Flac.Verify scan|ui-scan|preview|preview-video|preview-bd|convert|convert-video|convert-stereo|convert-video-stereo|convert-bd-stereo <disc root> [output folder] [full] [chapter] [offset seconds]");
+    Console.Error.WriteLine("Usage: DiscChannelLab.Verify scan|ui-scan|preview|preview-video|preview-bd|convert|convert-video|convert-stereo|convert-video-stereo|convert-bd-stereo <disc root> [output folder] [full] [chapter] [offset seconds]");
     return 2;
 }
 

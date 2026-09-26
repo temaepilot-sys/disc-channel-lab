@@ -6,10 +6,10 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
-$project = Join-Path $root 'BDDVD2Flac\BDDVD2Flac.csproj'
+$project = Join-Path $root 'DiscChannelLab.App\DiscChannelLab.App.csproj'
 $destination = if ([System.IO.Path]::IsPathRooted($OutputDirectory)) { $OutputDirectory } else { Join-Path $root $OutputDirectory }
 $offlineSource = Join-Path $root 'offline-packages'
-$bundleDirectory = Join-Path $root 'BDDVD2Flac\obj\embedded-tools'
+$bundleDirectory = Join-Path $root 'DiscChannelLab.App\obj\embedded-tools'
 $bundlePath = Join-Path $bundleDirectory 'tools.bundle.zip'
 $sdkCandidates = @(
     (Join-Path (Split-Path -Parent $root) '.dotnet10\sdk\dotnet.exe'),

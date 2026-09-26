@@ -6,7 +6,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$project = Join-Path $projectRoot 'BDDVD2Flac\BDDVD2Flac.csproj'
+$project = Join-Path $projectRoot 'DiscChannelLab.App\DiscChannelLab.App.csproj'
 $destination = if ([System.IO.Path]::IsPathRooted($OutputDirectory)) {
     $OutputDirectory
 } else {

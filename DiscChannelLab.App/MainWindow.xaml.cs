@@ -189,6 +189,26 @@ public partial class MainWindow : Window
     {
         if (IsSeekKey(e.Key)) await _model.ApplyStereoMixAsync();
     }
+
+    private async void MixInput_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (sender is not TextBox input) return;
+        input.GetBindingExpression(TextBox.TextProperty)?.UpdateSource();
+        if (!Validation.GetHasError(input)) await _model.ApplyStereoMixAsync();
+    }
+
+    private async void MixInput_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter || sender is not TextBox input) return;
+        input.GetBindingExpression(TextBox.TextProperty)?.UpdateSource();
+        if (!Validation.GetHasError(input)) await _model.ApplyStereoMixAsync();
+        e.Handled = true;
+    }
+
+    private async void MixOff_Click(object sender, RoutedEventArgs e) => await _model.ApplyStereoMixAsync();
+
+    private async void ResetStereoMix_Click(object sender, RoutedEventArgs e) => await _model.ResetStereoMixAsync();
+
     private void StopPlayback_Click(object sender, RoutedEventArgs e) => _model.StopPlayback();
     private async void FindSilence_Click(object sender, RoutedEventArgs e) => await _model.FindSilenceAsync();
 

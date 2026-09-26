@@ -7,6 +7,6 @@
     <UseWPF>true</UseWPF>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="..\BDDVD2Flac\BDDVD2Flac.csproj" />
+    <ProjectReference Include="..\DiscChannelLab.App\DiscChannelLab.App.csproj" />
   </ItemGroup>
 </Project>

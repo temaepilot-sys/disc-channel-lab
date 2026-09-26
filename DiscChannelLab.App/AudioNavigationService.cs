@@ -107,7 +107,8 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
                 $"[0:{stream.Index}]asplit=2[levels_in][play_in];[levels_in]{analysis},anullsink;[play_in]{filter}[audio_out]",
                 "-map", "[audio_out]"]);
         }
-        outputArgs.AddRange(["-vn", "-sn", "-dn", "-ac", "2", "-c:a", "pcm_s16le", "-f", "s16le", "pipe:1"]);
+        outputArgs.AddRange(["-vn", "-sn", "-dn", "-ac", "2", "-c:a", "pcm_s16le",
+            "-t", Seconds(endTicks - startTicks), "-f", "s16le", "pipe:1"]);
         var decodeInfo = new ProcessStartInfo(paths.Ffmpeg)
         {
             UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = writeInput is not null,
@@ -145,15 +146,31 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
             var playError = playbackPosition is null ? player.StandardError.ReadToEndAsync(token)
                 : ReadPlayerClockAsync(player.StandardError, startTicks, playbackPosition, token);
             var inputTask = writeInput is null ? Task.CompletedTask : FeedAsync();
-            try { await CopyPcmWithVolumeAsync(decoder.StandardOutput.BaseStream, player.StandardInput.BaseStream,
+            long submittedBytes;
+            try { submittedBytes = await CopyPcmWithVolumeAsync(decoder.StandardOutput.BaseStream, player.StandardInput.BaseStream,
                 volume, token, () => segmentStarted?.Invoke(startTicks)); }
             finally { player.StandardInput.Close(); }
             await inputTask;
             await decoder.WaitForExitAsync(token);
             await player.WaitForExitAsync(token);
             var errors = (await decodeError) + (await playError);
+            var expectedBytes = sampleCount * 2 * sizeof(short);
+            if (decoder.ExitCode != 0 && player.ExitCode == 0 &&
+                submittedBytes >= expectedBytes / 2 &&
+                expectedBytes - submittedBytes <= 48000 * 2 * sizeof(short) / 2)
+            {
+                // Some DVD streams end with a damaged packet just before a chapter boundary.
+                // The preview has already played almost all requested audio, so allow the next track.
+                log.Write($"DVD PREVIEW trailing decoder error: {submittedBytes}/{expectedBytes} PCM bytes, " +
+                          $"decoder exit {decoder.ExitCode}. Playback continues.");
+                return;
+            }
             if (decoder.ExitCode != 0 || player.ExitCode != 0)
+            {
+                log.Write($"DVD PREVIEW failed: {submittedBytes}/{expectedBytes} PCM bytes, " +
+                          $"decoder exit {decoder.ExitCode}, player exit {player.ExitCode}.");
                 throw new FfToolException(string.IsNullOrWhiteSpace(errors) ? "DVD の試聴に失敗しました。" : errors);
+            }
             async Task FeedAsync()
             {
                 try { await writeInput!(decoder.StandardInput.BaseStream, token); }
@@ -284,7 +301,7 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
         return diagnostics.ToString();
     }
 
-    public static async Task CopyPcmWithVolumeAsync(Stream source, Stream destination, Func<double> volume,
+    public static async Task<long> CopyPcmWithVolumeAsync(Stream source, Stream destination, Func<double> volume,
         CancellationToken token, Action? firstWrite = null)
     {
         const int bytesPerSecond = 48000 * 2 * sizeof(short);
@@ -338,6 +355,7 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
             if (carried != 0) buffer.AsSpan(complete, carried).CopyTo(buffer);
         }
         if (carried != 0) throw new InvalidDataException("再生音声のサンプルが途中で切れています。");
+        return submittedBytes;
     }
 
     private static double SafeGain(double requested) =>

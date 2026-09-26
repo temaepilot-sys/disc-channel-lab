@@ -54,6 +54,9 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private double _centerMixPercent = 100 / Math.Sqrt(2);
     private double _surroundMixPercent = 100 / Math.Sqrt(2);
     private double _lfeMixPercent;
+    private bool _centerMixOff;
+    private bool _surroundMixOff;
+    private bool _lfeMixOff;
     private StereoMixSettings? _activePlaybackMix;
     private bool _suspendEditSave;
 
@@ -137,10 +140,14 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public double CenterMixPercent { get => _centerMixPercent; set { if (Set(ref _centerMixPercent, ClampPercent(value))) Changed(nameof(CenterMixText)); } }
     public double SurroundMixPercent { get => _surroundMixPercent; set { if (Set(ref _surroundMixPercent, ClampPercent(value))) Changed(nameof(SurroundMixText)); } }
     public double LfeMixPercent { get => _lfeMixPercent; set { if (Set(ref _lfeMixPercent, ClampPercent(value))) Changed(nameof(LfeMixText)); } }
+    public bool CenterMixOff { get => _centerMixOff; set => Set(ref _centerMixOff, value); }
+    public bool SurroundMixOff { get => _surroundMixOff; set => Set(ref _surroundMixOff, value); }
+    public bool LfeMixOff { get => _lfeMixOff; set => Set(ref _lfeMixOff, value); }
     public string CenterMixText => $"{CenterMixPercent:0}%";
     public string SurroundMixText => $"{SurroundMixPercent:0}%";
     public string LfeMixText => $"{LfeMixPercent:0}%";
-    private StereoMixSettings CurrentMix => new(CenterMixPercent / 100, SurroundMixPercent / 100, LfeMixPercent / 100);
+    private StereoMixSettings CurrentMix => new(CenterMixOff ? 0 : CenterMixPercent / 100,
+        SurroundMixOff ? 0 : SurroundMixPercent / 100, LfeMixOff ? 0 : LfeMixPercent / 100);
     private static double ClampPercent(double value) => Math.Clamp(double.IsFinite(value) ? value : 0, 0, 100);
     public string Status { get => LanguageService.T(_status); private set => Set(ref _status, value); }
     public string SavedFolder { get => _savedFolder; private set { if (Set(ref _savedFolder, value)) Changed(nameof(CanOpenSavedFolder)); } }
@@ -847,6 +854,17 @@ public sealed class MainViewModel : INotifyPropertyChanged
         if (!IsPlaying || SelectedPreviewChannel?.Code is not null || CurrentMix == _activePlaybackMix) return;
         AdvancePlaybackClock();
         await SeekAsync(PreviewSeconds);
+    }
+
+    public async Task ResetStereoMixAsync()
+    {
+        CenterMixPercent = StereoMixSettings.Default.Center * 100;
+        SurroundMixPercent = StereoMixSettings.Default.Surround * 100;
+        LfeMixPercent = StereoMixSettings.Default.Lfe * 100;
+        CenterMixOff = false;
+        SurroundMixOff = false;
+        LfeMixOff = false;
+        await ApplyStereoMixAsync();
     }
 
     public void PausePlayback()

@@ -10,7 +10,7 @@ public static class StereoPreviewMixer
 {
     public static async Task<long> CopyAsync(Stream source, Stream destination, AudioStreamInfo stream,
         Func<PreviewMixState> settings, Func<double> volume, CancellationToken token,
-        Action? firstWrite = null)
+        Action? firstWrite = null, Action<PreviewMixState>? mixApplied = null)
     {
         var channels = StereoMixSettings.ChannelNames(stream);
         if (channels.Count != stream.Channels)
@@ -53,6 +53,7 @@ public static class StereoPreviewMixer
                 BuildWeights(channels, requested, targetLeft, targetRight);
                 active = requested;
                 rampFrames = submittedFrames == 0 ? 1 : 480;
+                mixApplied?.Invoke(requested);
             }
             var requestedGain = SafeGain(volume());
             if (requestedGain != targetGain)
@@ -120,15 +121,15 @@ public static class StereoPreviewMixer
         {
             switch (channels[i])
             {
-                case "FL": left[i] = 1; break;
-                case "FR": right[i] = 1; break;
+                case "FL": left[i] = state.Mix.Front; break;
+                case "FR": right[i] = state.Mix.Front; break;
                 case "FC": left[i] = right[i] = state.Mix.Center; break;
                 case "BL" or "SL" or "TFL": left[i] = state.Mix.Surround / surroundCount; break;
                 case "BR" or "SR" or "TFR": right[i] = state.Mix.Surround / rightSurroundCount; break;
                 case "BC": left[i] = right[i] = state.Mix.Surround / 2; break;
                 case "LFE": left[i] = right[i] = state.Mix.Lfe; break;
-                case "FLC": left[i] = 0.5; break;
-                case "FRC": right[i] = 0.5; break;
+                case "FLC": left[i] = 0.5 * state.Mix.Front; break;
+                case "FRC": right[i] = 0.5 * state.Mix.Front; break;
             }
         }
         Normalize(left);

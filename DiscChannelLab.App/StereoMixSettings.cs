@@ -3,7 +3,7 @@ using System.Globalization;
 namespace Disc2Flac;
 
 /// <summary>Relative channel weights; pan's less-than operator normalizes each output channel.</summary>
-public sealed record StereoMixSettings(double Center, double Surround, double Lfe)
+public sealed record StereoMixSettings(double Center, double Surround, double Lfe, double Front = 1)
 {
     public static StereoMixSettings Default { get; } = new(1 / Math.Sqrt(2), 1 / Math.Sqrt(2), 0);
 
@@ -47,7 +47,7 @@ public sealed record StereoMixSettings(double Center, double Surround, double Lf
     public string PanFilter(AudioStreamInfo stream)
     {
         if (!Supports(stream)) throw new InvalidOperationException("このチャンネル配置のステレオミックスには対応していません。");
-        if (!Valid(Center) || !Valid(Surround) || !Valid(Lfe))
+        if (!Valid(Front) || !Valid(Center) || !Valid(Surround) || !Valid(Lfe))
             throw new ArgumentOutOfRangeException(nameof(Center), "ミックス比率は0～100%で指定してください。");
         var channels = Layouts[stream.ChannelLayout].Split(' ');
         var left = Terms(channels, "FL", ["BL", "SL", "TFL"], "FLC");
@@ -57,8 +57,8 @@ public sealed record StereoMixSettings(double Center, double Surround, double Lf
 
     private string Terms(string[] channels, string front, string[] surrounds, string wide)
     {
-        var parts = new List<string> { front };
-        if (channels.Contains(wide)) parts.Add($"0.5*{wide}");
+        var parts = new List<string> { $"{Format(Front)}*{front}" };
+        if (channels.Contains(wide)) parts.Add($"{Format(0.5 * Front)}*{wide}");
         if (Center > 0 && channels.Contains("FC")) parts.Add($"{Format(Center)}*FC");
         var presentSurrounds = surrounds.Where(channels.Contains).ToArray();
         if (Surround > 0)

@@ -27,7 +27,7 @@ if (args is ["live-mix-test"])
     var copy = StereoPreviewMixer.CopyAsync(source, pcmOutput, stream,
         () => Volatile.Read(ref live), () => 1, CancellationToken.None);
     await Task.Delay(150);
-    Volatile.Write(ref live, new PreviewMixState(new StereoMixSettings(0, 0, 0), null));
+    Volatile.Write(ref live, new PreviewMixState(new StereoMixSettings(0, 0, 0, 0), null));
     await copy;
     var result = pcmOutput.ToArray();
     var before = BinaryPrimitives.ReadInt16LittleEndian(result.AsSpan(2400 * 4, 2));
@@ -53,6 +53,12 @@ if (args is ["live-mix-test"])
         if (activeLeft[index] + activeRight[index] <= 0 || mutedLeft[index] + mutedRight[index] != 0)
             throw new InvalidDataException($"Live mute did not isolate {channel}.");
     }
+    var silentLeft = new double[names.Count];
+    var silentRight = new double[names.Count];
+    StereoPreviewMixer.BuildWeights(names, new PreviewMixState(new StereoMixSettings(0, 0, 0, 0), null),
+        silentLeft, silentRight);
+    if (silentLeft.Any(x => x != 0) || silentRight.Any(x => x != 0))
+        throw new InvalidDataException("Muting every mix group did not produce silence.");
     Console.WriteLine("Live stereo mix changed audible PCM without restarting playback.");
     return 0;
 }
@@ -81,7 +87,7 @@ if (args is ["mix-ui-test"])
             if (model.SelectedPreviewChannel?.Code is not null)
                 throw new InvalidDataException("Slider change did not activate the stereo mix.");
             model.SelectedPreviewChannel = model.PreviewChannels[1];
-            foreach (var name in new[] { "Center", "Surround", "Lfe" })
+            foreach (var name in new[] { "Front", "Center", "Surround", "Lfe" })
             {
                 var slider = (Slider)window.FindName($"{name}MixSlider")!;
                 var input = (TextBox)window.FindName($"{name}MixInput")!;
@@ -132,20 +138,23 @@ if (args is ["mix-controls-test"])
         StereoMixSettings ActiveMix() => (StereoMixSettings)typeof(MainViewModel)
             .GetProperty("CurrentMix", BindingFlags.Instance | BindingFlags.NonPublic)!
             .GetValue(model)!;
+        model.FrontMixPercent = 64;
         model.CenterMixPercent = 82.5;
         model.SurroundMixPercent = 35.25;
         model.LfeMixPercent = 20;
+        model.FrontMixMuted = true;
         model.CenterMixMuted = true;
         model.SurroundMixMuted = true;
         model.LfeMixMuted = true;
-        if (ActiveMix() != new StereoMixSettings(0, 0, 0) || model.CenterMixPercent != 82.5)
+        if (ActiveMix() != new StereoMixSettings(0, 0, 0, 0) ||
+            model.FrontMixPercent != 64 || model.CenterMixPercent != 82.5)
             throw new InvalidDataException("Mute switches did not retain entered levels.");
         model.SurroundMixMuted = false;
         if (ActiveMix().Surround != 0.3525)
             throw new InvalidDataException("Restoring a channel did not restore its entered level.");
         await model.ResetStereoMixAsync();
         if (ActiveMix() != StereoMixSettings.Default ||
-            model.CenterMixMuted || model.SurroundMixMuted || model.LfeMixMuted)
+            model.FrontMixMuted || model.CenterMixMuted || model.SurroundMixMuted || model.LfeMixMuted)
             throw new InvalidDataException("Mix defaults were not restored.");
         Console.WriteLine("Mix levels, mute switches, and reset passed.");
     }
@@ -163,6 +172,10 @@ if (args is ["mix-playback-test", var mixSource])
         if (!model.CanPlay || !model.CanDownmixStereo || model.PreviewChannels.Count < 2)
             throw new InvalidDataException($"A playable multichannel title is required: {model.Status}");
         var priorStarts = File.ReadLines(model.LogPath).Count(line => line.Contains("DVD PREVIEW ", StringComparison.Ordinal));
+        var priorApplied = File.ReadLines(model.LogPath)
+            .Count(line => line.Contains("LIVE PCM MIX channel=stereo mix=0/", StringComparison.Ordinal));
+        var priorSilent = File.ReadLines(model.LogPath)
+            .Count(line => line.Contains("LIVE PCM MIX channel=stereo mix=0/0/0 front=0", StringComparison.Ordinal));
         model.SelectedPreviewChannel = model.PreviewChannels.First(x => x.Code is not null);
         await model.TogglePlaybackAsync();
         var started = false;
@@ -184,10 +197,18 @@ if (args is ["mix-playback-test", var mixSource])
         if (!model.IsPlaying || activeMix.Center != 0 || model.SelectedPreviewChannel?.Code is not null)
             throw new InvalidDataException("The changed stereo mix did not reach playback.");
         await Task.Delay(500);
+        model.FrontMixPercent = 0;
+        model.SurroundMixPercent = 0;
+        model.LfeMixPercent = 0;
+        await model.ApplyStereoMixAsync();
+        await Task.Delay(500);
         var playbackLog = File.ReadAllText(model.LogPath);
         var startsAfter = playbackLog.Split("DVD PREVIEW ", StringSplitOptions.None).Length - 1;
+        var appliedAfter = playbackLog.Split("LIVE PCM MIX channel=stereo mix=0/", StringSplitOptions.None).Length - 1;
+        var silentAfter = playbackLog.Split("LIVE PCM MIX channel=stereo mix=0/0/0 front=0", StringSplitOptions.None).Length - 1;
         if (!model.IsPlaying || startsAfter != priorStarts + 1 ||
-            !playbackLog.Contains("PREVIEW MIX channel=stereo mix=0/", StringComparison.Ordinal))
+            !playbackLog.Contains("PREVIEW MIX channel=stereo mix=0/", StringComparison.Ordinal) ||
+            appliedAfter <= priorApplied || silentAfter <= priorSilent)
             throw new InvalidDataException($"The live mix did not update the running player: {model.Status}");
         Console.WriteLine("Changed stereo mix reached playback without a player restart.");
     }
@@ -707,7 +728,12 @@ if (args is ["mix-layouts"])
             "-f", "lavfi", "-i", $"anullsrc=r=48000:cl={layout}",
             "-t", "0.05", "-ac", channelCount.ToString(), "-ch_layout", layout,
             "-c:a", "pcm_s16le", "-f", "s16le", "NUL"], CancellationToken.None);
-        foreach (var settings in new[] { StereoMixSettings.Default, new StereoMixSettings(0.4, 0.6, 0.2) })
+        foreach (var settings in new[]
+                 {
+                     StereoMixSettings.Default,
+                     new StereoMixSettings(0.4, 0.6, 0.2, 0.5),
+                     new StereoMixSettings(0, 0, 0, 0)
+                 })
             await mixRunner.RunAsync(ffmpeg, ["-hide_banner", "-nostdin", "-v", "error",
                 "-f", "lavfi", "-i", $"anullsrc=r=48000:cl={layout}",
                 "-af", settings.PanFilter(stream), "-t", "0.05",

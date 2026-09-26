@@ -299,9 +299,23 @@
                             <DockPanel Margin="0,0,0,5">
                                 <Button DockPanel.Dock="Right" Content="{local:Loc Key='デフォルトに戻す'}"
                                         Click="ResetStereoMix_Click" Margin="8,0,0,0"/>
-                                <TextBlock Text="{local:Loc Key='前方 100%を基準に設定。出力は自動正規化します。'}"
+                                <TextBlock Text="{local:Loc Key='各チャンネルの比率を設定。出力は自動正規化します。'}"
                                            FontSize="11" Foreground="{DynamicResource MutedBrush}"
                                            VerticalAlignment="Center" TextWrapping="Wrap"/>
+                            </DockPanel>
+                            <DockPanel Margin="0,0,0,3">
+                                <TextBlock DockPanel.Dock="Left" Text="{local:Loc Key='前方左右'}" Width="82"/>
+                                <CheckBox x:Name="FrontMixMute" DockPanel.Dock="Right" Content="{local:Loc Key='ミュート'}"
+                                          Tag="Front" IsChecked="{Binding FrontMixMuted, Mode=TwoWay}" Click="MixMute_Click"
+                                          VerticalAlignment="Center" Margin="8,0,0,0"/>
+                                <TextBlock DockPanel.Dock="Right" Text="%" VerticalAlignment="Center" Margin="2,0,0,0"/>
+                                <TextBox x:Name="FrontMixInput" DockPanel.Dock="Right" Width="55" HorizontalContentAlignment="Right"
+                                         Text="{Binding FrontMixPercent, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Delay=150, StringFormat={}{0:0.##}, ValidatesOnExceptions=True}"
+                                         LostFocus="MixInput_LostFocus" KeyDown="MixInput_KeyDown"/>
+                                <Slider x:Name="FrontMixSlider" Minimum="0" Maximum="100" TickFrequency="1"
+                                        ValueChanged="MixSlider_ValueChanged"
+                                        PreviewMouseLeftButtonUp="MixSlider_MouseUp" PreviewKeyUp="MixSlider_KeyUp"
+                                        Value="{Binding FrontMixPercent, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
                             </DockPanel>
                             <DockPanel Margin="0,0,0,3">
                                 <TextBlock DockPanel.Dock="Left" Text="{local:Loc Key='センター'}" Width="82"/>

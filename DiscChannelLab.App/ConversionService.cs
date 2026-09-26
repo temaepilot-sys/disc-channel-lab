@@ -243,6 +243,7 @@ public sealed class ConversionService(ToolPaths paths, ProcessRunner runner, Ffp
     internal static void AddDownmixTags(List<string> arguments, StereoMixSettings mix)
     {
         arguments.AddRange(["-metadata", "DOWNMIX=multichannel to stereo",
+            "-metadata", $"DOWNMIX_FRONT={mix.Front.ToString("0.######", CultureInfo.InvariantCulture)}",
             "-metadata", $"DOWNMIX_CENTER={mix.Center.ToString("0.######", CultureInfo.InvariantCulture)}",
             "-metadata", $"DOWNMIX_SURROUND={mix.Surround.ToString("0.######", CultureInfo.InvariantCulture)}",
             "-metadata", $"DOWNMIX_LFE={mix.Lfe.ToString("0.######", CultureInfo.InvariantCulture)}"]);

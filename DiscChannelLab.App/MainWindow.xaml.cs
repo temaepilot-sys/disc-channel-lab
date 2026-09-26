@@ -232,6 +232,7 @@ public partial class MainWindow : Window
         var checkedState = mute.IsChecked == true;
         switch (mute.Tag as string)
         {
+            case "Front": _model.FrontMixMuted = checkedState; break;
             case "Center": _model.CenterMixMuted = checkedState; break;
             case "Surround": _model.SurroundMixMuted = checkedState; break;
             case "LFE": _model.LfeMixMuted = checkedState; break;

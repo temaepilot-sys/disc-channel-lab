@@ -135,7 +135,7 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
                      "-f", "s16le", "-sample_rate", "48000", "-ch_layout", "stereo", "-i", "pipe:0" })
             playInfo.ArgumentList.Add(argument);
         log.Write($"DVD PREVIEW {playlist.DisplayName} {startTicks / 45000d:0.###}-{endTicks / 45000d:0.###} " +
-                  $"channel={soloChannel ?? "stereo"} mix={mix.Center:0.###}/{mix.Surround:0.###}/{mix.Lfe:0.###}");
+                  $"channel={soloChannel ?? "stereo"} mix={mix.Center:0.###}/{mix.Surround:0.###}/{mix.Lfe:0.###} front={mix.Front:0.###}");
         using var player = new Process { StartInfo = playInfo };
         using var decoder = new Process { StartInfo = decodeInfo };
         if (!player.Start()) throw new IOException("音声プレーヤーを起動できません。");
@@ -160,7 +160,7 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
             {
                 submittedBytes = liveChannels
                     ? await StereoPreviewMixer.CopyAsync(decoder.StandardOutput.BaseStream, player.StandardInput.BaseStream,
-                        stream, liveMix!, volume, token, () => segmentStarted?.Invoke(startTicks))
+                        stream, liveMix!, volume, token, () => segmentStarted?.Invoke(startTicks), LogLiveMix)
                     : await CopyPcmWithVolumeAsync(decoder.StandardOutput.BaseStream, player.StandardInput.BaseStream,
                         volume, token, () => segmentStarted?.Invoke(startTicks));
             }
@@ -255,7 +255,7 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
         }) playInfo.ArgumentList.Add(argument);
 
         log.Write($"PREVIEW {Path.GetFileName(sourcePath)} seek={Seconds(seekTicks)} duration={Seconds(durationTicks)} " +
-                  $"channel={soloChannel ?? "stereo"} mix={mix.Center:0.###}/{mix.Surround:0.###}/{mix.Lfe:0.###}");
+                  $"channel={soloChannel ?? "stereo"} mix={mix.Center:0.###}/{mix.Surround:0.###}/{mix.Lfe:0.###} front={mix.Front:0.###}");
         using var player = new Process { StartInfo = playInfo };
         using var decoder = new Process { StartInfo = decodeInfo };
         if (!player.Start()) throw new IOException("音声プレーヤーを起動できません。");
@@ -279,7 +279,7 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
             {
                 if (liveChannels)
                     await StereoPreviewMixer.CopyAsync(decoder.StandardOutput.BaseStream, player.StandardInput.BaseStream,
-                        stream, liveMix!, volume, token, onStarted);
+                        stream, liveMix!, volume, token, onStarted, LogLiveMix);
                 else
                     await CopyPcmWithVolumeAsync(decoder.StandardOutput.BaseStream, player.StandardInput.BaseStream,
                         volume, token, onStarted);
@@ -331,6 +331,10 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
         }
         return diagnostics.ToString();
     }
+
+    private void LogLiveMix(PreviewMixState state) =>
+        log.Write($"LIVE PCM MIX channel={state.SoloChannel ?? "stereo"} " +
+                  $"mix={state.Mix.Center:0.###}/{state.Mix.Surround:0.###}/{state.Mix.Lfe:0.###} front={state.Mix.Front:0.###}");
 
     public static async Task<long> CopyPcmWithVolumeAsync(Stream source, Stream destination, Func<double> volume,
         CancellationToken token, Action? firstWrite = null)

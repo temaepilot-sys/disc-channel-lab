@@ -16,7 +16,7 @@ The app reads supported, unprotected Blu-ray, DVD-Audio, and DVD-Video sources t
 
 - Inspect titles, chapters, tracks, audio streams, and channel layouts.
 - Preview audio with play/pause, previous/next track, seeking, and volume control.
-- Set center, surround, and LFE mix levels with sliders or numeric input; mute a group or reset the defaults. Adjusting the mix switches preview to stereo mix and updates the running audio without restarting the player.
+- Set front, center, surround, and LFE mix levels with sliders or numeric input; mute a group or reset the defaults. Muting every group silences the stereo mix. Adjusting the mix updates running audio without restarting the player.
 - Preview volume uses a quadratic low-volume curve by default, with a linear-gain option for analysis. Both keep 100% at unity and 200% at twice the amplitude. Hover over the slider for actual gain and dB; changes ramp over 10 ms.
 - See each input channel's peak level during playback, before stereo mixing and volume adjustment. The meters use 20 ms analysis windows and follow the audio player's clock. Hover over a meter to see its peak and RMS values in dBFS.
 - Start in dark mode and English by default. Use the **Language** menu for Japanese and the **Dark mode** checkbox for a light theme; both choices are saved for the next launch.

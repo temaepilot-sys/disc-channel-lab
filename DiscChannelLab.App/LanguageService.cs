@@ -110,11 +110,11 @@ public sealed class LanguageService : INotifyPropertyChanged
         ["多チャンネル音声を2chステレオのFLACで保存"] = "Save multichannel audio as stereo FLAC",
         ["チャンネル別のモノラルFLACを曲ごとに保存"] = "Save one mono FLAC per channel and track",
         ["ステレオミックス比率（試聴にも適用）"] = "Stereo mix levels (also used for preview)",
-        ["前方 100%を基準に設定。出力は自動正規化します。"] = "Front channels are the 100% reference. Output is normalized automatically.",
+        ["各チャンネルの比率を設定。出力は自動正規化します。"] = "Set each channel group's level. Output is normalized automatically.",
         ["デフォルトに戻す"] = "Reset to defaults", ["ミュート"] = "Mute",
         ["ミックスを調整すると試聴音をステレオミックスに切り替えます。"] =
             "Adjusting the mix switches preview to the stereo mix.",
-        ["センター"] = "Center", ["サラウンド"] = "Surround",
+        ["前方左右"] = "Front L/R", ["センター"] = "Center", ["サラウンド"] = "Surround",
         ["FLACで保存"] = "Save FLAC", ["中止"] = "Cancel",
         ["保存フォルダーを開く"] = "Open output folder",
         ["曲情報とチャプター名を一括編集"] = "Edit tracks and chapter names",

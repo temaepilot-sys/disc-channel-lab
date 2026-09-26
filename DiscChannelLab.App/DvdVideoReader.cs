@@ -6,7 +6,8 @@ namespace Disc2Flac;
 
 public static class DvdVideoReader
 {
-    public static IReadOnlyList<PlaylistInfo> ReadAll(string root, FfprobeService probe, Action<string>? log = null)
+    public static IReadOnlyList<PlaylistInfo> ReadAll(string root, FfprobeService probe, Action<string>? log = null,
+        CancellationToken token = default)
     {
         var path = Path.Combine(root, "VIDEO_TS", "VIDEO_TS.IFO");
         if (!File.Exists(path)) return [];
@@ -23,17 +24,12 @@ public static class DvdVideoReader
         var result = new List<PlaylistInfo>();
         for (var title = 1; title <= count; title++)
         {
+            token.ThrowIfCancellationRequested();
             try
             {
-                var (duration, chapters) = probe.ProbeDvdVideoTitleAsync(root, title, CancellationToken.None)
+                var (duration, chapters) = FfprobeService.WithTimeout(ct => probe.ProbeDvdVideoTitleAsync(root, title, ct), token)
                     .GetAwaiter().GetResult();
-                if (duration <= 0) continue;
-                if (!probe.HasPlayableDvdVideoAudioAsync(root, title, CancellationToken.None)
-                    .GetAwaiter().GetResult())
-                {
-                    log?.Invoke($"DVD-Video タイトル {title} は音声を読み出せないため一覧から除外しました。");
-                    continue;
-                }
+                if (duration <= 0) throw new InvalidDataException("タイトルの時間とチャプターを取得できませんでした。");
                 result.Add(new PlaylistInfo
                 {
                     Id = 20000 + title, Format = DiscFormat.DvdVideo,
@@ -41,9 +37,12 @@ public static class DvdVideoReader
                     Clips = [], ChapterStarts = chapters, DurationTicks = duration
                 });
             }
-            catch (Exception ex) when (ex is FfToolException or InvalidDataException or IOException)
+            catch (Exception ex) when (FfprobeService.IsRecoverable(ex))
             {
                 log?.Invoke($"DVD-Video タイトル {title} を読めません: {ex.Message}");
+                result.Add(new PlaylistInfo { Id = 20000 + title, Format = DiscFormat.DvdVideo,
+                    DvdVideoTitle = title, DisplayOrder = result.Count + 1, Clips = [], ChapterStarts = [],
+                    DurationTicks = 0, Availability = AudioAvailability.Failed, AnalysisDetails = ex.Message });
             }
         }
         return result;

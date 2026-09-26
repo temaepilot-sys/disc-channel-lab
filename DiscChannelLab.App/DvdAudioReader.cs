@@ -95,10 +95,20 @@ public static class DvdAudioReader
         return result;
     }
 
-    public static string DiscKey(string root)
+    public static string DiscKey(string root, Action<string>? log = null)
     {
         using var sha = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        foreach (var file in Directory.EnumerateFiles(Path.Combine(root, "AUDIO_TS"), "*.IFO").OrderBy(Path.GetFileName))
+        var folder = Path.Combine(root, "AUDIO_TS");
+        string[] files;
+        try { files = Directory.GetFiles(folder, "*.IFO"); }
+        catch (IOException ex)
+        {
+            log?.Invoke($"DVD-Audio directory enumeration failed; reading known IFO paths: {ex.Message}");
+            files = new[] { Path.Combine(folder, "AUDIO_TS.IFO") }.Concat(Enumerable.Range(1, 99)
+                .Select(i => Path.Combine(folder, $"ATS_{i:00}_0.IFO"))).Where(File.Exists).ToArray();
+        }
+        if (files.Length == 0) throw new InvalidDataException("ディスク識別に必要なIFOを読み取れません。");
+        foreach (var file in files.OrderBy(Path.GetFileName))
         {
             sha.AppendData(Encoding.UTF8.GetBytes(Path.GetFileName(file)));
             sha.AppendData(File.ReadAllBytes(file));

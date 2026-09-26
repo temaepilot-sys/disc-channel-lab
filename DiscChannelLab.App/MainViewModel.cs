@@ -6,7 +6,7 @@ using System.Runtime.CompilerServices;
 
 namespace Disc2Flac;
 
-public sealed class MainViewModel : INotifyPropertyChanged
+public sealed partial class MainViewModel : INotifyPropertyChanged
 {
     private readonly AppLog _log = new();
     private readonly DiscService _discService;
@@ -18,6 +18,16 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private PlaylistInfo? _loadedPlaylist;
     private CancellationTokenSource? _work;
     private CancellationTokenSource? _playback;
+    private CancellationTokenSource? _inspection;
+    public Task InspectionTask { get; private set; } = Task.CompletedTask;
+    private string _inspectionProgress = "";
+    public string InspectionProgress { get => _inspectionProgress; private set => Set(ref _inspectionProgress, value); }
+    public bool CanInspect => !IsBusy && !IsPlaying && _disc is not null;
+    public bool CanToggleTail => CanInspect && _loadedPlaylist?.HasShortTail == true;
+    public bool MergeShortTail => _loadedPlaylist?.MergeShortTail ?? true;
+    public string ChapterCorrectionNote => _loadedPlaylist?.HasShortTail == true
+        ? LanguageService.T(MergeShortTail ? "末尾の1秒未満の区間を前の曲に含めています。元の区切りも保持しています。" : "ディスクに記録された元の区切りを表示しています。")
+        : LanguageService.T("チャプターの補正はありません。");
     private Task? _playbackTask;
     private readonly Stopwatch _playClock = new();
     private readonly Queue<(double Position, double[] Peaks, double[] Rms)> _meterFrames = new();
@@ -297,7 +307,10 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
     }
     public bool CanChooseHighRes => SelectedStream?.CanMakeHighResolution == true && !IsBusy;
-    public string SelectedStreamNote => LanguageService.T(SelectedStream is { HasSupportedChannels: false }
+    public string SelectedStreamNote => LanguageService.T(SelectedStream is { } available && _loadedPlaylist is { } loaded &&
+        Tracks.Any(track => track.IsSelected && !available.Covers(loaded, track))
+        ? "選択中の曲に、この音声が存在しない区間があります。保存する曲または音声を変更してください。"
+        : SelectedStream is { HasSupportedChannels: false }
         ? "この音声のチャンネル数または配置には対応していません。"
         : SelectedStream is { Channels: > 2 } stream && StereoMixSettings.Supports(stream)
         ? SaveIndividualChannels
@@ -314,9 +327,10 @@ public sealed class MainViewModel : INotifyPropertyChanged
             : "");
     public bool IsCdSelected { get => _quality == OutputQuality.Cd; set { if (value) { _quality = OutputQuality.Cd; Changed(); Changed(nameof(IsHighResSelected)); Changed(nameof(CanConvert)); } } }
     public bool IsHighResSelected { get => _quality == OutputQuality.HighResolution; set { if (value && CanChooseHighRes) { _quality = OutputQuality.HighResolution; Changed(); Changed(nameof(IsCdSelected)); Changed(nameof(CanConvert)); } } }
-    public bool CanConvert => !IsBusy && !IsPlaying && _disc is not null && _loadedPlaylist is not null && SelectedStream is not null && !string.IsNullOrWhiteSpace(OutputFolder) && Tracks.Any(x => x.IsSelected) && (_quality == OutputQuality.Cd ? SelectedStream.CanMakeCd : SelectedStream.CanMakeHighResolution);
+    private bool HasVerifiedAudio => _loadedPlaylist?.Availability is AudioAvailability.Ready or AudioAvailability.Partial;
+    public bool CanConvert => !IsBusy && !IsPlaying && HasVerifiedAudio && _disc is not null && _loadedPlaylist is not null && SelectedStream is not null && !string.IsNullOrWhiteSpace(OutputFolder) && Tracks.Any(x => x.IsSelected) && Tracks.Where(x => x.IsSelected).All(x => SelectedStream.Covers(_loadedPlaylist, x)) && (_quality == OutputQuality.Cd ? SelectedStream.CanMakeCd : SelectedStream.CanMakeHighResolution);
     public bool CanEditTracks => !IsBusy && !IsPlaying && Tracks.Count > 0;
-    public bool CanPlay => !IsBusy && SelectedTrack is not null && SelectedStream is not null && _disc is not null && _loadedPlaylist is not null && _navigation.CanPlay;
+    public bool CanPlay => !IsBusy && HasVerifiedAudio && SelectedTrack is not null && SelectedStream is not null && _disc is not null && _loadedPlaylist is not null && SelectedStream.Covers(_loadedPlaylist, SelectedTrack) && _navigation.CanPlay;
     public bool CanSeek => !IsBusy && SelectedTrack is not null;
     public bool CanPreviousTrack => CanSeek && Tracks.IndexOf(SelectedTrack!) > 0;
     public bool CanNextTrack
@@ -328,7 +342,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
             return index >= 0 && index < Tracks.Count - 1;
         }
     }
-    public bool CanDetectSilence => !IsBusy && !IsPlaying && SelectedTrack is not null && SelectedStream is not null && _disc is not null && _loadedPlaylist is not null;
+    public bool CanDetectSilence => CanPlay && !IsPlaying;
     public bool CanSplit => CanDetectSilence && PreviewSeconds >= 0.5 && PreviewSeconds <= PreviewMax - 0.5;
     public bool CanMerge
     {
@@ -360,7 +374,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     public bool IsRefreshingLanguage { get; private set; }
 
-    public void DetachLanguage() => LanguageService.Instance.LanguageChanged -= LanguageChanged;
+    public void DetachLanguage()
+    { StopInspection(); LanguageService.Instance.LanguageChanged -= LanguageChanged; }
 
     private void LanguageChanged(object? sender, EventArgs e)
     {
@@ -375,7 +390,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
             if (_disc is not null) RefreshMetadata();
             foreach (var name in new[] { nameof(AlbumTitle), nameof(TitleName), nameof(Status), nameof(PlayPauseText),
                 nameof(SelectedTrackTitle), nameof(SelectedChapterText), nameof(SelectedStreamNote),
-                nameof(VolumeDetails) }) Changed(name);
+                nameof(VolumeDetails), nameof(ChapterCorrectionNote) }) Changed(name);
         }
         finally { IsRefreshingLanguage = false; }
     }
@@ -444,18 +459,20 @@ public sealed class MainViewModel : INotifyPropertyChanged
         if (_isoRoot is not null && !Path.GetFullPath(path).Equals(_isoRoot, StringComparison.OrdinalIgnoreCase))
             ClearIsoSelection();
         BeginWork("ディスクを解析しています");
+        var opened = false;
         try
         {
             ClearCurrentDisc();
             AlbumTitle = "ディスクを解析しています";
             Status = "ディスクを解析しています";
             Source = path;
-            _disc = await Task.Run(() => _discService.Analyze(path), _work!.Token);
+            _disc = await Task.Run(() => _discService.Analyze(path, _work!.Token), _work!.Token);
             _disc.AlbumTitle = _editStore.LoadAlbumTitle(_disc) ?? _disc.AlbumTitle;
             RefreshMetadata();
             Playlists.Clear();
             foreach (var playlist in _disc.Playlists)
             {
+                playlist.MergeShortTail = _editStore.LoadMergeShortTail(_disc, playlist);
                 playlist.ChapterTitles = _editStore.LoadChapterTitles(_disc, playlist) ??
                     Enumerable.Repeat<string?>(null, playlist.ChapterStarts.Count).ToArray();
                 playlist.TitleName = _editStore.LoadTitleName(_disc, playlist) ?? playlist.TitleName;
@@ -468,29 +485,26 @@ public sealed class MainViewModel : INotifyPropertyChanged
                 _editStore.Load(_disc, playlist) is not null ||
                 _editStore.LoadChapterTitles(_disc, playlist) is not null ||
                 _editStore.LoadTitleName(_disc, playlist) is not null);
-            var candidates = preferred is null ? Playlists.AsEnumerable() :
-                new[] { preferred }.Concat(Playlists.Where(playlist => playlist != preferred));
-            InvalidDataException? unavailable = null;
+            var ranked = Playlists.OrderByDescending(PlaylistRanking.Score).ToArray();
+            var candidates = preferred is null ? ranked.AsEnumerable() :
+                new[] { preferred }.Concat(ranked.Where(playlist => playlist != preferred));
             foreach (var playlist in candidates)
             {
                 SelectedPlaylist = playlist;
-                try
-                {
-                    await LoadPlaylistCoreAsync(playlist, _work.Token);
-                    unavailable = null;
-                    break;
-                }
-                catch (InvalidDataException ex)
-                {
-                    unavailable = ex;
-                    _log.Write($"Title {playlist.Id:00000} unavailable: {ex.Message}");
-                }
+                await LoadPlaylistCoreAsync(playlist, _work.Token);
+                if (playlist.Availability is AudioAvailability.Ready or AudioAvailability.Partial or AudioAvailability.Protected) break;
             }
-            if (unavailable is not null) throw unavailable;
+            if (_loadedPlaylist?.Availability is not (AudioAvailability.Ready or AudioAvailability.Partial) && candidates.FirstOrDefault() is { } first)
+            {
+                SelectedPlaylist = first;
+                await LoadPlaylistCoreAsync(first, _work.Token);
+            }
             Status = PlaylistStatus(ambiguous);
+            opened = true;
         }
         catch (Exception ex) { HandleError(ex); }
         finally { EndWork(); }
+        if (opened) StartBackgroundInspection();
     }
 
     public async Task OpenIsoAsync(string isoPath)
@@ -521,6 +535,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     public void ClearCurrentDisc()
     {
+        StopInspection();
+        _discService.ClearCache();
         StopPlayback();
         _navigation.ClearCache();
         _disc = null;
@@ -557,31 +573,42 @@ public sealed class MainViewModel : INotifyPropertyChanged
     {
         if (_disc is null) return;
         StopPlayback();
-        _loadedPlaylist = null;
+        _loadedPlaylist = playlist;
         Streams.Clear();
         SelectedStream = null;
         foreach (var track in Tracks) track.PropertyChanged -= TrackChanged;
         Tracks.Clear();
         SelectedTrack = null;
+        var savedTracks = _editStore.Load(_disc, playlist);
+        ReplaceTracks(savedTracks ?? DiscService.BuildTracks(_disc, playlist));
+        _titleName = playlist.TitleName;
+        Changed(nameof(TitleName));
+        UpdateActions();
         var result = await _discService.AnalyzePlaylistAsync(_disc, playlist, token);
+        playlist.ChapterTitles = _editStore.LoadChapterTitles(_disc, playlist) ?? playlist.ChapterTitles;
         RefreshMetadata();
         foreach (var stream in result.Streams) Streams.Add(stream);
-        SelectedStream = Streams.FirstOrDefault(x => x.IsStereo) ?? Streams.FirstOrDefault();
-        var savedTracks = _editStore.Load(_disc, playlist);
-        foreach (var track in savedTracks ?? result.Tracks)
+        SelectedStream = Streams.FirstOrDefault();
+        ReplaceTracks(savedTracks ?? result.Tracks);
+        UpdateActions();
+    }
+
+    private void ReplaceTracks(IReadOnlyList<TrackRow> tracks)
+    {
+        foreach (var track in Tracks) track.PropertyChanged -= TrackChanged;
+        Tracks.Clear();
+        foreach (var track in tracks)
         {
             track.PropertyChanged += TrackChanged;
             Tracks.Add(track);
         }
-        _loadedPlaylist = playlist;
-        _titleName = playlist.TitleName;
-        Changed(nameof(TitleName));
         SelectedTrack = Tracks.FirstOrDefault();
-        UpdateActions();
     }
 
     private string PlaylistStatus(bool ambiguous)
     {
+        if (_loadedPlaylist?.Availability is not (AudioAvailability.Ready or AudioAvailability.Partial))
+            return $"{_loadedPlaylist?.AvailabilityLabel} · {LanguageService.T("チャプター情報を表示しています。音声は再解析できます。")}";
         if (_loadedPlaylist is { } playlist && Tracks.Count == 1 &&
             Tracks[0].StartTicks == 0 && Tracks[0].EndTicks == playlist.DurationTicks)
             return "全編を1曲として表示しています。「FLACで保存」で1ファイルに保存します。";
@@ -719,6 +746,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     public async Task TogglePlaybackAsync()
     {
+        StopInspection();
         if (IsPlaying) { PausePlayback(); return; }
         await StartPlaybackAsync(++_transportVersion);
     }
@@ -756,6 +784,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     private async Task StartPlaybackAsync(int version)
     {
+        StopInspection();
         if (_playbackTask is { IsCompleted: false } previous) await previous;
         if (version != _transportVersion || !CanPlay || SelectedTrack is null || SelectedStream is null ||
             _disc is null || _loadedPlaylist is null) return;
@@ -998,6 +1027,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     public void Cancel()
     {
+        StopInspection();
         _work?.Cancel();
         StopPlayback();
     }
@@ -1009,6 +1039,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     private void BeginWork(string message)
     {
+        StopInspection();
         StopPlayback();
         _work = new CancellationTokenSource();
         IsBusy = true;
@@ -1041,7 +1072,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     private void TrackChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(TrackRow.IsSelected)) Changed(nameof(CanConvert));
+        if (e.PropertyName == nameof(TrackRow.IsSelected)) { Changed(nameof(CanConvert)); Changed(nameof(SelectedStreamNote)); }
         if (sender == SelectedTrack && e.PropertyName == nameof(TrackRow.Title)) Changed(nameof(SelectedTrackTitle));
         if (!_suspendEditSave && e.PropertyName is nameof(TrackRow.Title) or nameof(TrackRow.Artist) or nameof(TrackRow.IsSelected))
             SaveEdits();
@@ -1069,6 +1100,11 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     private void UpdateActions()
     {
+        Changed(nameof(SelectedStreamNote));
+        Changed(nameof(CanInspect));
+        Changed(nameof(CanToggleTail));
+        Changed(nameof(MergeShortTail));
+        Changed(nameof(ChapterCorrectionNote));
         Changed(nameof(CanConvert));
         Changed(nameof(CanEditTracks));
         Changed(nameof(CanPlay));

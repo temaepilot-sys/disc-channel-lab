@@ -15,6 +15,8 @@ The app reads supported, unprotected Blu-ray, DVD-Audio, and DVD-Video sources t
 ## Features
 
 - Inspect titles, chapters, tracks, audio streams, and channel layouts.
+- Keep available chapters visible when audio is absent, unsupported, or cannot be analyzed. Titles show their inspection state; repeated menu clips are ranked below likely music titles.
+- Recover Blu-ray audio by inspecting individual clips when playlist probing fails. Audio IDs are matched across clips even when stream indexes change; streams present in only part of a title are labeled.
 - Preview audio with play/pause, previous/next track, seeking, and volume control.
 - Set front, center, surround, and LFE mix levels with sliders or numeric input; mute a group or reset the defaults. Sliders use the same perceptual curve as playback volume, while numeric inputs show the actual channel gain. Each group changes independently; muting every group silences the stereo mix. Changes update running audio without restarting the player.
 - Preview volume uses a quadratic low-volume curve by default, with a linear-gain option for analysis. Both keep 100% at unity and 200% at twice the amplitude. Hover over the slider for actual gain and dB; changes ramp over 10 ms.
@@ -27,6 +29,23 @@ The app reads supported, unprotected Blu-ray, DVD-Audio, and DVD-Video sources t
 - If a playlist extends slightly beyond the audio at a clip's end, conversion may add up to 20 ms of silence to preserve the requested sample count. Larger gaps still fail validation.
 - Read saved Blu-ray track, chapter, and album edits from the earlier `Disc2Flac` app when the disc matches.
 - Open a disc drive, a disc folder, or a mounted ISO. Protected sources are unsupported.
+
+## Reading and diagnostics
+
+The **Reading and diagnostics** panel offers **Retry selected title**, **Inspect all titles**, and **Save diagnostic report**. Initial analysis shows chapter rows before audio probing finishes, then checks remaining titles in the background. Starting playback or another foreground operation stops the background scan. Retry uses longer, bounded probe timeouts. Reports include title states, original/effective chapter boundaries, clip information, errors, and FFmpeg versions; titles not yet inspected are marked accordingly. The report contains disc metadata and local diagnostic details, so review it before sharing.
+
+**Merge short final chapter** includes a final segment shorter than one second in the previous track. Uncheck it to restore the original boundary. The source markers remain intact, and boundary modes retain separate saved track layouts; metadata on matching track starts carries across when toggling. This option does not trim audio.
+
+Audio correspondence uses transport IDs and compatible channel layouts, with unambiguous format/language matching when no ID exists. Ambiguous matches are rejected. Playback and CD export can handle a sample-rate change between matching clips; native high-resolution export requires matching rates and bit depths. A channel-layout change requiring a different interpretation is reported instead of silently changing channels. Short decode checks verify a sample, not every second of a title. Media damage, protected sources, and unsupported formats can still prevent playback.
+
+Developer checks:
+
+```powershell
+dotnet run --project DiscChannelLab.Verify -c Release -- reading-tests
+dotnet run --project DiscChannelLab.Verify -c Release -- diagnose H:\ diagnostics.json
+```
+
+The regression checks generate their own small clips and cover original boundaries, correction/edit persistence, menu ranking, timeouts/cancellation, stream-ID remapping and sample-rate changes, direct-clip fallback, failed-title isolation/retry, no-audio detection, and exact sample counts in cross-clip FLAC exports.
 
 ## Requirements
 

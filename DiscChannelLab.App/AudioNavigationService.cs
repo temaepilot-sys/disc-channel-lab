@@ -37,8 +37,8 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
         foreach (var segment in PlaylistSegments.ForRange(playlist, startTicks, endTicks))
         {
             token.ThrowIfCancellationRequested();
-            var (sourcePath, seekTicks) = await GetSourceAsync(disc, stream, segment, token);
-            await PlaySegmentAsync(ffplay, sourcePath, stream, seekTicks, segment.EndTicks - segment.StartTicks,
+            var (sourcePath, seekTicks, source) = await GetSourceAsync(disc, stream, segment, token);
+            await PlaySegmentAsync(ffplay, sourcePath, source, seekTicks, segment.EndTicks - segment.StartTicks,
                 token, () => segmentStarted?.Invoke(segment.StartTicks), volume ?? (() => 1), mix, soloChannel,
                 segment.StartTicks, channelLevels, playbackPosition, liveMix);
         }
@@ -97,22 +97,8 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
         var skipSamples = ConversionService.ToSample(startTicks - sourceStart, 48000);
         var sampleCount = ConversionService.ToSample(endTicks - startTicks, 48000);
         var liveChannels = liveMix is not null && StereoMixSettings.Supports(stream);
-        var filter = $"aresample=48000:osf=s16,atrim=start_sample={skipSamples}:end_sample={skipSamples + sampleCount},asetpts=PTS-STARTPTS";
-        if (!liveChannels)
-        {
-            if (soloChannel is not null) filter = StereoMixSettings.SoloFilter(stream, soloChannel, stereo: true) + "," + filter;
-            else if (StereoMixSettings.Supports(stream)) filter = mix.PanFilter(stream) + "," + filter;
-        }
-        var outputArgs = new List<string>();
-        if (channelLevels is null)
-            outputArgs.AddRange(["-map", $"0:{stream.Index}", "-af", filter]);
-        else
-        {
-            var analysis = $"aresample=48000,atrim=start_sample={skipSamples}:end_sample={skipSamples + sampleCount},asetpts=PTS-STARTPTS,{MeterFilter}";
-            outputArgs.AddRange(["-filter_complex",
-                $"[0:{stream.Index}]asplit=2[levels_in][play_in];[levels_in]{analysis},anullsink;[play_in]{filter}[audio_out]",
-                "-map", "[audio_out]"]);
-        }
+        var filter = PreviewFilter(stream, skipSamples, sampleCount, liveChannels, mix, soloChannel, channelLevels is not null);
+        var outputArgs = new List<string> { "-map", $"0:{stream.Index}", "-af", filter };
         outputArgs.AddRange(["-vn", "-sn", "-dn", "-ac", liveChannels ? stream.Channels.ToString() : "2",
             "-c:a", "pcm_s16le",
             "-t", Seconds(endTicks - startTicks), "-f", "s16le", "pipe:1"]);
@@ -211,23 +197,12 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
         Func<PreviewMixState>? liveMix)
     {
         var samples = (long)Math.Round(durationTicks * 48000d / 45000d, MidpointRounding.AwayFromZero);
+        var inputSeekTicks = Math.Max(0, seekTicks - 45000);
+        var skipTicks = seekTicks - inputSeekTicks;
+        var skipSamples = (long)Math.Round(skipTicks * 48000d / 45000d, MidpointRounding.AwayFromZero);
         var liveChannels = liveMix is not null && StereoMixSettings.Supports(stream);
-        var filter = $"aresample=48000:osf=s16,atrim=end_sample={samples},asetpts=PTS-STARTPTS";
-        if (!liveChannels)
-        {
-            if (soloChannel is not null) filter = StereoMixSettings.SoloFilter(stream, soloChannel, stereo: true) + "," + filter;
-            else if (StereoMixSettings.Supports(stream)) filter = mix.PanFilter(stream) + "," + filter;
-        }
-        var outputArgs = new List<string>();
-        if (channelLevels is null)
-            outputArgs.AddRange(["-map", $"0:{stream.Index}", "-af", filter]);
-        else
-        {
-            var analysis = $"aresample=48000,atrim=end_sample={samples},asetpts=PTS-STARTPTS,{MeterFilter}";
-            outputArgs.AddRange(["-filter_complex",
-                $"[0:{stream.Index}]asplit=2[levels_in][play_in];[levels_in]{analysis},anullsink;[play_in]{filter}[audio_out]",
-                "-map", "[audio_out]"]);
-        }
+        var filter = PreviewFilter(stream, skipSamples, samples, liveChannels, mix, soloChannel, channelLevels is not null);
+        var outputArgs = new List<string> { "-map", $"0:{stream.Index}", "-af", filter };
         outputArgs.AddRange(["-vn", "-sn", "-dn", "-ac", liveChannels ? stream.Channels.ToString() : "2",
             "-c:a", "pcm_s16le", "-f", "s16le", "pipe:1"]);
         if (liveChannels) outputArgs.InsertRange(outputArgs.Count - 3, ["-ch_layout", stream.ChannelLayout]);
@@ -238,8 +213,8 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
         };
         foreach (var argument in new[]
         {
-            "-hide_banner", "-nostdin", "-v", channelLevels is null ? "error" : "info", "-ss", Seconds(seekTicks),
-            "-t", Seconds(durationTicks + 4500), "-i", sourcePath
+            "-hide_banner", "-nostdin", "-v", channelLevels is null ? "error" : "info", "-ss", Seconds(inputSeekTicks),
+            "-t", Seconds(durationTicks + skipTicks + 4500), "-i", sourcePath
         }.Concat(outputArgs)) decodeInfo.ArgumentList.Add(argument);
         var playInfo = new ProcessStartInfo(ffplay)
         {
@@ -405,11 +380,11 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
         foreach (var segment in PlaylistSegments.ForRange(playlist, track.StartTicks, track.EndTicks))
         {
             token.ThrowIfCancellationRequested();
-            var (sourcePath, seekTicks) = await GetSourceAsync(disc, stream, segment, token);
+            var (sourcePath, seekTicks, source) = await GetSourceAsync(disc, stream, segment, token);
             var result = await runner.RunAsync(paths.Ffmpeg,
                 ["-hide_banner", "-nostdin", "-nostats", "-v", "info",
                  "-ss", Seconds(seekTicks), "-t", Seconds(segment.EndTicks - segment.StartTicks), "-i", sourcePath,
-                 "-map", $"0:{stream.Index}", "-vn", "-sn", "-dn",
+                 "-map", $"0:{source.Index}", "-vn", "-sn", "-dn",
                  "-af", "silencedetect=noise=-45dB:duration=0.8", "-f", "null", "-"], token);
             foreach (var offset in ParseSilenceMidpoints(result.Error))
             {
@@ -481,26 +456,35 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
         return result;
     }
 
-    private async Task<(string Path, long SeekTicks)> GetSourceAsync(DiscAnalysis disc, AudioStreamInfo stream,
+    private async Task<(string Path, long SeekTicks, AudioStreamInfo Source)> GetSourceAsync(DiscAnalysis disc, AudioStreamInfo stream,
         PlaylistSegment segment, CancellationToken token)
     {
         var path = Path.Combine(disc.Root, "BDMV", "STREAM", $"{segment.Clip.Id}.m2ts");
         if (!File.Exists(path)) throw new FileNotFoundException($"音声クリップが見つかりません: {path}");
-        var cacheKey = $"{path}|{stream.Index}";
+        var cacheKey = $"{path}|{AudioStreamMatcher.Identity(stream)}";
         if (!_clipCache.TryGetValue(cacheKey, out var source))
         {
-            source = (await probe.ProbeClipAsync(path, token)).FirstOrDefault(x => x.Index == stream.Index);
-            if (source is not null) _clipCache[cacheKey] = source;
+            source = AudioStreamMatcher.Resolve(stream, await probe.ProbeClipAsync(path, token));
+            _clipCache[cacheKey] = source;
         }
-        if (source is null || source.Codec != stream.Codec || source.Profile != stream.Profile ||
-            (!string.IsNullOrEmpty(stream.TransportId) && source.TransportId != stream.TransportId) ||
-            source.SampleRate != stream.SampleRate || source.BitDepth != stream.BitDepth || source.Channels != stream.Channels ||
-            (stream.Channels > 2 && !string.Equals(source.ChannelLayout, stream.ChannelLayout, StringComparison.OrdinalIgnoreCase)))
-            throw new InvalidDataException($"クリップ {segment.Clip.Id} の音声形式が選択した音声と一致しません。");
         if (source.StartTimeTicks is null) throw new InvalidDataException($"クリップ {segment.Clip.Id} の音声開始時刻が不明です。");
         var seekTicks = PlaylistSegments.SourceTicks(segment) - source.StartTimeTicks.Value;
         if (seekTicks < 0) throw new InvalidDataException($"クリップ {segment.Clip.Id} の再生位置が不正です。");
-        return (path, seekTicks);
+        return (path, seekTicks, source);
+    }
+
+    private static string PreviewFilter(AudioStreamInfo stream, long skip, long count, bool liveChannels,
+        StereoMixSettings mix, string? soloChannel, bool meters)
+    {
+        var filter = $"aresample=48000,atrim=start_sample={skip}:end_sample={skip + count},asetpts=PTS-STARTPTS";
+        // Keep metering in the same chain: a separate sink can crash older FFmpeg builds at EOF.
+        if (meters) filter += "," + MeterFilter;
+        if (!liveChannels)
+        {
+            if (soloChannel is not null) filter += "," + StereoMixSettings.SoloFilter(stream, soloChannel, stereo: true);
+            else if (StereoMixSettings.Supports(stream)) filter += "," + mix.PanFilter(stream);
+        }
+        return filter + ",aformat=sample_fmts=s16";
     }
 
     private static string Seconds(long ticks) => (ticks / 45000m).ToString("0.########", CultureInfo.InvariantCulture);

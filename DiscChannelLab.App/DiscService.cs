@@ -2,22 +2,27 @@ using System.Xml;
 using System.Xml.Linq;
 using System.Security.Cryptography;
 using System.Text;
+using System.Collections.Concurrent;
 
 namespace Disc2Flac;
 
 public sealed class DiscService(FfprobeService probe, AppLog log)
 {
-    public DiscAnalysis Analyze(string path)
+    private readonly ConcurrentDictionary<(string Disc, int Title), PlaylistProbeResult> _inspections = new();
+    public void ClearCache() { _inspections.Clear(); probe.ClearCache(); }
+    public DiscAnalysis Analyze(string path, CancellationToken token = default)
     {
         var root = NormalizeDiscRoot(path);
         if (Directory.Exists(Path.Combine(root, "BDMV", "PLAYLIST")))
             return AnalyzeBluRay(root);
-        var audio = DvdAudioReader.ReadAll(root, log.Write);
+        var diagnostics = new List<string>();
+        void Trace(string message) { diagnostics.Add(message); log.Write(message); }
+        var audio = DvdAudioReader.ReadAll(root, Trace);
         IReadOnlyList<PlaylistInfo> video = [];
         if (File.Exists(Path.Combine(root, "VIDEO_TS", "VIDEO_TS.IFO")))
         {
-            try { video = DvdVideoReader.ReadAll(root, probe, log.Write); }
-            catch (Exception ex) when (ex is InvalidDataException or IOException) { log.Write($"DVD-Video: {ex.Message}"); }
+            try { video = DvdVideoReader.ReadAll(root, probe, Trace, token); }
+            catch (Exception ex) when (ex is InvalidDataException or IOException) { Trace($"DVD-Video: {ex.Message}"); }
         }
         var playlists = audio.Concat(video).ToArray();
         if (playlists.Length == 0)
@@ -33,7 +38,8 @@ public sealed class DiscService(FfprobeService probe, AppLog log)
         return new DiscAnalysis
         {
             Root = root, Format = audio.Count > 0 ? DiscFormat.DvdAudio : DiscFormat.DvdVideo,
-            DiscKey = audio.Count > 0 ? DvdAudioReader.DiscKey(root) : DvdVideoReader.DiscKey(root),
+            DiscKey = audio.Count > 0 ? DvdAudioReader.DiscKey(root, Trace) : DvdVideoReader.DiscKey(root),
+            Diagnostics = diagnostics,
             AlbumTitle = label, Playlists = playlists
         };
     }
@@ -75,27 +81,82 @@ public sealed class DiscService(FfprobeService probe, AppLog log)
 
     public async Task<(IReadOnlyList<AudioStreamInfo> Streams, IReadOnlyList<TrackRow> Tracks)> AnalyzePlaylistAsync(DiscAnalysis disc, PlaylistInfo playlist, CancellationToken token)
     {
-        PlaylistProbeResult result;
-        try { result = await probe.ProbePlaylistAsync(disc.Root, playlist, token); }
-        catch (FfToolException ex) when (ex.Message.Contains("AACS", StringComparison.OrdinalIgnoreCase) || ex.Message.Contains("BD+", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new ProtectedDiscException("このディスクはコピー保護されているため処理できません。");
-        }
-        if (result.Streams.Count == 0) throw new InvalidDataException("対応する音声ストリームがありません。");
+        var result = await InspectPlaylistAsync(disc, playlist, token);
         if (disc.AlbumTitle == "Unknown Album") disc.AlbumTitle = Tag(result.Tags, "album") ?? Tag(result.Tags, "title") ?? disc.AlbumTitle;
         disc.Artist ??= Tag(result.Tags, "album_artist") ?? Tag(result.Tags, "artist");
         disc.Date ??= Tag(result.Tags, "date");
         disc.Genre ??= Tag(result.Tags, "genre");
         disc.Publisher ??= Tag(result.Tags, "publisher");
         disc.Description ??= Tag(result.Tags, "description") ?? Tag(result.Tags, "comment");
-        var tracks = new List<TrackRow>();
-        var wholePlaylistIsOneTrack = playlist.ChapterStarts.Count == 1 && playlist.ChapterStarts[0] == 0;
-        for (var i = 0; i < playlist.ChapterStarts.Count; i++)
+        return (result.Streams, BuildTracks(disc, playlist, result));
+    }
+
+    public async Task<PlaylistProbeResult> InspectPlaylistAsync(DiscAnalysis disc, PlaylistInfo playlist,
+        CancellationToken token, bool force = false)
+    {
+        var key = (disc.DiscKey, playlist.Id);
+        if (!force && _inspections.TryGetValue(key, out var cached))
         {
-            var start = playlist.ChapterStarts[i];
-            var end = i + 1 < playlist.ChapterStarts.Count ? playlist.ChapterStarts[i + 1] : playlist.DurationTicks;
+            playlist.Availability = cached.Availability;
+            playlist.AnalysisDetails = string.Join(Environment.NewLine, cached.Diagnostics);
+            return cached;
+        }
+        var version = ++playlist.InspectionVersion;
+        playlist.Availability = AudioAvailability.Analyzing;
+        PlaylistProbeResult result;
+        try
+        {
+            if (force && playlist.Format == DiscFormat.BluRay && playlist.DurationTicks == 0)
+            {
+                var structure = MplsReader.Read(Path.Combine(disc.Root, "BDMV", "PLAYLIST", $"{playlist.Id:00000}.mpls"), playlist.Id);
+                playlist.DurationTicks = structure.DurationTicks;
+                playlist.ChapterStarts = structure.ChapterStarts;
+                playlist.Clips = structure.Clips;
+                playlist.ChapterTitles = Enumerable.Repeat<string?>(null, structure.ChapterStarts.Count).ToArray();
+                playlist.RefreshLanguage();
+            }
+            if (playlist.Format == DiscFormat.DvdVideo && playlist.DurationTicks == 0)
+            {
+                var structure = await FfprobeService.WithTimeout(ct => probe.ProbeDvdVideoTitleAsync(disc.Root, playlist.DvdVideoTitle, ct), token, force ? 25 : 10);
+                playlist.DurationTicks = structure.DurationTicks;
+                playlist.ChapterStarts = structure.Chapters;
+                playlist.ChapterTitles = Enumerable.Repeat<string?>(null, structure.Chapters.Count).ToArray();
+                playlist.RefreshLanguage();
+            }
+            result = await probe.ProbePlaylistAsync(disc.Root, playlist, token, force);
+        }
+        catch (OperationCanceledException)
+        { if (playlist.InspectionVersion == version) playlist.Availability = AudioAvailability.Pending; throw; }
+        catch (Exception ex) when (FfprobeService.IsRecoverable(ex) || ex is ProtectedDiscException)
+        {
+            result = new PlaylistProbeResult([], new Dictionary<int, ChapterMetadata>(), new Dictionary<string, string>())
+            { Availability = ex is ProtectedDiscException ? AudioAvailability.Protected : AudioAvailability.Failed,
+              Diagnostics = [ex.Message] };
+        }
+        if (token.IsCancellationRequested && playlist.InspectionVersion == version)
+            playlist.Availability = AudioAvailability.Pending;
+        token.ThrowIfCancellationRequested();
+        if (playlist.InspectionVersion != version) return result;
+        playlist.Availability = result.Availability;
+        playlist.AnalysisDetails = string.Join(Environment.NewLine, result.Diagnostics);
+        _inspections[key] = result;
+        log.Write($"INSPECTION title={playlist.Id} state={result.Availability} audio={result.DetectedAudioCount}\n{playlist.AnalysisDetails}");
+        return result;
+    }
+
+    public static IReadOnlyList<TrackRow> BuildTracks(DiscAnalysis disc, PlaylistInfo playlist, PlaylistProbeResult? result = null)
+    {
+        var starts = playlist.EffectiveChapterStarts;
+        var tracks = new List<TrackRow>();
+        var wholePlaylistIsOneTrack = starts.Count == 1 && starts[0] == 0;
+        for (var i = 0; i < starts.Count; i++)
+        {
+            var start = starts[i];
+            var end = i + 1 < starts.Count ? starts[i + 1] : playlist.DurationTicks;
             if (end <= start) continue;
-            result.Chapters.TryGetValue(i + 1, out var chapter);
+            var chapter = result?.Chapters.Values.FirstOrDefault(x => x.StartTicks is { } time && Math.Abs(time - start) < 4500);
+            if (chapter is null && result?.Chapters.TryGetValue(i + 1, out var byNumber) == true && byNumber.StartTicks is null)
+                chapter = byNumber;
             var title = chapter?.Title;
             var hasTitle = !string.IsNullOrWhiteSpace(title) && !title.StartsWith("Chapter", StringComparison.OrdinalIgnoreCase);
             tracks.Add(new TrackRow
@@ -109,7 +170,7 @@ public sealed class DiscService(FfprobeService probe, AppLog log)
                 Artist = chapter?.Artist ?? disc.Artist
             });
         }
-        return (result.Streams, tracks);
+        return tracks;
     }
 
     private static string? Tag(IReadOnlyDictionary<string, string> tags, string name) =>

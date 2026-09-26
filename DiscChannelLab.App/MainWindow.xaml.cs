@@ -120,6 +120,21 @@ public partial class MainWindow : Window
     }
 
     private void SelectAll_Click(object sender, RoutedEventArgs e) => _model.SelectAll(true);
+    private async void RetryTitle_Click(object sender, RoutedEventArgs e)
+    { CommitTrackEdits(); await _model.RetrySelectedTitleAsync(); }
+    private void InspectAll_Click(object sender, RoutedEventArgs e) => _model.InspectAllTitles();
+    private void StopInspection_Click(object sender, RoutedEventArgs e) => _model.StopInspection();
+    private void MergeShortTail_Click(object sender, RoutedEventArgs e)
+    {
+        CommitTrackEdits();
+        _model.ToggleShortTail(((CheckBox)sender).IsChecked == true);
+    }
+    private async void SaveDiagnostics_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new SaveFileDialog { Title = LanguageService.T("診断レポートを保存"),
+            Filter = "JSON (*.json)|*.json", FileName = $"DiscChannelLab-diagnostics-{DateTime.Now:yyyyMMdd-HHmmss}.json" };
+        if (dialog.ShowDialog(this) == true) await _model.SaveDiagnosticsAsync(dialog.FileName);
+    }
     private void ClearSelection_Click(object sender, RoutedEventArgs e) => _model.SelectAll(false);
     private void BulkEditAll_Click(object sender, RoutedEventArgs e) => OpenBulkEditor(selectedOnly: false);
     private void BulkEditSelected_Click(object sender, RoutedEventArgs e) => OpenBulkEditor(selectedOnly: true);

@@ -10,6 +10,31 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Threading;
 
+if (args is ["reading-tests"])
+{
+    await ReadingRegressionTests.RunAsync();
+    return 0;
+}
+if (args is ["reading-disc-test", var readingRoot])
+{
+    await ReadingRegressionTests.RunDiscAsync(readingRoot);
+    return 0;
+}
+if (args is ["diagnose", var diagnosticRoot, var diagnosticPath])
+{
+    var diagnosticLog = new AppLog();
+    var diagnosticService = new DiscService(new FfprobeService(new ToolPaths(), new ProcessRunner(diagnosticLog)), diagnosticLog);
+    var diagnosticDisc = diagnosticService.Analyze(diagnosticRoot);
+    foreach (var title in diagnosticDisc.Playlists)
+    {
+        await diagnosticService.InspectPlaylistAsync(diagnosticDisc, title, CancellationToken.None);
+        Console.WriteLine($"{title.Id:00000}: {title.Availability}; chapters={title.ChapterStarts.Count}/{title.EffectiveChapterStarts.Count}");
+    }
+    await DiscDiagnostics.SaveAsync(diagnosticDisc, diagnosticPath, CancellationToken.None);
+    Console.WriteLine($"Saved: {diagnosticPath}");
+    return 0;
+}
+
 if (args is ["live-mix-test"])
 {
     var stream = new AudioStreamInfo
@@ -799,13 +824,17 @@ if (args[0] == "ui-scan")
     Console.WriteLine($"UI: {model.AlbumTitle}, {model.Playlists.Count} titles, {model.Tracks.Count} tracks, {model.Streams.Count} streams, canSave={model.CanConvert}, status={model.Status}");
     if (model.Playlists.Count == 0 || model.Tracks.Count == 0 || model.Streams.Count == 0)
         throw new InvalidDataException("画面用モデルに曲を表示できませんでした。");
-    foreach (var title in model.Playlists.Skip(1).Where(title => !title.IsRepeatedShortClipLoop))
+    foreach (var title in model.Playlists.Where(title => title != model.SelectedPlaylist && !title.IsRepeatedShortClipLoop).ToArray())
     {
+        model.SelectedPlaylist = title;
         await model.ChoosePlaylistAsync(title);
-        Console.WriteLine($"  {title.TitleLabel}: {model.Tracks.Count} tracks / {model.Streams.Count} streams");
-        if (model.Tracks.Count == 0 || model.Streams.Count == 0)
+        Console.WriteLine($"  {title.TitleLabel}: {model.Tracks.Count} tracks / {model.Streams.Count} streams / {title.Availability}");
+        if (title.DurationTicks > 0 && title.ChapterStarts.Count > 0 && model.Tracks.Count == 0 ||
+            title.Availability is AudioAvailability.Ready or AudioAvailability.Partial && model.Streams.Count == 0)
             throw new InvalidDataException($"{title.TitleLabel} を選択できませんでした。");
     }
+    model.Cancel();
+    model.DetachLanguage();
     return 0;
 }
 var log = new AppLog();
@@ -855,7 +884,8 @@ if (args[0] is "convert-bd-stereo" or "convert-bd-individual" or "preview-bd" or
             soloChannel: args[0].EndsWith("-solo", StringComparison.Ordinal) ? "FC" : null,
             channelLevels: (_, _, _, _) => meterFrameCount++,
             playbackPosition: (_, seconds) => maxAudioClock = Math.Max(maxAudioClock, seconds));
-        if (decoderStartedAfter is null || maxAudioClock < 1.5 || meterFrameCount < 50)
+        var expectedSeconds = (end - first) / 45000d;
+        if (decoderStartedAfter is null || maxAudioClock < expectedSeconds * 0.7 || meterFrameCount < expectedSeconds * 20)
             throw new InvalidDataException($"Playback clock or channel meters were unavailable: {maxAudioClock:0.00}s, {meterFrameCount} frames.");
         Console.WriteLine($"BD preview completed: {selectedPlaylist.DisplayName} / {selectedStream.DisplayName}; " +
             $"chapter {previewChapter}; " +
@@ -881,7 +911,7 @@ foreach (var title in disc.Playlists)
 {
     Console.WriteLine($"  {title.DisplayName} [MPLS {title.Id:00000}; clips={title.Clips.Count}; " +
                       $"unique={title.Clips.Select(clip => clip.Id).Distinct().Count()}; " +
-                      $"max={title.Clips.Max(clip => (clip.OutTicks - clip.InTicks) / 45000d):0.#}s; " +
+                      $"max={title.Clips.Select(clip => (clip.OutTicks - clip.InTicks) / 45000d).DefaultIfEmpty().Max():0.#}s; " +
                       $"first={title.Clips.FirstOrDefault()?.Id}]");
     try
     {

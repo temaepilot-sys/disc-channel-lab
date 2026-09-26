@@ -28,9 +28,11 @@ public static class MplsReader
             catch (Exception ex) when (ex is InvalidDataException or IOException)
             {
                 log?.Invoke($"プレイリスト {id:00000} を読めません: {ex.Message}");
+                playlists.Add(new PlaylistInfo { Id = id, Clips = [], ChapterStarts = [], DurationTicks = 0,
+                    Availability = AudioAvailability.Failed, AnalysisDetails = ex.Message });
             }
         }
-        var ordered = playlists.OrderBy(x => x.IsRepeatedShortClipLoop)
+        var ordered = playlists.OrderByDescending(PlaylistRanking.Score)
             .ThenByDescending(x => x.DurationTicks).ThenByDescending(x => x.ChapterStarts.Count).ToArray();
         for (var i = 0; i < ordered.Length; i++) ordered[i].DisplayOrder = i + 1;
         return ordered;
@@ -78,11 +80,6 @@ public static class MplsReader
             var absolute = clip.PlaylistStartTicks + markTime - clip.InTicks;
             if (absolute > 0 && absolute < position) chapterStarts.Add(absolute);
         }
-
-        // Some discs place a final entry mark less than one second before the end.
-        // Merge that tail into the previous chapter so it remains playable and exportable.
-        if (chapterStarts.Count > 1 && position - chapterStarts.Max < TicksPerSecond)
-            chapterStarts.Remove(chapterStarts.Max);
 
         if (position < TicksPerSecond) throw new InvalidDataException("再生時間が短すぎます。");
         return new PlaylistInfo { Id = id, Clips = clips, ChapterStarts = chapterStarts.ToArray(), DurationTicks = position };

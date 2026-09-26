@@ -96,8 +96,10 @@ public sealed class TrackEditsStore
             try
             {
                 var titles = JsonSerializer.Deserialize<List<string?>>(File.ReadAllText(path));
-                if (titles is not null && titles.Count == playlist.ChapterStarts.Count)
-                    return titles.Select(title => string.IsNullOrWhiteSpace(title) ? null : title.Trim()).ToArray();
+                if (titles is not null && (titles.Count == playlist.ChapterStarts.Count ||
+                    playlist.HasShortTail && titles.Count == playlist.ChapterStarts.Count - 1))
+                    return titles.Select(title => string.IsNullOrWhiteSpace(title) ? null : title.Trim())
+                        .Concat(Enumerable.Repeat<string?>(null, playlist.ChapterStarts.Count - titles.Count)).ToArray();
                 _log.Write($"CHAPTER TITLES INVALID {path}");
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
@@ -129,7 +131,7 @@ public sealed class TrackEditsStore
 
     public IReadOnlyList<TrackRow>? Load(DiscAnalysis disc, PlaylistInfo playlist)
     {
-        foreach (var path in ReadPaths(disc, $"{playlist.Id:00000}.json"))
+        foreach (var path in ReadPaths(disc, TrackFileName(playlist)))
         {
             if (!File.Exists(path)) continue;
             try
@@ -180,8 +182,34 @@ public sealed class TrackEditsStore
 
     private string FilePath(DiscAnalysis disc, PlaylistInfo playlist)
     {
-        return Path.Combine(DiscDirectory(disc), $"{playlist.Id:00000}.json");
+        return Path.Combine(DiscDirectory(disc), TrackFileName(playlist));
     }
+
+    private static string TrackFileName(PlaylistInfo playlist) => playlist.MergeShortTail
+        ? $"{playlist.Id:00000}.json" : $"{playlist.Id:00000}.original.json";
+
+    public bool LoadMergeShortTail(DiscAnalysis disc, PlaylistInfo playlist)
+    {
+        var path = Path.Combine(DiscDirectory(disc), $"{playlist.Id:00000}.reading.json");
+        try { return !File.Exists(path) || JsonSerializer.Deserialize<ReadingOptions>(File.ReadAllText(path))?.MergeShortTail != false; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        { _log.Write($"READING OPTIONS: {ex.Message}"); return true; }
+    }
+
+    public void SaveMergeShortTail(DiscAnalysis disc, PlaylistInfo playlist)
+    {
+        var path = Path.Combine(DiscDirectory(disc), $"{playlist.Id:00000}.reading.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            File.WriteAllText(temporary, JsonSerializer.Serialize(new ReadingOptions(playlist.MergeShortTail), JsonOptions));
+            File.Move(temporary, path, overwrite: true);
+        }
+        finally { if (File.Exists(temporary)) File.Delete(temporary); }
+    }
+
+    private sealed record ReadingOptions(bool MergeShortTail);
 
     private IEnumerable<string> ReadPaths(DiscAnalysis disc, string fileName)
     {

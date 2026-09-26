@@ -64,13 +64,10 @@ public sealed class ConversionService(ToolPaths paths, ProcessRunner runner, Ffp
                     if (!File.Exists(sourcePath)) throw new FileNotFoundException($"音声クリップが見つかりません: {sourcePath}");
                     if (!checkedClips.TryGetValue(segment.Clip.Id, out var source))
                     {
-                        source = (await probe.ProbeClipAsync(sourcePath, token)).FirstOrDefault(x => x.Index == stream.Index);
-                        if (source is null || source.Codec != stream.Codec || source.Profile != stream.Profile ||
-                            (!string.IsNullOrEmpty(stream.TransportId) && source.TransportId != stream.TransportId) ||
-                            source.SampleRate != stream.SampleRate ||
-                            source.BitDepth != stream.BitDepth || source.Channels != stream.Channels ||
-                            (stream.Channels > 2 && !string.Equals(source.ChannelLayout, stream.ChannelLayout, StringComparison.OrdinalIgnoreCase)))
-                            throw new InvalidDataException($"クリップ {segment.Clip.Id} の音声形式が選択した音声と一致しません。");
+                        source = AudioStreamMatcher.Resolve(stream, await probe.ProbeClipAsync(sourcePath, token));
+                        if (quality == OutputQuality.Cd ? !source.CanMakeCd :
+                            !source.CanMakeHighResolution || source.SampleRate != expectedRate || source.BitDepth != expectedDepth)
+                            throw new InvalidDataException($"クリップ {segment.Clip.Id} は選択した保存音質の条件を満たしていません。");
                         if (source.StartTimeTicks is null)
                             throw new InvalidDataException($"クリップ {segment.Clip.Id} の音声開始時刻が不明です。");
                         checkedClips.Add(segment.Clip.Id, source);
@@ -85,14 +82,14 @@ public sealed class ConversionService(ToolPaths paths, ProcessRunner runner, Ffp
                     var part = Path.Combine(stage, $"{i + 1:000}-{channelIndex + 1:00}-part-{partIndex + 1:00}.flac");
                     var filter = quality == OutputQuality.Cd
                         ? $"aresample=44100:osf=s16:dither_method=triangular,atrim=end_sample={sampleCount},asetpts=PTS-STARTPTS"
-                        : $"atrim=end_sample={sampleCount},asetpts=PTS-STARTPTS";
+                        : $"aresample={expectedRate},atrim=end_sample={sampleCount},asetpts=PTS-STARTPTS";
                     if (channel is not null) filter = StereoMixSettings.SoloFilter(stream, channel, stereo: false) + "," + filter;
                     else if (saveStereoDownmix) filter = mix.PanFilter(stream) + "," + filter;
                     var arguments = new List<string>
                     {
                         "-hide_banner", "-nostdin", "-v", "error", "-progress", "pipe:1",
                         "-ss", Seconds(seekTicks), "-t", Seconds(durationTicks + 4500), "-i", sourcePath,
-                        "-map", $"0:{stream.Index}", "-vn", "-sn", "-dn", "-af", filter,
+                        "-map", $"0:{source.Index}", "-vn", "-sn", "-dn", "-af", filter,
                         "-c:a", "flac", "-sample_fmt", quality == OutputQuality.Cd ? "s16" : "s32",
                         "-metadata", $"title={title}", "-metadata", $"track={track.Number}",
                         "-metadata", $"album={flacAlbum}"

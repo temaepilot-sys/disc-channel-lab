@@ -5,6 +5,7 @@ namespace Disc2Flac;
 
 public enum OutputQuality { Cd, HighResolution }
 public enum DiscFormat { BluRay, DvdAudio, DvdVideo }
+public enum AudioAvailability { Pending, Analyzing, Ready, Partial, NoAudio, Unsupported, Failed, Protected }
 
 public sealed record DvdAudioProgram(long StartSector, long EndSector, long StartTicks, long EndTicks);
 public sealed record DvdAudioTitle(int TitleSet, int TitleNumber, IReadOnlyList<DvdAudioProgram> Programs);
@@ -32,8 +33,36 @@ public sealed class PlaylistInfo : INotifyPropertyChanged
             Changed(nameof(DisplayName));
         }
     }
-    public required IReadOnlyList<ClipInfo> Clips { get; init; }
-    public required IReadOnlyList<long> ChapterStarts { get; init; }
+    public required IReadOnlyList<ClipInfo> Clips { get; set; }
+    public required IReadOnlyList<long> ChapterStarts { get; set; }
+    internal int InspectionVersion { get; set; }
+    public bool MergeShortTail { get; set; } = true;
+    public bool HasShortTail => ChapterStarts.Count > 1 && DurationTicks - ChapterStarts[^1] < 45000;
+    public IReadOnlyList<long> EffectiveChapterStarts => MergeShortTail && HasShortTail
+        ? ChapterStarts.Take(ChapterStarts.Count - 1).ToArray() : ChapterStarts;
+    private AudioAvailability _availability;
+    private string _analysisDetails = "";
+    public AudioAvailability Availability
+    {
+        get => _availability;
+        set { _availability = value; Changed(nameof(Availability)); Changed(nameof(AvailabilityLabel)); }
+    }
+    public string AnalysisDetails
+    {
+        get => _analysisDetails;
+        set { _analysisDetails = value; Changed(nameof(AnalysisDetails)); }
+    }
+    public string AvailabilityLabel => LanguageService.T(Availability switch
+    {
+        AudioAvailability.Analyzing => "音声を確認中",
+        AudioAvailability.Ready => "再生確認済み",
+        AudioAvailability.Partial => "音声あり・一部未確認",
+        AudioAvailability.NoAudio => "音声なし",
+        AudioAvailability.Unsupported => "対応対象外の音声",
+        AudioAvailability.Failed => "解析失敗・再試行可能",
+        AudioAvailability.Protected => "保護されたディスク",
+        _ => "未確認"
+    });
     public IReadOnlyList<string?> ChapterTitles
     {
         get => _chapterTitles;
@@ -45,7 +74,7 @@ public sealed class PlaylistInfo : INotifyPropertyChanged
             Changed(nameof(DisplayName));
         }
     }
-    public required long DurationTicks { get; init; }
+    public required long DurationTicks { get; set; }
     public TimeSpan Duration => TimeSpan.FromSeconds(DurationTicks / 45000d);
     public string DisplayNumber => DisplayOrder.ToString("00");
     public string TitleLabel => Format == DiscFormat.DvdAudio ? $"A {DvdAudio?.TitleSet:00}/{DvdAudio?.TitleNumber:00}"
@@ -86,6 +115,9 @@ public sealed class PlaylistInfo : INotifyPropertyChanged
     public event PropertyChangedEventHandler? PropertyChanged;
     public void RefreshLanguage()
     {
+        Changed(nameof(Duration));
+        Changed(nameof(DurationLabel));
+        Changed(nameof(AvailabilityLabel));
         Changed(nameof(ChapterCountLabel));
         Changed(nameof(ChapterSummary));
         Changed(nameof(DisplayName));
@@ -101,6 +133,21 @@ public sealed class AudioStreamInfo : INotifyPropertyChanged
     public required string Codec { get; init; }
     public string Profile { get; init; } = "";
     public string TransportId { get; init; } = "";
+    public string Language { get; init; } = "";
+    public IReadOnlyList<string> CoveredClipIds { get; init; } = [];
+    public IReadOnlyList<string> InspectedClipIds { get; init; } = [];
+    public int TotalClips { get; init; }
+    public bool HasPartialCoverage => TotalClips > 0 && CoveredClipIds.Count < TotalClips;
+    public AudioStreamInfo WithCoverage(IReadOnlyList<string> covered, IReadOnlyList<string> inspected, int total) => new()
+    {
+        Index = Index, Codec = Codec, Profile = Profile, TransportId = TransportId, Language = Language,
+        SampleRate = SampleRate, Channels = Channels, ChannelLayout = ChannelLayout, BitDepth = BitDepth,
+        StartTimeTicks = StartTimeTicks, SampleCount = SampleCount, CoveredClipIds = covered,
+        InspectedClipIds = inspected, TotalClips = total
+    };
+    public bool Covers(PlaylistInfo playlist, TrackRow track) => playlist.Clips
+        .Where(clip => clip.PlaylistStartTicks < track.EndTicks && clip.PlaylistStartTicks + clip.OutTicks - clip.InTicks > track.StartTicks)
+        .All(clip => !InspectedClipIds.Contains(clip.Id) || CoveredClipIds.Contains(clip.Id));
     public required int SampleRate { get; init; }
     public required int Channels { get; init; }
     public required string ChannelLayout { get; init; }
@@ -111,7 +158,8 @@ public sealed class AudioStreamInfo : INotifyPropertyChanged
     public bool HasSupportedChannels => Channels is >= 1 and <= 8 && (Channels <= 2 || ChannelLayout != "unknown");
     public bool CanMakeCd => HasSupportedChannels && BitDepth >= 16 && SampleRate >= 44100;
     public bool CanMakeHighResolution => HasSupportedChannels && BitDepth >= 24 && SampleRate >= 88200;
-    public string DisplayName => $"{CodecLabel} · {(Channels == 1 ? "Mono" : IsStereo ? "Stereo" : $"{Channels}ch ({ChannelLayout})")} · {SampleRate / 1000d:0.0}kHz / {(BitDepth is null ? LanguageService.T("深度不明") : $"{BitDepth}bit")}";
+    public string DisplayName => $"{CodecLabel} · {(Channels == 1 ? "Mono" : IsStereo ? "Stereo" : $"{Channels}ch ({ChannelLayout})")} · {SampleRate / 1000d:0.0}kHz / {(BitDepth is null ? LanguageService.T("深度不明") : $"{BitDepth}bit")}" +
+        (HasPartialCoverage ? $" · {LanguageService.T("一部区間のみ")} #{Index}" : "");
     private string CodecLabel => LanguageService.T(Codec switch
     {
         "pcm_bluray" or "pcm_dvd" => "LPCM",
@@ -157,6 +205,7 @@ public sealed record SplitCandidate(long PositionTicks, string Description) : IN
 
 public sealed class DiscAnalysis
 {
+    public IReadOnlyList<string> Diagnostics { get; init; } = [];
     public required string Root { get; init; }
     public DiscFormat Format { get; init; } = DiscFormat.BluRay;
     public string DiscKey { get; init; } = "";
@@ -169,6 +218,14 @@ public sealed class DiscAnalysis
     public required IReadOnlyList<PlaylistInfo> Playlists { get; init; }
 }
 
-public sealed record ChapterMetadata(string? Title, string? Artist);
+public sealed record ChapterMetadata(string? Title, string? Artist)
+{
+    public long? StartTicks { get; init; }
+}
 public sealed record PlaylistProbeResult(IReadOnlyList<AudioStreamInfo> Streams,
-    IReadOnlyDictionary<int, ChapterMetadata> Chapters, IReadOnlyDictionary<string, string> Tags);
+    IReadOnlyDictionary<int, ChapterMetadata> Chapters, IReadOnlyDictionary<string, string> Tags)
+{
+    public int DetectedAudioCount { get; init; }
+    public AudioAvailability Availability { get; init; }
+    public IReadOnlyList<string> Diagnostics { get; init; } = [];
+}

@@ -85,6 +85,8 @@
                                                    Foreground="{DynamicResource MutedBrush}"
                                                    TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
                                                    ToolTip="{Binding ChapterSummary}"/>
+                                        <TextBlock Text="{Binding AvailabilityLabel}" FontSize="11"
+                                                   Foreground="{DynamicResource MutedBrush}"/>
                                     </StackPanel>
                                 </Grid>
                             </DataTemplate>
@@ -95,6 +97,28 @@
                               ToolTip="{Binding SelectedStream.DisplayName}" MinHeight="32" Margin="0,0,0,5"/>
                     <TextBlock Text="{Binding SelectedStreamNote}" FontSize="12" Foreground="{DynamicResource MutedBrush}"
                                TextWrapping="Wrap" Margin="0,0,0,14"/>
+
+                    <TextBlock Text="{Binding SelectedPlaylist.AvailabilityLabel}" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                    <Expander Header="{local:Loc Key='読み取り・診断'}" Margin="0,0,0,12">
+                        <StackPanel Margin="0,8,0,0">
+                            <TextBlock Text="{Binding InspectionProgress}" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                            <WrapPanel>
+                                <Button Content="{local:Loc Key='選択タイトルを再解析'}" Click="RetryTitle_Click"
+                                        IsEnabled="{Binding CanInspect}" Margin="0,0,4,6"/>
+                                <Button Content="{local:Loc Key='全タイトルを診断'}" Click="InspectAll_Click"
+                                        IsEnabled="{Binding CanInspect}" Margin="0,0,4,6"/>
+                                <Button Content="{local:Loc Key='診断を中止'}" Click="StopInspection_Click" Margin="0,0,4,6"/>
+                                <Button Content="{local:Loc Key='診断レポートを保存'}" Click="SaveDiagnostics_Click"
+                                        IsEnabled="{Binding CanInspect}" Margin="0,0,4,6"/>
+                            </WrapPanel>
+                            <CheckBox Content="{local:Loc Key='短い末尾を前の曲に含める'}"
+                                      IsChecked="{Binding MergeShortTail, Mode=OneWay}" Click="MergeShortTail_Click"
+                                      IsEnabled="{Binding CanToggleTail}" Margin="0,6,0,6"/>
+                            <TextBlock Text="{Binding ChapterCorrectionNote}" TextWrapping="Wrap" FontSize="12"/>
+                            <TextBox Text="{Binding SelectedPlaylist.AnalysisDetails, Mode=OneWay}" IsReadOnly="True"
+                                     TextWrapping="Wrap" MaxHeight="160" VerticalScrollBarVisibility="Auto" Margin="0,8,0,0"/>
+                        </StackPanel>
+                    </Expander>
 
                     <Separator Margin="0,0,0,12"/>
                     <TextBlock Text="{local:Loc Key='ディスク名（親フォルダー）'}" Margin="0,0,0,4"/>

@@ -174,11 +174,11 @@ public sealed class ProcessRunner(AppLog log)
 public sealed class FfToolException(string message) : Exception(message);
 public sealed class ProtectedDiscException(string message) : Exception(message);
 
-public sealed class FfprobeService(ToolPaths paths, ProcessRunner runner)
+public sealed partial class FfprobeService(ToolPaths paths, ProcessRunner runner)
 {
     public static string BlurayInput(string root) => $"bluray:{root}";
 
-    public async Task<PlaylistProbeResult> ProbePlaylistAsync(string root, PlaylistInfo playlist, CancellationToken token)
+    private async Task<PlaylistProbeResult> ProbePlaylistCoreAsync(string root, PlaylistInfo playlist, CancellationToken token)
     {
         ProcessResult result;
         if (playlist.Format == DiscFormat.DvdAudio && playlist.DvdAudio is { } audio)
@@ -208,7 +208,8 @@ public sealed class FfprobeService(ToolPaths paths, ProcessRunner runner)
                 if (chapter.TryGetProperty("tags", out var tags))
                 {
                     var chapterTags = ReadTags(tags);
-                    names[number] = new ChapterMetadata(Tag(chapterTags, "title"), Tag(chapterTags, "artist"));
+                    names[number] = new ChapterMetadata(Tag(chapterTags, "title"), Tag(chapterTags, "artist"))
+                        { StartTicks = ParseTicks(String(chapter, "start_time")) };
                 }
                 number++;
             }
@@ -220,7 +221,9 @@ public sealed class FfprobeService(ToolPaths paths, ProcessRunner runner)
             foreach (var stream in streamElements.EnumerateArray())
                 if (String(stream, "codec_type") == "audio" && stream.TryGetProperty("tags", out var streamTags))
                     foreach (var tag in ReadTags(streamTags)) metadata.TryAdd(tag.Key, tag.Value);
-        return new PlaylistProbeResult(streams, names, metadata);
+        var detected = DescribeAudio(document.RootElement);
+        return new PlaylistProbeResult(streams, names, metadata)
+            { DetectedAudioCount = detected.Count, Diagnostics = detected };
     }
 
     public async Task<(long DurationTicks, IReadOnlyList<long> Chapters)> ProbeDvdVideoTitleAsync(
@@ -231,7 +234,6 @@ public sealed class FfprobeService(ToolPaths paths, ProcessRunner runner)
              "-of", "json", "-show_streams", "-show_chapters", "-show_format", root], token);
         using var document = JsonDocument.Parse(result.Output);
         var json = document.RootElement;
-        if (ReadSupportedAudioStreams(json, DiscFormat.DvdVideo).Count == 0) return (0, []);
         var duration = json.TryGetProperty("format", out var format) ? ParseTicks(String(format, "duration")) ?? 0 : 0;
         var starts = new List<long>();
         if (json.TryGetProperty("chapters", out var chapters))
@@ -256,12 +258,7 @@ public sealed class FfprobeService(ToolPaths paths, ProcessRunner runner)
 
     public async Task<IReadOnlyList<AudioStreamInfo>> ProbeClipAsync(string path, CancellationToken token)
     {
-        var result = await runner.RunAsync(paths.Ffprobe,
-            ["-v", "error", "-of", "json", "-show_streams", "-show_format", path], token);
-        using var document = JsonDocument.Parse(result.Output);
-        var root = document.RootElement;
-        var formatStart = root.TryGetProperty("format", out var format) ? ParseTicks(String(format, "start_time")) : null;
-        return ReadSupportedAudioStreams(root, formatStartTicks: formatStart);
+        return (await ProbeClipDetailedAsync(path, token)).Streams;
     }
 
     private static IReadOnlyList<AudioStreamInfo> ReadSupportedAudioStreams(JsonElement root,
@@ -292,6 +289,7 @@ public sealed class FfprobeService(ToolPaths paths, ProcessRunner runner)
                     Codec = codec,
                     Profile = profile,
                     TransportId = String(stream, "id"),
+                    Language = stream.TryGetProperty("tags", out var streamTags) ? String(streamTags, "language") : "",
                     SampleRate = Number(stream, "sample_rate") ?? 0,
                     Channels = Number(stream, "channels") ?? 0,
                     ChannelLayout = String(stream, "channel_layout") is { Length: > 0 } layout ? layout : "unknown",

@@ -66,8 +66,9 @@ public sealed class PlaylistInfo : INotifyPropertyChanged
     }
     public string DurationLabel => Duration.ToString(@"hh\:mm\:ss");
     public string ChapterCountLabel => LanguageService.T($"{ChapterStarts.Count}チャプター");
-    public bool IsRepeatedShortClipLoop => ChapterStarts.Count == 1 && Clips.Count >= 20 &&
-        Clips.All(clip => clip.Id == Clips[0].Id && clip.OutTicks - clip.InTicks <= 60 * 45000);
+    public bool IsRepeatedShortClipLoop => Clips.Count >= 16 &&
+        Clips.Count >= Clips.Select(clip => clip.Id).Distinct().Count() * 4 &&
+        Clips.All(clip => clip.OutTicks - clip.InTicks <= 125L * 45000);
     public string? ChapterTitle(int number) => number >= 1 && number <= ChapterTitles.Count &&
         !string.IsNullOrWhiteSpace(ChapterTitles[number - 1]) ? ChapterTitles[number - 1]!.Trim() : null;
     public string ChapterSummary

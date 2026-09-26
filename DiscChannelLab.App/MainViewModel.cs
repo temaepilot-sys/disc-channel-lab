@@ -461,14 +461,32 @@ public sealed class MainViewModel : INotifyPropertyChanged
                 playlist.TitleName = _editStore.LoadTitleName(_disc, playlist) ?? playlist.TitleName;
                 Playlists.Add(playlist);
             }
-            var ambiguous = Playlists.Count > 1 &&
+            var ambiguous = Playlists.Count > 1 && !Playlists[1].IsRepeatedShortClipLoop &&
                             Playlists[1].DurationTicks >= Playlists[0].DurationTicks * 0.95 &&
                             Math.Abs(Playlists[0].ChapterStarts.Count - Playlists[1].ChapterStarts.Count) <= 2;
-            SelectedPlaylist = Playlists.FirstOrDefault(playlist =>
+            var preferred = Playlists.FirstOrDefault(playlist =>
                 _editStore.Load(_disc, playlist) is not null ||
                 _editStore.LoadChapterTitles(_disc, playlist) is not null ||
-                _editStore.LoadTitleName(_disc, playlist) is not null) ?? Playlists.FirstOrDefault();
-            if (SelectedPlaylist is not null) await LoadPlaylistCoreAsync(SelectedPlaylist, _work.Token);
+                _editStore.LoadTitleName(_disc, playlist) is not null);
+            var candidates = preferred is null ? Playlists.AsEnumerable() :
+                new[] { preferred }.Concat(Playlists.Where(playlist => playlist != preferred));
+            InvalidDataException? unavailable = null;
+            foreach (var playlist in candidates)
+            {
+                SelectedPlaylist = playlist;
+                try
+                {
+                    await LoadPlaylistCoreAsync(playlist, _work.Token);
+                    unavailable = null;
+                    break;
+                }
+                catch (InvalidDataException ex)
+                {
+                    unavailable = ex;
+                    _log.Write($"Title {playlist.Id:00000} unavailable: {ex.Message}");
+                }
+            }
+            if (unavailable is not null) throw unavailable;
             Status = PlaylistStatus(ambiguous);
         }
         catch (Exception ex) { HandleError(ex); }

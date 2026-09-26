@@ -799,7 +799,7 @@ if (args[0] == "ui-scan")
     Console.WriteLine($"UI: {model.AlbumTitle}, {model.Playlists.Count} titles, {model.Tracks.Count} tracks, {model.Streams.Count} streams, canSave={model.CanConvert}, status={model.Status}");
     if (model.Playlists.Count == 0 || model.Tracks.Count == 0 || model.Streams.Count == 0)
         throw new InvalidDataException("画面用モデルに曲を表示できませんでした。");
-    foreach (var title in model.Playlists.Skip(1))
+    foreach (var title in model.Playlists.Skip(1).Where(title => !title.IsRepeatedShortClipLoop))
     {
         await model.ChoosePlaylistAsync(title);
         Console.WriteLine($"  {title.TitleLabel}: {model.Tracks.Count} tracks / {model.Streams.Count} streams");
@@ -824,7 +824,8 @@ if (args[0] is "convert-bd-stereo" or "convert-bd-individual" or "preview-bd" or
         try
         {
             var (candidateStreams, _) = await reader.AnalyzePlaylistAsync(disc, candidate, CancellationToken.None);
-            selectedStream = candidateStreams.FirstOrDefault(StereoMixSettings.Supports);
+            selectedStream = candidateStreams.FirstOrDefault(StereoMixSettings.Supports) ??
+                (args[0] == "preview-bd" ? candidateStreams.FirstOrDefault() : null);
             if (selectedStream is null) continue;
             selectedPlaylist = candidate;
             break;
@@ -833,7 +834,10 @@ if (args[0] is "convert-bd-stereo" or "convert-bd-individual" or "preview-bd" or
     }
     if (selectedPlaylist is null || selectedStream is null)
         throw new InvalidDataException("多チャンネルの BD 音声が見つかりません。");
-    var first = selectedPlaylist.ChapterStarts[0];
+    var previewChapter = args[0].StartsWith("preview-bd", StringComparison.Ordinal) &&
+        args.Length >= 3 && int.TryParse(args[2], out var requestedChapter)
+        ? Math.Clamp(requestedChapter, 1, selectedPlaylist.ChapterStarts.Count) : 1;
+    var first = selectedPlaylist.ChapterStarts[previewChapter - 1];
     if (args[0].StartsWith("preview-bd", StringComparison.Ordinal))
     {
         Environment.SetEnvironmentVariable("SDL_AUDIODRIVER", "dummy");
@@ -842,8 +846,10 @@ if (args[0] is "convert-bd-stereo" or "convert-bd-individual" or "preview-bd" or
         double? decoderStartedAfter = null;
         var maxAudioClock = 0d;
         var meterFrameCount = 0;
+        var end = Math.Min(selectedPlaylist.DurationTicks, first + 2 * 45000);
+        Console.WriteLine($"Chapter {previewChapter}: {first / 45000d:0.000}s to {end / 45000d:0.000}s");
         await navigation.PlayAsync(disc, selectedPlaylist, selectedStream, first,
-            first + 2 * 45000, CancellationToken.None,
+            end, CancellationToken.None,
             segmentStarted: _ => decoderStartedAfter ??= playbackTimer.Elapsed.TotalSeconds,
             volume: () => 1.5,
             soloChannel: args[0].EndsWith("-solo", StringComparison.Ordinal) ? "FC" : null,
@@ -852,6 +858,7 @@ if (args[0] is "convert-bd-stereo" or "convert-bd-individual" or "preview-bd" or
         if (decoderStartedAfter is null || maxAudioClock < 1.5 || meterFrameCount < 50)
             throw new InvalidDataException($"Playback clock or channel meters were unavailable: {maxAudioClock:0.00}s, {meterFrameCount} frames.");
         Console.WriteLine($"BD preview completed: {selectedPlaylist.DisplayName} / {selectedStream.DisplayName}; " +
+            $"chapter {previewChapter}; " +
             $"first PCM at {decoderStartedAfter:0.00}s, audio clock {maxAudioClock:0.00}s, " +
             $"meter frames {meterFrameCount}, completed in {playbackTimer.Elapsed.TotalSeconds:0.00}s");
         return 0;
@@ -872,10 +879,17 @@ if (args[0] is "convert-bd-stereo" or "convert-bd-individual" or "preview-bd" or
 }
 foreach (var title in disc.Playlists)
 {
-    Console.WriteLine($"  {title.DisplayName}");
-    var (streams, tracks) = await reader.AnalyzePlaylistAsync(disc, title, CancellationToken.None);
-    foreach (var stream in streams) Console.WriteLine($"    {stream.DisplayName}");
-    Console.WriteLine($"    {tracks.Count} tracks");
+    Console.WriteLine($"  {title.DisplayName} [MPLS {title.Id:00000}; clips={title.Clips.Count}; " +
+                      $"unique={title.Clips.Select(clip => clip.Id).Distinct().Count()}; " +
+                      $"max={title.Clips.Max(clip => (clip.OutTicks - clip.InTicks) / 45000d):0.#}s; " +
+                      $"first={title.Clips.FirstOrDefault()?.Id}]");
+    try
+    {
+        var (streams, tracks) = await reader.AnalyzePlaylistAsync(disc, title, CancellationToken.None);
+        foreach (var stream in streams) Console.WriteLine($"    {stream.DisplayName}");
+        Console.WriteLine($"    {tracks.Count} tracks");
+    }
+    catch (InvalidDataException ex) { Console.WriteLine($"    Unavailable: {ex.Message}"); }
 }
 if (args[0] == "scan") return 0;
 if (args[0] == "silence")

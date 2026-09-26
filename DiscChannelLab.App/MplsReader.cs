@@ -79,6 +79,11 @@ public static class MplsReader
             if (absolute > 0 && absolute < position) chapterStarts.Add(absolute);
         }
 
+        // Some discs place a final entry mark less than one second before the end.
+        // Merge that tail into the previous chapter so it remains playable and exportable.
+        if (chapterStarts.Count > 1 && position - chapterStarts.Max < TicksPerSecond)
+            chapterStarts.Remove(chapterStarts.Max);
+
         if (position < TicksPerSecond) throw new InvalidDataException("再生時間が短すぎます。");
         return new PlaylistInfo { Id = id, Clips = clips, ChapterStarts = chapterStarts.ToArray(), DurationTicks = position };
     }

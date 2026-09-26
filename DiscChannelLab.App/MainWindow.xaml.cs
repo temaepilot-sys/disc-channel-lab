@@ -17,7 +17,7 @@ public partial class MainWindow : Window
     private bool _switchingMixPreview;
     private readonly DispatcherTimer _driveTimer = new() { Interval = TimeSpan.FromSeconds(3) };
     private readonly DispatcherTimer _playTimer = new() { Interval = TimeSpan.FromMilliseconds(30) };
-    private readonly DispatcherTimer _mixTimer = new() { Interval = TimeSpan.FromMilliseconds(180) };
+    private readonly DispatcherTimer _mixTimer = new() { Interval = TimeSpan.FromMilliseconds(50) };
 
     public MainWindow()
     {

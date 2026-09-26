@@ -59,6 +59,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private bool _lfeMixMuted;
     private StereoMixSettings? _activePlaybackMix;
     private string? _activePreviewChannel;
+    private PreviewMixState _livePreviewMix = new(StereoMixSettings.Default, null);
     private bool _suspendEditSave;
 
     public ObservableCollection<string> Sources { get; } = [];
@@ -738,6 +739,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         var previewChannel = SelectedPreviewChannel?.Code;
         _activePlaybackMix = mix;
         _activePreviewChannel = previewChannel;
+        Volatile.Write(ref _livePreviewMix, new PreviewMixState(mix, previewChannel));
         var start = track.StartTicks + (long)Math.Round(PreviewSeconds * 45000, MidpointRounding.AwayFromZero);
         var session = new CancellationTokenSource();
         _playback = session;
@@ -784,7 +786,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
                         _playClock.Restart();
                         AdvancePlaybackClock();
                     }, null);
-                });
+                }, () => Volatile.Read(ref _livePreviewMix));
             if (ReferenceEquals(_playback, session) && IsPlaying)
             {
                 completed = true;
@@ -850,6 +852,14 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public async Task ChangePreviewChannelAsync()
     {
         if (!IsPlaying) return;
+        if (SelectedStream is { } stream && StereoMixSettings.Supports(stream))
+        {
+            _activePreviewChannel = SelectedPreviewChannel?.Code;
+            Volatile.Write(ref _livePreviewMix, new PreviewMixState(CurrentMix, _activePreviewChannel));
+            _log.Write($"PREVIEW MIX channel={_activePreviewChannel ?? "stereo"} " +
+                       $"mix={CurrentMix.Center:0.###}/{CurrentMix.Surround:0.###}/{CurrentMix.Lfe:0.###}");
+            return;
+        }
         AdvancePlaybackClock();
         await SeekAsync(PreviewSeconds);
     }
@@ -858,6 +868,15 @@ public sealed class MainViewModel : INotifyPropertyChanged
     {
         if (!IsPlaying) return;
         if (CurrentMix == _activePlaybackMix && SelectedPreviewChannel?.Code == _activePreviewChannel) return;
+        if (SelectedStream is { } stream && StereoMixSettings.Supports(stream))
+        {
+            _activePlaybackMix = CurrentMix;
+            _activePreviewChannel = SelectedPreviewChannel?.Code;
+            Volatile.Write(ref _livePreviewMix, new PreviewMixState(_activePlaybackMix, _activePreviewChannel));
+            _log.Write($"PREVIEW MIX channel={_activePreviewChannel ?? "stereo"} " +
+                       $"mix={_activePlaybackMix.Center:0.###}/{_activePlaybackMix.Surround:0.###}/{_activePlaybackMix.Lfe:0.###}");
+            return;
+        }
         AdvancePlaybackClock();
         await SeekAsync(PreviewSeconds);
     }

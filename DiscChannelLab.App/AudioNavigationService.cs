@@ -22,7 +22,8 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
         long startTicks, long endTicks, CancellationToken token, Action<long>? segmentStarted = null,
         Func<double>? volume = null, StereoMixSettings? mix = null, string? soloChannel = null,
         Action<long, double, double[], double[]>? channelLevels = null,
-        Action<long, double>? playbackPosition = null)
+        Action<long, double>? playbackPosition = null,
+        Func<PreviewMixState>? liveMix = null)
     {
         var ffplay = paths.Ffplay ?? throw new FileNotFoundException("再生用の ffplay.exe が見つかりません。");
         mix ??= StereoMixSettings.Default;
@@ -30,7 +31,7 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
         if (playlist.Format != DiscFormat.BluRay)
         {
             await PlayDvdAsync(ffplay, disc, playlist, stream, startTicks, endTicks,
-                token, segmentStarted, volume ?? (() => 1), mix, soloChannel, channelLevels, playbackPosition);
+                token, segmentStarted, volume ?? (() => 1), mix, soloChannel, channelLevels, playbackPosition, liveMix);
             return;
         }
         foreach (var segment in PlaylistSegments.ForRange(playlist, startTicks, endTicks))
@@ -39,7 +40,7 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
             var (sourcePath, seekTicks) = await GetSourceAsync(disc, stream, segment, token);
             await PlaySegmentAsync(ffplay, sourcePath, stream, seekTicks, segment.EndTicks - segment.StartTicks,
                 token, () => segmentStarted?.Invoke(segment.StartTicks), volume ?? (() => 1), mix, soloChannel,
-                segment.StartTicks, channelLevels, playbackPosition);
+                segment.StartTicks, channelLevels, playbackPosition, liveMix);
         }
     }
 
@@ -65,7 +66,8 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
     private async Task PlayDvdAsync(string ffplay, DiscAnalysis disc, PlaylistInfo playlist,
         AudioStreamInfo stream, long startTicks, long endTicks, CancellationToken token,
         Action<long>? segmentStarted, Func<double> volume, StereoMixSettings mix, string? soloChannel,
-        Action<long, double, double[], double[]>? channelLevels, Action<long, double>? playbackPosition)
+        Action<long, double, double[], double[]>? channelLevels, Action<long, double>? playbackPosition,
+        Func<PreviewMixState>? liveMix)
     {
         var inputArgs = new List<string>();
         Func<Stream, CancellationToken, Task>? writeInput = null;
@@ -94,9 +96,13 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
         else throw new InvalidDataException("DVD の再生元がありません。");
         var skipSamples = ConversionService.ToSample(startTicks - sourceStart, 48000);
         var sampleCount = ConversionService.ToSample(endTicks - startTicks, 48000);
+        var liveChannels = liveMix is not null && StereoMixSettings.Supports(stream);
         var filter = $"aresample=48000:osf=s16,atrim=start_sample={skipSamples}:end_sample={skipSamples + sampleCount},asetpts=PTS-STARTPTS";
-        if (soloChannel is not null) filter = StereoMixSettings.SoloFilter(stream, soloChannel, stereo: true) + "," + filter;
-        else if (StereoMixSettings.Supports(stream)) filter = mix.PanFilter(stream) + "," + filter;
+        if (!liveChannels)
+        {
+            if (soloChannel is not null) filter = StereoMixSettings.SoloFilter(stream, soloChannel, stereo: true) + "," + filter;
+            else if (StereoMixSettings.Supports(stream)) filter = mix.PanFilter(stream) + "," + filter;
+        }
         var outputArgs = new List<string>();
         if (channelLevels is null)
             outputArgs.AddRange(["-map", $"0:{stream.Index}", "-af", filter]);
@@ -107,8 +113,10 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
                 $"[0:{stream.Index}]asplit=2[levels_in][play_in];[levels_in]{analysis},anullsink;[play_in]{filter}[audio_out]",
                 "-map", "[audio_out]"]);
         }
-        outputArgs.AddRange(["-vn", "-sn", "-dn", "-ac", "2", "-c:a", "pcm_s16le",
+        outputArgs.AddRange(["-vn", "-sn", "-dn", "-ac", liveChannels ? stream.Channels.ToString() : "2",
+            "-c:a", "pcm_s16le",
             "-t", Seconds(endTicks - startTicks), "-f", "s16le", "pipe:1"]);
+        if (liveChannels) outputArgs.InsertRange(outputArgs.Count - 3, ["-ch_layout", stream.ChannelLayout]);
         var decodeInfo = new ProcessStartInfo(paths.Ffmpeg)
         {
             UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = writeInput is not null,
@@ -148,17 +156,24 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
                 : ReadPlayerClockAsync(player.StandardError, startTicks, playbackPosition, token);
             var inputTask = writeInput is null ? Task.CompletedTask : FeedAsync();
             long submittedBytes;
-            try { submittedBytes = await CopyPcmWithVolumeAsync(decoder.StandardOutput.BaseStream, player.StandardInput.BaseStream,
-                volume, token, () => segmentStarted?.Invoke(startTicks)); }
+            try
+            {
+                submittedBytes = liveChannels
+                    ? await StereoPreviewMixer.CopyAsync(decoder.StandardOutput.BaseStream, player.StandardInput.BaseStream,
+                        stream, liveMix!, volume, token, () => segmentStarted?.Invoke(startTicks))
+                    : await CopyPcmWithVolumeAsync(decoder.StandardOutput.BaseStream, player.StandardInput.BaseStream,
+                        volume, token, () => segmentStarted?.Invoke(startTicks));
+            }
             finally { player.StandardInput.Close(); }
             await inputTask;
             await decoder.WaitForExitAsync(token);
             await player.WaitForExitAsync(token);
             var errors = (await decodeError) + (await playError);
-            var expectedBytes = sampleCount * 2 * sizeof(short);
+            var expectedBytes = sampleCount * (liveChannels ? stream.Channels : 2) * sizeof(short);
+            var halfSecondBytes = 48000 * (liveChannels ? stream.Channels : 2) * sizeof(short) / 2;
             if (decoder.ExitCode != 0 && player.ExitCode == 0 &&
                 submittedBytes >= expectedBytes / 2 &&
-                expectedBytes - submittedBytes <= 48000 * 2 * sizeof(short) / 2)
+                expectedBytes - submittedBytes <= halfSecondBytes)
             {
                 // Some DVD streams end with a damaged packet just before a chapter boundary.
                 // The preview has already played almost all requested audio, so allow the next track.
@@ -192,12 +207,17 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
     private async Task PlaySegmentAsync(string ffplay, string sourcePath, AudioStreamInfo stream, long seekTicks,
         long durationTicks, CancellationToken token, Action onStarted, Func<double> volume,
         StereoMixSettings mix, string? soloChannel, long segmentStartTicks,
-        Action<long, double, double[], double[]>? channelLevels, Action<long, double>? playbackPosition)
+        Action<long, double, double[], double[]>? channelLevels, Action<long, double>? playbackPosition,
+        Func<PreviewMixState>? liveMix)
     {
         var samples = (long)Math.Round(durationTicks * 48000d / 45000d, MidpointRounding.AwayFromZero);
+        var liveChannels = liveMix is not null && StereoMixSettings.Supports(stream);
         var filter = $"aresample=48000:osf=s16,atrim=end_sample={samples},asetpts=PTS-STARTPTS";
-        if (soloChannel is not null) filter = StereoMixSettings.SoloFilter(stream, soloChannel, stereo: true) + "," + filter;
-        else if (StereoMixSettings.Supports(stream)) filter = mix.PanFilter(stream) + "," + filter;
+        if (!liveChannels)
+        {
+            if (soloChannel is not null) filter = StereoMixSettings.SoloFilter(stream, soloChannel, stereo: true) + "," + filter;
+            else if (StereoMixSettings.Supports(stream)) filter = mix.PanFilter(stream) + "," + filter;
+        }
         var outputArgs = new List<string>();
         if (channelLevels is null)
             outputArgs.AddRange(["-map", $"0:{stream.Index}", "-af", filter]);
@@ -208,7 +228,9 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
                 $"[0:{stream.Index}]asplit=2[levels_in][play_in];[levels_in]{analysis},anullsink;[play_in]{filter}[audio_out]",
                 "-map", "[audio_out]"]);
         }
-        outputArgs.AddRange(["-vn", "-sn", "-dn", "-ac", "2", "-c:a", "pcm_s16le", "-f", "s16le", "pipe:1"]);
+        outputArgs.AddRange(["-vn", "-sn", "-dn", "-ac", liveChannels ? stream.Channels.ToString() : "2",
+            "-c:a", "pcm_s16le", "-f", "s16le", "pipe:1"]);
+        if (liveChannels) outputArgs.InsertRange(outputArgs.Count - 3, ["-ch_layout", stream.ChannelLayout]);
         var decodeInfo = new ProcessStartInfo(paths.Ffmpeg)
         {
             UseShellExecute = false, CreateNoWindow = true,
@@ -253,8 +275,15 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
                 : ReadLevelLogAsync(decoder.StandardError, stream.Channels, segmentStartTicks, channelLevels, token);
             var playError = playbackPosition is null ? player.StandardError.ReadToEndAsync(token)
                 : ReadPlayerClockAsync(player.StandardError, segmentStartTicks, playbackPosition, token);
-            try { await CopyPcmWithVolumeAsync(decoder.StandardOutput.BaseStream, player.StandardInput.BaseStream,
-                volume, token, onStarted); }
+            try
+            {
+                if (liveChannels)
+                    await StereoPreviewMixer.CopyAsync(decoder.StandardOutput.BaseStream, player.StandardInput.BaseStream,
+                        stream, liveMix!, volume, token, onStarted);
+                else
+                    await CopyPcmWithVolumeAsync(decoder.StandardOutput.BaseStream, player.StandardInput.BaseStream,
+                        volume, token, onStarted);
+            }
             finally { player.StandardInput.Close(); }
             await decoder.WaitForExitAsync(token);
             await player.WaitForExitAsync(token);

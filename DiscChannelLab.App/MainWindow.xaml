@@ -310,7 +310,7 @@
                                           VerticalAlignment="Center" Margin="8,0,0,0"/>
                                 <TextBlock DockPanel.Dock="Right" Text="%" VerticalAlignment="Center" Margin="2,0,0,0"/>
                                 <TextBox x:Name="CenterMixInput" DockPanel.Dock="Right" Width="55" HorizontalContentAlignment="Right"
-                                         Text="{Binding CenterMixPercent, Mode=TwoWay, UpdateSourceTrigger=LostFocus, StringFormat={}{0:0.##}, ValidatesOnExceptions=True}"
+                                         Text="{Binding CenterMixPercent, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Delay=150, StringFormat={}{0:0.##}, ValidatesOnExceptions=True}"
                                          LostFocus="MixInput_LostFocus" KeyDown="MixInput_KeyDown"/>
                                 <Slider x:Name="CenterMixSlider" Minimum="0" Maximum="100" TickFrequency="1"
                                         ValueChanged="MixSlider_ValueChanged"
@@ -324,7 +324,7 @@
                                           VerticalAlignment="Center" Margin="8,0,0,0"/>
                                 <TextBlock DockPanel.Dock="Right" Text="%" VerticalAlignment="Center" Margin="2,0,0,0"/>
                                 <TextBox x:Name="SurroundMixInput" DockPanel.Dock="Right" Width="55" HorizontalContentAlignment="Right"
-                                         Text="{Binding SurroundMixPercent, Mode=TwoWay, UpdateSourceTrigger=LostFocus, StringFormat={}{0:0.##}, ValidatesOnExceptions=True}"
+                                         Text="{Binding SurroundMixPercent, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Delay=150, StringFormat={}{0:0.##}, ValidatesOnExceptions=True}"
                                          LostFocus="MixInput_LostFocus" KeyDown="MixInput_KeyDown"/>
                                 <Slider x:Name="SurroundMixSlider" Minimum="0" Maximum="100" TickFrequency="1"
                                         ValueChanged="MixSlider_ValueChanged"
@@ -338,7 +338,7 @@
                                           VerticalAlignment="Center" Margin="8,0,0,0"/>
                                 <TextBlock DockPanel.Dock="Right" Text="%" VerticalAlignment="Center" Margin="2,0,0,0"/>
                                 <TextBox x:Name="LfeMixInput" DockPanel.Dock="Right" Width="55" HorizontalContentAlignment="Right"
-                                         Text="{Binding LfeMixPercent, Mode=TwoWay, UpdateSourceTrigger=LostFocus, StringFormat={}{0:0.##}, ValidatesOnExceptions=True}"
+                                         Text="{Binding LfeMixPercent, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Delay=150, StringFormat={}{0:0.##}, ValidatesOnExceptions=True}"
                                          LostFocus="MixInput_LostFocus" KeyDown="MixInput_KeyDown"/>
                                 <Slider x:Name="LfeMixSlider" Minimum="0" Maximum="100" TickFrequency="1"
                                         ValueChanged="MixSlider_ValueChanged"

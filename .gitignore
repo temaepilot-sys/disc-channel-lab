@@ -1,0 +1,25 @@
+# Build products and downloaded packages are local only.
+**/bin/
+**/obj/
+artifacts/
+offline-packages/
+verification-output/
+.vs/
+*.user
+*.suo
+
+# Never commit third-party tools, disc images, extracted media, or local logs.
+*.exe
+*.dll
+*.pdb
+*.nupkg
+*.iso
+*.ISO
+*.flac
+*.wav
+*.m2ts
+*.vob
+*.aob
+*.log
+tools/
+Trash/

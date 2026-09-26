@@ -1,0 +1,426 @@
+using System.Buffers.Binary;
+using System.Diagnostics;
+using System.Globalization;
+using System.Text;
+using System.Text.RegularExpressions;
+
+namespace Disc2Flac;
+
+public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner, FfprobeService probe, AppLog log)
+{
+    private static readonly Regex SilenceEvent = new(@"silence_(start|end):\s*([0-9]+(?:\.[0-9]+)?)", RegexOptions.Compiled);
+    private const string MeterFilter = "asetnsamples=n=4800:p=0,astats=metadata=1:reset=1:measure_perchannel=Peak_level+RMS_level:measure_overall=none,ametadata=mode=print";
+    private readonly Dictionary<string, AudioStreamInfo> _clipCache = new(StringComparer.OrdinalIgnoreCase);
+    private bool? _meterFiltersAvailable;
+
+    public bool CanPlay => paths.Ffplay is not null;
+    public void ClearCache() => _clipCache.Clear();
+
+    public async Task PlayAsync(DiscAnalysis disc, PlaylistInfo playlist, AudioStreamInfo stream,
+        long startTicks, long endTicks, CancellationToken token, Action<long>? segmentStarted = null,
+        Func<double>? volume = null, StereoMixSettings? mix = null, string? soloChannel = null,
+        Action<long, double, double[], double[]>? channelLevels = null)
+    {
+        var ffplay = paths.Ffplay ?? throw new FileNotFoundException("再生用の ffplay.exe が見つかりません。");
+        mix ??= StereoMixSettings.Default;
+        if (channelLevels is not null && !await MeterFiltersAvailableAsync(token)) channelLevels = null;
+        if (playlist.Format != DiscFormat.BluRay)
+        {
+            await PlayDvdAsync(ffplay, disc, playlist, stream, startTicks, endTicks,
+                token, segmentStarted, volume ?? (() => 1), mix, soloChannel, channelLevels);
+            return;
+        }
+        foreach (var segment in PlaylistSegments.ForRange(playlist, startTicks, endTicks))
+        {
+            token.ThrowIfCancellationRequested();
+            var (sourcePath, seekTicks) = await GetSourceAsync(disc, stream, segment, token);
+            await PlaySegmentAsync(ffplay, sourcePath, stream, seekTicks, segment.EndTicks - segment.StartTicks,
+                token, () => segmentStarted?.Invoke(segment.StartTicks), volume ?? (() => 1), mix, soloChannel,
+                segment.StartTicks, channelLevels);
+        }
+    }
+
+    private async Task<bool> MeterFiltersAvailableAsync(CancellationToken token)
+    {
+        if (_meterFiltersAvailable is { } cached) return cached;
+        try
+        {
+            var filters = (await runner.RunAsync(paths.Ffmpeg, ["-hide_banner", "-filters"], token)).Output;
+            _meterFiltersAvailable = Regex.IsMatch(filters, @"(?m)^\s*[TSC\.]{2,3}\s+astats\s") &&
+                Regex.IsMatch(filters, @"(?m)^\s*[TSC\.]{2,3}\s+ametadata\s");
+        }
+        catch (Exception ex) when (ex is FfToolException or IOException)
+        {
+            _meterFiltersAvailable = false;
+            log.Write($"Channel meter unavailable: {ex.Message}");
+        }
+        if (_meterFiltersAvailable == false)
+            log.Write("Channel meter unavailable: FFmpeg astats/ametadata filters are missing; preview continues without meters.");
+        return _meterFiltersAvailable.Value;
+    }
+
+    private async Task PlayDvdAsync(string ffplay, DiscAnalysis disc, PlaylistInfo playlist,
+        AudioStreamInfo stream, long startTicks, long endTicks, CancellationToken token,
+        Action<long>? segmentStarted, Func<double> volume, StereoMixSettings mix, string? soloChannel,
+        Action<long, double, double[], double[]>? channelLevels)
+    {
+        var inputArgs = new List<string>();
+        Func<Stream, CancellationToken, Task>? writeInput = null;
+        long sourceStart;
+        if (playlist.Format == DiscFormat.DvdAudio && playlist.DvdAudio is { } audio)
+        {
+            var range = DvdAudioSectors.Range(audio, startTicks, endTicks);
+            sourceStart = startTicks - range.SkipTicks;
+            inputArgs.AddRange(["-f", "mpeg", "-probesize", "4000000", "-analyzeduration", "10000000", "-i", "pipe:0"]);
+            writeInput = (input, ct) => DvdAudioSectors.CopyAsync(disc.Root, audio.TitleSet,
+                range.FirstSector, range.LastSector, input, ct);
+        }
+        else if (playlist.Format == DiscFormat.DvdVideo)
+        {
+            var first = 1;
+            var last = 1;
+            for (var i = 0; i < playlist.ChapterStarts.Count; i++)
+            {
+                if (playlist.ChapterStarts[i] <= startTicks) first = i + 1;
+                if (playlist.ChapterStarts[i] < endTicks) last = i + 1;
+            }
+            sourceStart = playlist.ChapterStarts[first - 1];
+            inputArgs.AddRange(["-f", "dvdvideo", "-title", playlist.DvdVideoTitle.ToString(),
+                "-chapter_start", first.ToString(), "-chapter_end", last.ToString(), "-i", disc.Root]);
+        }
+        else throw new InvalidDataException("DVD の再生元がありません。");
+        var skipSamples = ConversionService.ToSample(startTicks - sourceStart, 48000);
+        var sampleCount = ConversionService.ToSample(endTicks - startTicks, 48000);
+        var filter = $"aresample=48000:osf=s16,atrim=start_sample={skipSamples}:end_sample={skipSamples + sampleCount},asetpts=PTS-STARTPTS";
+        if (soloChannel is not null) filter = StereoMixSettings.SoloFilter(stream, soloChannel, stereo: true) + "," + filter;
+        else if (StereoMixSettings.Supports(stream)) filter = mix.PanFilter(stream) + "," + filter;
+        var outputArgs = new List<string>();
+        if (channelLevels is null)
+            outputArgs.AddRange(["-map", $"0:{stream.Index}", "-af", filter]);
+        else
+        {
+            var analysis = $"aresample=48000,atrim=start_sample={skipSamples}:end_sample={skipSamples + sampleCount},asetpts=PTS-STARTPTS,{MeterFilter}";
+            outputArgs.AddRange(["-filter_complex",
+                $"[0:{stream.Index}]asplit=2[levels_in][play_in];[levels_in]{analysis},anullsink;[play_in]{filter}[audio_out]",
+                "-map", "[audio_out]"]);
+        }
+        outputArgs.AddRange(["-vn", "-sn", "-dn", "-ac", "2", "-c:a", "pcm_s16le", "-f", "s16le", "pipe:1"]);
+        var decodeInfo = new ProcessStartInfo(paths.Ffmpeg)
+        {
+            UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = writeInput is not null,
+            RedirectStandardOutput = true, RedirectStandardError = true
+        };
+        foreach (var argument in new[] { "-hide_banner", "-v", channelLevels is null ? "error" : "info" }
+                     .Concat(inputArgs).Concat(outputArgs)) decodeInfo.ArgumentList.Add(argument);
+        var playInfo = new ProcessStartInfo(ffplay)
+        {
+            UseShellExecute = false, CreateNoWindow = true,
+            RedirectStandardInput = true, RedirectStandardError = true
+        };
+        foreach (var argument in new[] { "-nodisp", "-autoexit", "-nostats", "-loglevel", "error",
+                     "-fflags", "nobuffer", "-flags", "low_delay", "-probesize", "32", "-max_delay", "0",
+                     "-f", "s16le", "-sample_rate", "48000", "-ch_layout", "stereo", "-i", "pipe:0" })
+            playInfo.ArgumentList.Add(argument);
+        log.Write($"DVD PREVIEW {playlist.DisplayName} {startTicks / 45000d:0.###}-{endTicks / 45000d:0.###}");
+        using var player = new Process { StartInfo = playInfo };
+        using var decoder = new Process { StartInfo = decodeInfo };
+        if (!player.Start()) throw new IOException("音声プレーヤーを起動できません。");
+        var decoderStarted = false;
+        try
+        {
+            decoderStarted = decoder.Start();
+            if (!decoderStarted) throw new IOException("音声デコーダーを起動できません。");
+            using var registration = token.Register(() =>
+            {
+                try { if (!decoder.HasExited) decoder.Kill(entireProcessTree: true); } catch (InvalidOperationException) { }
+                try { if (!player.HasExited) player.Kill(entireProcessTree: true); } catch (InvalidOperationException) { }
+            });
+            var decodeError = channelLevels is null
+                ? decoder.StandardError.ReadToEndAsync(token)
+                : ReadLevelLogAsync(decoder.StandardError, stream.Channels, startTicks, channelLevels, token);
+            var playError = player.StandardError.ReadToEndAsync(token);
+            var inputTask = writeInput is null ? Task.CompletedTask : FeedAsync();
+            segmentStarted?.Invoke(startTicks);
+            try { await CopyPcmWithVolumeAsync(decoder.StandardOutput.BaseStream, player.StandardInput.BaseStream, volume, token); }
+            finally { player.StandardInput.Close(); }
+            await inputTask;
+            await decoder.WaitForExitAsync(token);
+            await player.WaitForExitAsync(token);
+            var errors = (await decodeError) + (await playError);
+            if (decoder.ExitCode != 0 || player.ExitCode != 0)
+                throw new FfToolException(string.IsNullOrWhiteSpace(errors) ? "DVD の試聴に失敗しました。" : errors);
+            async Task FeedAsync()
+            {
+                try { await writeInput!(decoder.StandardInput.BaseStream, token); }
+                catch (IOException ex) when ((ex.HResult & 0xffff) is 109 or 232)
+                {
+                    // FFmpeg can stop reading once the requested sample range has been decoded.
+                }
+                finally { decoder.StandardInput.Close(); }
+            }
+        }
+        finally
+        {
+            if (decoderStarted && !decoder.HasExited) decoder.Kill(entireProcessTree: true);
+            if (!player.HasExited) player.Kill(entireProcessTree: true);
+        }
+    }
+
+    private async Task PlaySegmentAsync(string ffplay, string sourcePath, AudioStreamInfo stream, long seekTicks,
+        long durationTicks, CancellationToken token, Action onStarted, Func<double> volume,
+        StereoMixSettings mix, string? soloChannel, long segmentStartTicks,
+        Action<long, double, double[], double[]>? channelLevels)
+    {
+        var samples = (long)Math.Round(durationTicks * 48000d / 45000d, MidpointRounding.AwayFromZero);
+        var filter = $"aresample=48000:osf=s16,atrim=end_sample={samples},asetpts=PTS-STARTPTS";
+        if (soloChannel is not null) filter = StereoMixSettings.SoloFilter(stream, soloChannel, stereo: true) + "," + filter;
+        else if (StereoMixSettings.Supports(stream)) filter = mix.PanFilter(stream) + "," + filter;
+        var outputArgs = new List<string>();
+        if (channelLevels is null)
+            outputArgs.AddRange(["-map", $"0:{stream.Index}", "-af", filter]);
+        else
+        {
+            var analysis = $"aresample=48000,atrim=end_sample={samples},asetpts=PTS-STARTPTS,{MeterFilter}";
+            outputArgs.AddRange(["-filter_complex",
+                $"[0:{stream.Index}]asplit=2[levels_in][play_in];[levels_in]{analysis},anullsink;[play_in]{filter}[audio_out]",
+                "-map", "[audio_out]"]);
+        }
+        outputArgs.AddRange(["-vn", "-sn", "-dn", "-ac", "2", "-c:a", "pcm_s16le", "-f", "s16le", "pipe:1"]);
+        var decodeInfo = new ProcessStartInfo(paths.Ffmpeg)
+        {
+            UseShellExecute = false, CreateNoWindow = true,
+            RedirectStandardOutput = true, RedirectStandardError = true
+        };
+        foreach (var argument in new[]
+        {
+            "-hide_banner", "-nostdin", "-v", channelLevels is null ? "error" : "info", "-ss", Seconds(seekTicks),
+            "-t", Seconds(durationTicks + 4500), "-i", sourcePath
+        }.Concat(outputArgs)) decodeInfo.ArgumentList.Add(argument);
+        var playInfo = new ProcessStartInfo(ffplay)
+        {
+            UseShellExecute = false, CreateNoWindow = true,
+            RedirectStandardInput = true, RedirectStandardError = true
+        };
+        foreach (var argument in new[]
+        {
+            "-nodisp", "-autoexit", "-nostats", "-loglevel", "error",
+            "-fflags", "nobuffer", "-flags", "low_delay", "-probesize", "32", "-max_delay", "0", "-f", "s16le",
+            "-sample_rate", "48000", "-ch_layout", "stereo", "-i", "pipe:0"
+        }) playInfo.ArgumentList.Add(argument);
+
+        log.Write($"PREVIEW {Path.GetFileName(sourcePath)} seek={Seconds(seekTicks)} duration={Seconds(durationTicks)}");
+        using var player = new Process { StartInfo = playInfo };
+        using var decoder = new Process { StartInfo = decodeInfo };
+        if (!player.Start()) throw new IOException("音声プレーヤーを起動できません。");
+        var decoderStarted = false;
+        try
+        {
+            decoderStarted = decoder.Start();
+            if (!decoderStarted) throw new IOException("音声デコーダーを起動できません。");
+            using var registration = token.Register(() =>
+            {
+                try { if (!decoder.HasExited) decoder.Kill(entireProcessTree: true); } catch (InvalidOperationException) { }
+                try { if (!player.HasExited) player.Kill(entireProcessTree: true); } catch (InvalidOperationException) { }
+            });
+            token.ThrowIfCancellationRequested();
+            onStarted();
+            var decodeError = channelLevels is null
+                ? decoder.StandardError.ReadToEndAsync(token)
+                : ReadLevelLogAsync(decoder.StandardError, stream.Channels, segmentStartTicks, channelLevels, token);
+            var playError = player.StandardError.ReadToEndAsync(token);
+            try { await CopyPcmWithVolumeAsync(decoder.StandardOutput.BaseStream, player.StandardInput.BaseStream, volume, token); }
+            finally { player.StandardInput.Close(); }
+            await decoder.WaitForExitAsync(token);
+            await player.WaitForExitAsync(token);
+            var errors = (await decodeError) + (await playError);
+            if (decoder.ExitCode != 0 || player.ExitCode != 0)
+                throw new FfToolException(string.IsNullOrWhiteSpace(errors) ? "音声プレビューに失敗しました。" : errors);
+        }
+        finally
+        {
+            if (decoderStarted && !decoder.HasExited) decoder.Kill(entireProcessTree: true);
+            if (!player.HasExited) player.Kill(entireProcessTree: true);
+        }
+    }
+
+    private static async Task<string> ReadLevelLogAsync(StreamReader reader, int channelCount,
+        long segmentStartTicks, Action<long, double, double[], double[]> onLevels, CancellationToken token)
+    {
+        var parser = new ChannelLevelLogParser(channelCount, segmentStartTicks, onLevels);
+        var diagnostics = new StringBuilder();
+        string? line;
+        while ((line = await reader.ReadLineAsync(token).ConfigureAwait(false)) is not null)
+        {
+            if (parser.Consume(line)) continue;
+            if (diagnostics.Length < 16000) diagnostics.AppendLine(line);
+        }
+        parser.Flush();
+        return diagnostics.ToString();
+    }
+
+    public static async Task CopyPcmWithVolumeAsync(Stream source, Stream destination, Func<double> volume,
+        CancellationToken token)
+    {
+        const int bytesPerSecond = 48000 * 2 * sizeof(short);
+        const double maxQueuedSeconds = 0.06;
+        var clock = Stopwatch.StartNew();
+        var submittedBytes = 0L;
+        var buffer = new byte[4096];
+        var carried = 0;
+        var currentGain = SafeGain(volume());
+        var targetGain = currentGain;
+        var rampFrames = 0;
+        var rampStep = 0d;
+        int count;
+        while ((count = await source.ReadAsync(buffer.AsMemory(carried), token).ConfigureAwait(false)) > 0)
+        {
+            var available = count + carried;
+            var complete = available & ~3;
+            if (complete == 0) { carried = available; continue; }
+            var due = (submittedBytes + complete) / (double)bytesPerSecond - maxQueuedSeconds;
+            var wait = due - clock.Elapsed.TotalSeconds;
+            if (wait > 0) await Task.Delay(TimeSpan.FromSeconds(wait), token).ConfigureAwait(false);
+            var requestedGain = SafeGain(volume());
+            if (requestedGain != targetGain)
+            {
+                targetGain = requestedGain;
+                rampFrames = 480; // Smooth changes over 10 ms at 48 kHz.
+                rampStep = (targetGain - currentGain) / rampFrames;
+            }
+            if (currentGain != 1 || rampFrames > 0)
+            {
+                for (var i = 0; i < complete; i += 4)
+                {
+                    if (rampFrames > 0)
+                    {
+                        currentGain += rampStep;
+                        if (--rampFrames == 0) currentGain = targetGain;
+                    }
+                    for (var channel = 0; channel < 4; channel += 2)
+                    {
+                        var sample = BinaryPrimitives.ReadInt16LittleEndian(buffer.AsSpan(i + channel, 2));
+                        var scaled = (short)Math.Clamp(Math.Round(sample * currentGain), short.MinValue, short.MaxValue);
+                        BinaryPrimitives.WriteInt16LittleEndian(buffer.AsSpan(i + channel, 2), scaled);
+                    }
+                }
+            }
+            await destination.WriteAsync(buffer.AsMemory(0, complete), token).ConfigureAwait(false);
+            submittedBytes += complete;
+            carried = available - complete;
+            if (carried != 0) buffer.AsSpan(complete, carried).CopyTo(buffer);
+        }
+        if (carried != 0) throw new InvalidDataException("再生音声のサンプルが途中で切れています。");
+    }
+
+    private static double SafeGain(double requested) =>
+        double.IsFinite(requested) ? Math.Clamp(requested, 0, 2) : 1;
+
+    public async Task<IReadOnlyList<SplitCandidate>> FindSilenceAsync(DiscAnalysis disc, PlaylistInfo playlist,
+        AudioStreamInfo stream, TrackRow track, CancellationToken token)
+    {
+        if (playlist.Format != DiscFormat.BluRay)
+            return await FindDvdSilenceAsync(disc, playlist, stream, track, token);
+        var positions = new List<long>();
+        foreach (var segment in PlaylistSegments.ForRange(playlist, track.StartTicks, track.EndTicks))
+        {
+            token.ThrowIfCancellationRequested();
+            var (sourcePath, seekTicks) = await GetSourceAsync(disc, stream, segment, token);
+            var result = await runner.RunAsync(paths.Ffmpeg,
+                ["-hide_banner", "-nostdin", "-nostats", "-v", "info",
+                 "-ss", Seconds(seekTicks), "-t", Seconds(segment.EndTicks - segment.StartTicks), "-i", sourcePath,
+                 "-map", $"0:{stream.Index}", "-vn", "-sn", "-dn",
+                 "-af", "silencedetect=noise=-45dB:duration=0.8", "-f", "null", "-"], token);
+            foreach (var offset in ParseSilenceMidpoints(result.Error))
+            {
+                var position = segment.StartTicks + (long)Math.Round(offset * 45000, MidpointRounding.AwayFromZero);
+                if (position > track.StartTicks + 45000 && position < track.EndTicks - 45000)
+                    positions.Add(position);
+            }
+        }
+        var unique = new List<long>();
+        foreach (var position in positions.Order())
+            if (unique.Count == 0 || position - unique[^1] >= 90000) unique.Add(position);
+        return unique.Select(x => new SplitCandidate(x,
+            $"無音付近 · {TimeSpan.FromSeconds(x / 45000d).ToString(@"hh\:mm\:ss\.fff")}")).ToArray();
+    }
+
+    private async Task<IReadOnlyList<SplitCandidate>> FindDvdSilenceAsync(DiscAnalysis disc,
+        PlaylistInfo playlist, AudioStreamInfo stream, TrackRow track, CancellationToken token)
+    {
+        var arguments = new List<string> { "-hide_banner", "-nostats", "-v", "info" };
+        ProcessResult result;
+        if (playlist.Format == DiscFormat.DvdAudio && playlist.DvdAudio is { } audio)
+        {
+            var range = DvdAudioSectors.Range(audio, track.StartTicks, track.EndTicks);
+            arguments.AddRange(["-f", "mpeg", "-i", "pipe:0", "-ss", (range.SkipTicks / 45000m).ToString(CultureInfo.InvariantCulture),
+                "-t", track.DurationSeconds.ToString(CultureInfo.InvariantCulture), "-map", $"0:{stream.Index}",
+                "-vn", "-sn", "-dn", "-af", "silencedetect=noise=-45dB:duration=0.8", "-f", "null", "-"]);
+            result = await runner.RunWithInputAsync(paths.Ffmpeg, arguments,
+                (input, ct) => DvdAudioSectors.CopyAsync(disc.Root, audio.TitleSet,
+                    range.FirstSector, range.LastSector, input, ct), token);
+        }
+        else
+        {
+            var first = 1;
+            var last = 1;
+            for (var i = 0; i < playlist.ChapterStarts.Count; i++)
+            {
+                if (playlist.ChapterStarts[i] <= track.StartTicks) first = i + 1;
+                if (playlist.ChapterStarts[i] < track.EndTicks) last = i + 1;
+            }
+            arguments.AddRange(["-nostdin", "-f", "dvdvideo", "-title", playlist.DvdVideoTitle.ToString(),
+                "-chapter_start", first.ToString(), "-chapter_end", last.ToString(), "-i", disc.Root,
+                "-ss", ((track.StartTicks - playlist.ChapterStarts[first - 1]) / 45000m).ToString(CultureInfo.InvariantCulture),
+                "-t", track.DurationSeconds.ToString(CultureInfo.InvariantCulture), "-map", $"0:{stream.Index}",
+                "-vn", "-sn", "-dn", "-af", "silencedetect=noise=-45dB:duration=0.8", "-f", "null", "-"]);
+            result = await runner.RunAsync(paths.Ffmpeg, arguments, token);
+        }
+        return ParseSilenceMidpoints(result.Error)
+            .Select(seconds => track.StartTicks + (long)Math.Round(seconds * 45000, MidpointRounding.AwayFromZero))
+            .Where(position => position > track.StartTicks + 45000 && position < track.EndTicks - 45000)
+            .Select(position => new SplitCandidate(position,
+                $"無音付近 · {TimeSpan.FromSeconds(position / 45000d).ToString(@"hh\:mm\:ss\.fff")}"))
+            .ToArray();
+    }
+
+    public static IReadOnlyList<double> ParseSilenceMidpoints(string output)
+    {
+        var result = new List<double>();
+        double? start = null;
+        foreach (Match match in SilenceEvent.Matches(output))
+        {
+            if (!double.TryParse(match.Groups[2].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var seconds)) continue;
+            if (match.Groups[1].Value == "start") start = seconds;
+            else if (start is { } beginning && seconds >= beginning)
+            {
+                result.Add((beginning + seconds) / 2);
+                start = null;
+            }
+        }
+        return result;
+    }
+
+    private async Task<(string Path, long SeekTicks)> GetSourceAsync(DiscAnalysis disc, AudioStreamInfo stream,
+        PlaylistSegment segment, CancellationToken token)
+    {
+        var path = Path.Combine(disc.Root, "BDMV", "STREAM", $"{segment.Clip.Id}.m2ts");
+        if (!File.Exists(path)) throw new FileNotFoundException($"音声クリップが見つかりません: {path}");
+        var cacheKey = $"{path}|{stream.Index}";
+        if (!_clipCache.TryGetValue(cacheKey, out var source))
+        {
+            source = (await probe.ProbeClipAsync(path, token)).FirstOrDefault(x => x.Index == stream.Index);
+            if (source is not null) _clipCache[cacheKey] = source;
+        }
+        if (source is null || source.Codec != stream.Codec || source.Profile != stream.Profile ||
+            (!string.IsNullOrEmpty(stream.TransportId) && source.TransportId != stream.TransportId) ||
+            source.SampleRate != stream.SampleRate || source.BitDepth != stream.BitDepth || source.Channels != stream.Channels ||
+            (stream.Channels > 2 && !string.Equals(source.ChannelLayout, stream.ChannelLayout, StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidDataException($"クリップ {segment.Clip.Id} の音声形式が選択した音声と一致しません。");
+        if (source.StartTimeTicks is null) throw new InvalidDataException($"クリップ {segment.Clip.Id} の音声開始時刻が不明です。");
+        var seekTicks = PlaylistSegments.SourceTicks(segment) - source.StartTimeTicks.Value;
+        if (seekTicks < 0) throw new InvalidDataException($"クリップ {segment.Clip.Id} の再生位置が不正です。");
+        return (path, seekTicks);
+    }
+
+    private static string Seconds(long ticks) => (ticks / 45000m).ToString("0.########", CultureInfo.InvariantCulture);
+}

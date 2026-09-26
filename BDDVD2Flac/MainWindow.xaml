@@ -1,0 +1,332 @@
+<Window x:Class="Disc2Flac.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:Disc2Flac"
+        Title="DiscChannelLab" Width="1140" Height="780" MinWidth="960" MinHeight="650"
+        WindowStartupLocation="CenterScreen" Background="{DynamicResource AppBackgroundBrush}"
+        Loaded="Window_Loaded" Closing="Window_Closing">
+    <Window.Resources>
+        <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Padding" Value="10,5"/>
+            <Setter Property="Margin" Value="0,0,6,0"/>
+            <Setter Property="MinHeight" Value="30"/>
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="292"/>
+            <ColumnDefinition Width="12"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+
+        <DockPanel Grid.Row="0" Grid.ColumnSpan="3" Margin="0,0,0,10">
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                <TextBlock Text="{local:Loc Key='言語'}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                <ComboBox x:Name="LanguageCombo" Width="92" MinHeight="28" Margin="0,0,16,0"
+                          SelectionChanged="LanguageCombo_SelectionChanged">
+                    <ComboBoxItem Content="English"/>
+                    <ComboBoxItem Content="日本語"/>
+                </ComboBox>
+                <CheckBox x:Name="ThemeToggle" Content="{local:Loc Key='ダークモード'}" VerticalAlignment="Center"
+                          Checked="ThemeToggle_Changed" Unchecked="ThemeToggle_Changed" Margin="0,0,16,0"/>
+                <TextBlock Text="Blu-ray / DVD-Audio / DVD-Video → FLAC"
+                           Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center"/>
+            </StackPanel>
+            <TextBlock Text="DiscChannelLab" FontSize="23" FontWeight="SemiBold"/>
+        </DockPanel>
+
+        <Border Grid.Row="1" Grid.Column="0" Background="{DynamicResource SurfaceBrush}" CornerRadius="8" Padding="14">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel>
+                    <TextBlock Text="{local:Loc Key='ディスク'}" FontSize="17" FontWeight="SemiBold" Margin="0,0,0,10"/>
+                    <TextBlock Text="{local:Loc Key='ドライブ'}" Margin="0,0,0,4"/>
+                    <ComboBox x:Name="SourceCombo" ItemsSource="{Binding Sources}" SelectedItem="{Binding Source, Mode=TwoWay}"
+                              SelectionChanged="Source_SelectionChanged" MinHeight="32" Margin="0,0,0,7"/>
+                    <TextBlock Text="{Binding SelectedIsoPath}" ToolTip="{Binding SelectedIsoPath}"
+                               TextTrimming="CharacterEllipsis" FontSize="12" Foreground="{DynamicResource MutedBrush}"
+                               Margin="0,0,0,4"/>
+                    <WrapPanel Margin="0,0,0,16">
+                        <Button Content="{local:Loc Key='再読み込み'}" Click="Analyze_Click"/>
+                        <Button Content="{local:Loc Key='フォルダーを開く'}" Click="Folder_Click"/>
+                        <Button Content="{local:Loc Key='ISOを開く'}" Click="Iso_Click" Margin="0"/>
+                    </WrapPanel>
+
+                    <TextBlock Text="{local:Loc Key='タイトル / チャプター'}" Margin="0,0,0,4"/>
+                    <ComboBox x:Name="PlaylistCombo" ItemsSource="{Binding Playlists}" SelectedItem="{Binding SelectedPlaylist, Mode=TwoWay}"
+                              SelectionChanged="Playlist_SelectionChanged"
+                              MinHeight="32" Margin="0,0,0,12">
+                        <ComboBox.ToolTip>
+                            <ToolTip MaxWidth="480">
+                                <TextBlock Text="{Binding SelectedPlaylist.DisplayName}" TextWrapping="Wrap" MaxWidth="450"/>
+                            </ToolTip>
+                        </ComboBox.ToolTip>
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate>
+                                <Grid HorizontalAlignment="Stretch" MinWidth="0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="70"/>
+                                        <ColumnDefinition Width="75"/>
+                                        <ColumnDefinition Width="88"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{Binding TitleLabel}" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Column="1" Text="{Binding DurationLabel}" VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Column="2" Text="{Binding ChapterCountLabel}" VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Column="3" Text="{Binding ChapterSummaryPreview}" TextTrimming="CharacterEllipsis"
+                                               TextWrapping="NoWrap" VerticalAlignment="Center">
+                                        <TextBlock.ToolTip>
+                                            <ToolTip MaxWidth="480">
+                                                <TextBlock Text="{Binding ChapterSummary}" TextWrapping="Wrap" MaxWidth="450"/>
+                                            </ToolTip>
+                                        </TextBlock.ToolTip>
+                                    </TextBlock>
+                                </Grid>
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+                    <TextBlock Text="{local:Loc Key='音声'}" Margin="0,0,0,4"/>
+                    <ComboBox ItemsSource="{Binding Streams}" SelectedItem="{Binding SelectedStream, Mode=TwoWay}"
+                              ToolTip="{Binding SelectedStream.DisplayName}" MinHeight="32" Margin="0,0,0,5"/>
+                    <TextBlock Text="{Binding SelectedStreamNote}" FontSize="12" Foreground="{DynamicResource MutedBrush}"
+                               TextWrapping="Wrap" Margin="0,0,0,14"/>
+
+                    <Separator Margin="0,0,0,12"/>
+                    <TextBlock Text="{local:Loc Key='ディスク名（親フォルダー）'}" Margin="0,0,0,4"/>
+                    <TextBlock Text="{Binding AlbumTitle}" FontSize="16" FontWeight="SemiBold"
+                               TextWrapping="Wrap" Margin="0,0,0,6"/>
+                    <TextBlock Text="{Binding MetadataDetails}" TextWrapping="Wrap" FontSize="12"
+                               Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,7"/>
+                    <TextBlock Text="{Binding SelectedChapterText}" TextWrapping="Wrap" FontSize="12"
+                               Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,6"/>
+                    <Button Content="{local:Loc Key='チャプター名を編集'}" Click="ChapterNames_Click"
+                            IsEnabled="{Binding CanEditTracks}" Margin="0,0,0,16"/>
+
+                    <TextBlock Text="{local:Loc Key='保存する音質'}" FontWeight="SemiBold" Margin="0,0,0,9"/>
+                    <RadioButton Content="{local:Loc Key='CD音質相当 · 16bit / 44.1kHz'}" GroupName="Quality"
+                                 IsChecked="{Binding IsCdSelected, Mode=TwoWay}" Margin="0,0,0,10"/>
+                    <RadioButton Content="{local:Loc Key='ハイレゾ · 元の形式'}" GroupName="Quality"
+                                 IsEnabled="{Binding CanChooseHighRes}"
+                                 IsChecked="{Binding IsHighResSelected, Mode=TwoWay}" Margin="0,0,0,9"/>
+                    <TextBlock Text="{local:Loc Key='ハイレゾは元音源が24bit / 88.2kHz以上のときに選べます。'}"
+                               FontSize="12" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap"/>
+                </StackPanel>
+            </ScrollViewer>
+        </Border>
+
+        <Grid Grid.Row="1" Grid.Column="2">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <Border Grid.Row="0" Background="{DynamicResource SurfaceBrush}" CornerRadius="8" Padding="12" Margin="0,0,0,8">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <DockPanel Grid.Row="0" Margin="0,0,0,7">
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                            <Button Content="{local:Loc Key='全行を一括編集'}" Click="BulkEditAll_Click" IsEnabled="{Binding CanEditTracks}"
+                                    ToolTip="{local:Loc Key='全行の曲名と、アルバム名をテキストで編集します'}"/>
+                            <Button Content="{local:Loc Key='選択行を一括編集'}" Click="BulkEditSelected_Click" IsEnabled="{Binding CanEditTracks}"
+                                    ToolTip="{local:Loc Key='表で Ctrl または Shift を使って選んだ行を、上から順に編集します'}"/>
+                            <Button Content="{local:Loc Key='すべて選択'}" Click="SelectAll_Click"/>
+                            <Button Content="{local:Loc Key='選択を解除'}" Click="ClearSelection_Click" Margin="0"/>
+                        </StackPanel>
+                        <TextBlock Text="{local:Loc Key='曲・チャプター'}" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                    </DockPanel>
+
+                    <DataGrid x:Name="TracksGrid" Grid.Row="1" ItemsSource="{Binding Tracks}" SelectedItem="{Binding SelectedTrack, Mode=TwoWay}"
+                              IsEnabled="{Binding CanSeek}" IsReadOnly="{Binding IsPlaying}"
+                              AutoGenerateColumns="False"
+                              CanUserAddRows="False" CanUserDeleteRows="False" HeadersVisibility="Column"
+                              GridLinesVisibility="Horizontal" RowHeaderWidth="0" SelectionMode="Extended">
+                        <DataGrid.Columns>
+                            <DataGridCheckBoxColumn Header="{local:Loc Key='保存'}" Binding="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="55"/>
+                            <DataGridTextColumn Header="#" Binding="{Binding Number}" IsReadOnly="True" Width="38"/>
+                            <DataGridTextColumn Header="{local:Loc Key='曲名（ダブルクリックで再生）'}" Binding="{Binding Title, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="*"/>
+                            <DataGridTextColumn Header="{local:Loc Key='アーティスト'}" Binding="{Binding Artist, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="120"/>
+                            <DataGridTextColumn Header="{local:Loc Key='開始'}" Binding="{Binding StartTime}" IsReadOnly="True" Width="98"/>
+                            <DataGridTextColumn Header="{local:Loc Key='終了'}" Binding="{Binding EndTime}" IsReadOnly="True" Width="98"/>
+                            <DataGridTextColumn Header="{local:Loc Key='長さ'}" Binding="{Binding Duration}" IsReadOnly="True" Width="98"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+
+                    <StackPanel Grid.Row="2" Margin="0,8,0,0">
+                        <DockPanel Margin="0,0,0,4">
+                            <TextBlock DockPanel.Dock="Right" Text="{Binding PreviewLengthText}" VerticalAlignment="Center"/>
+                            <TextBlock DockPanel.Dock="Right" Text=" / " VerticalAlignment="Center"/>
+                            <TextBlock DockPanel.Dock="Right" Text="{Binding PreviewTimeText}" VerticalAlignment="Center"/>
+                            <TextBlock Text="{Binding SelectedTrackTitle}" FontWeight="SemiBold"
+                                       TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                        </DockPanel>
+                        <Slider x:Name="PlayerSeekSlider" Minimum="0" Maximum="{Binding PreviewMax}"
+                                Value="{Binding PreviewSeconds, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                IsEnabled="{Binding CanSeek}" SmallChange="0.1" LargeChange="10"
+                                TickFrequency="0.1" Margin="0,0,0,7"/>
+                        <DockPanel Margin="0,0,0,5">
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock Text="{local:Loc Key='音量'}" VerticalAlignment="Center" Margin="8,0,5,0"/>
+                                <Slider Width="100" Minimum="0" Maximum="200"
+                                        Value="{Binding Volume, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                        VerticalAlignment="Center" ToolTip="{Binding VolumeDetails}"/>
+                                <TextBlock Text="{Binding VolumeText}" ToolTip="{Binding VolumeDetails}"
+                                           Width="42" VerticalAlignment="Center" Margin="5,0,0,0"/>
+                                <CheckBox Content="{local:Loc Key='連続再生'}" IsChecked="{Binding ContinuousPlayback, Mode=TwoWay}"
+                                          VerticalAlignment="Center" Margin="7,0,0,0"/>
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal">
+                                <Button Content="{local:Loc Key='前の曲'}" Click="PreviousTrack_Click" IsEnabled="{Binding CanPreviousTrack}"/>
+                                <Button Content="{Binding PlayPauseText}" Click="Play_Click"
+                                        IsEnabled="{Binding CanPlay}" FontWeight="SemiBold"/>
+                                <Button Content="{local:Loc Key='停止'}" Click="StopPlayback_Click" IsEnabled="{Binding CanSeek}"/>
+                                <Button Content="{local:Loc Key='次の曲'}" Click="NextTrack_Click" IsEnabled="{Binding CanNextTrack}" Margin="0"/>
+                            </StackPanel>
+                        </DockPanel>
+                        <DockPanel Margin="0,0,0,5">
+                            <CheckBox DockPanel.Dock="Right" Content="{local:Loc Key='聴感カーブ'}"
+                                      IsChecked="{Binding PerceivedVolume, Mode=TwoWay}"
+                                      ToolTip="{local:Loc Key='オン: 100%未満は小音量を細かく調整。オフ: 増幅率を線形で調整。どちらも100%は原音、200%は2倍。'}"
+                                      VerticalAlignment="Center" Margin="8,0,0,0"/>
+                            <TextBlock DockPanel.Dock="Left" Text="{local:Loc Key='試聴する音'}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                            <ComboBox Width="205" HorizontalAlignment="Left"
+                                      ItemsSource="{Binding PreviewChannels}"
+                                      SelectedItem="{Binding SelectedPreviewChannel, Mode=TwoWay}"
+                                      DisplayMemberPath="Label" IsEnabled="{Binding CanChoosePreviewChannel}"
+                                      SelectionChanged="PreviewChannel_SelectionChanged"
+                                      ToolTip="{local:Loc Key='個別チャンネルは左右のスピーカーに同じ音を出します'}"/>
+                        </DockPanel>
+                        <Border Background="{DynamicResource InputBrush}" BorderBrush="{DynamicResource BorderBrush}"
+                                BorderThickness="1" CornerRadius="5" Padding="7,5" Margin="0,0,0,5">
+                            <StackPanel>
+                                <TextBlock Text="{local:Loc Key='入力チャンネルのピーク · ミックス前 / 音量調整前'}"
+                                           FontSize="11" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,3"/>
+                                <ItemsControl ItemsSource="{Binding ChannelMeters}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate><UniformGrid Columns="4"/></ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid Margin="3,2" ToolTip="{Binding Details}">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="34"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="58"/>
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Text="{Binding Code}" FontWeight="SemiBold" FontSize="11"
+                                                           VerticalAlignment="Center"/>
+                                                <ProgressBar Grid.Column="1" Minimum="0" Maximum="100"
+                                                             Value="{Binding PeakPercent, Mode=OneWay}" Height="9"
+                                                             VerticalAlignment="Center"/>
+                                                <TextBlock Grid.Column="2" Text="{Binding PeakText}" FontSize="10"
+                                                           TextAlignment="Right" VerticalAlignment="Center"/>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </Border>
+                        <Expander Header="{local:Loc Key='分割位置の調整（0.1秒単位）'}">
+                            <StackPanel Margin="0,6,0,0">
+                                <WrapPanel Margin="0,0,0,5">
+                                    <Button Content="{local:Loc Key='-10秒'}" Tag="-10" Click="Nudge_Click" IsEnabled="{Binding CanSeek}"/>
+                                    <Button Content="{local:Loc Key='-1秒'}" Tag="-1" Click="Nudge_Click" IsEnabled="{Binding CanSeek}"/>
+                                    <Button Content="{local:Loc Key='-0.1秒'}" Tag="-0.1" Click="Nudge_Click" IsEnabled="{Binding CanSeek}"/>
+                                    <Button Content="{local:Loc Key='+0.1秒'}" Tag="0.1" Click="Nudge_Click" IsEnabled="{Binding CanSeek}"/>
+                                    <Button Content="{local:Loc Key='+1秒'}" Tag="1" Click="Nudge_Click" IsEnabled="{Binding CanSeek}"/>
+                                    <Button Content="{local:Loc Key='+10秒'}" Tag="10" Click="Nudge_Click" IsEnabled="{Binding CanSeek}" Margin="0"/>
+                                </WrapPanel>
+                                <WrapPanel Margin="0,0,0,5">
+                                    <TextBlock Text="{local:Loc Key='分割位置'}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                    <TextBox x:Name="SplitTimeBox" Width="112" Margin="0,0,8,0"
+                                             VerticalContentAlignment="Center" IsEnabled="{Binding CanEditTracks}"
+                                             ToolTip="{local:Loc Key='選択した行の先頭からの時刻（時:分:秒.ミリ秒）'}"
+                                             LostFocus="SplitTimeBox_LostFocus" KeyDown="SplitTimeBox_KeyDown"
+                                             Text="{Binding PreviewTimeText, Mode=TwoWay, UpdateSourceTrigger=LostFocus}"/>
+                                    <Button Content="{local:Loc Key='この位置で分割'}" Click="Split_Click" IsEnabled="{Binding CanSplit}"/>
+                                    <Button Content="{local:Loc Key='次の行と結合'}" Click="Merge_Click" IsEnabled="{Binding CanMerge}" Margin="0"/>
+                                </WrapPanel>
+                                <DockPanel>
+                                    <Button DockPanel.Dock="Left" Content="{local:Loc Key='無音候補を探す'}" Click="FindSilence_Click"
+                                            IsEnabled="{Binding CanDetectSilence}"/>
+                                    <ComboBox ItemsSource="{Binding SplitCandidates}"
+                                              SelectedItem="{Binding SelectedCandidate, Mode=TwoWay}"
+                                              DisplayMemberPath="DisplayName"
+                                              SelectionChanged="Candidate_SelectionChanged"
+                                              MinWidth="160" Margin="0,0,8,0"/>
+                                </DockPanel>
+                            </StackPanel>
+                        </Expander>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <Border Grid.Row="1" Background="{DynamicResource SurfaceBrush}" CornerRadius="8" Padding="12">
+                <StackPanel>
+                    <TextBlock Text="{local:Loc Key='FLACに保存'}" FontSize="15" FontWeight="SemiBold" Margin="0,0,0,7"/>
+                    <DockPanel Margin="0,0,0,7">
+                        <Button DockPanel.Dock="Right" Content="{local:Loc Key='保存先を選ぶ'}" Click="OutputFolder_Click" Margin="8,0,0,0"/>
+                        <TextBox Text="{Binding OutputFolder, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                 MinHeight="30" VerticalContentAlignment="Center"/>
+                    </DockPanel>
+                    <CheckBox Content="{local:Loc Key='チャプターごとにフォルダーを作成する'}"
+                              IsChecked="{Binding GroupByChapter, Mode=TwoWay}"
+                              Margin="0,0,0,5"/>
+                    <CheckBox Content="{local:Loc Key='多チャンネル音声を2chステレオのFLACで保存'}"
+                              IsChecked="{Binding SaveStereoDownmix, Mode=TwoWay}"
+                              IsEnabled="{Binding CanDownmixStereo}" Margin="0,0,0,5"/>
+                    <CheckBox Content="{local:Loc Key='チャンネル別のモノラルFLACを曲ごとに保存'}"
+                              IsChecked="{Binding SaveIndividualChannels, Mode=TwoWay}"
+                              IsEnabled="{Binding CanDownmixStereo}" Margin="0,0,0,5"/>
+                    <Expander x:Name="StereoMixExpander" Header="{local:Loc Key='ステレオミックス比率（試聴にも適用）'}"
+                              IsEnabled="{Binding CanDownmixStereo}" Margin="0,0,0,7">
+                        <StackPanel Margin="8,6,4,2">
+                            <TextBlock Text="{local:Loc Key='前方 100%を基準に設定。出力は自動正規化します。'}"
+                                       FontSize="11" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,5"/>
+                            <DockPanel Margin="0,0,0,3">
+                                <TextBlock DockPanel.Dock="Left" Text="{local:Loc Key='センター'}" Width="82"/>
+                                <TextBlock DockPanel.Dock="Right" Text="{Binding CenterMixText}" Width="42" TextAlignment="Right"/>
+                                <Slider Minimum="0" Maximum="100" TickFrequency="1"
+                                        PreviewMouseLeftButtonUp="MixSlider_MouseUp" PreviewKeyUp="MixSlider_KeyUp"
+                                        Value="{Binding CenterMixPercent, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                            </DockPanel>
+                            <DockPanel Margin="0,0,0,3">
+                                <TextBlock DockPanel.Dock="Left" Text="{local:Loc Key='サラウンド'}" Width="82"/>
+                                <TextBlock DockPanel.Dock="Right" Text="{Binding SurroundMixText}" Width="42" TextAlignment="Right"/>
+                                <Slider Minimum="0" Maximum="100" TickFrequency="1"
+                                        PreviewMouseLeftButtonUp="MixSlider_MouseUp" PreviewKeyUp="MixSlider_KeyUp"
+                                        Value="{Binding SurroundMixPercent, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                            </DockPanel>
+                            <DockPanel>
+                                <TextBlock DockPanel.Dock="Left" Text="LFE" Width="82"/>
+                                <TextBlock DockPanel.Dock="Right" Text="{Binding LfeMixText}" Width="42" TextAlignment="Right"/>
+                                <Slider Minimum="0" Maximum="100" TickFrequency="1"
+                                        PreviewMouseLeftButtonUp="MixSlider_MouseUp" PreviewKeyUp="MixSlider_KeyUp"
+                                        Value="{Binding LfeMixPercent, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                            </DockPanel>
+                        </StackPanel>
+                    </Expander>
+                    <WrapPanel Margin="0,0,0,7">
+                        <Button Content="{local:Loc Key='FLACで保存'}" IsEnabled="{Binding CanConvert}" Click="Save_Click"
+                                FontWeight="SemiBold" Background="{DynamicResource AccentBrush}"
+                                Foreground="{DynamicResource AccentTextBrush}"/>
+                        <Button Content="{local:Loc Key='中止'}" Click="Cancel_Click" IsEnabled="{Binding IsBusy}"/>
+                        <Button Content="{local:Loc Key='保存フォルダーを開く'}" Click="OpenSaved_Click"
+                                IsEnabled="{Binding CanOpenSavedFolder}" Margin="0"/>
+                    </WrapPanel>
+                    <ProgressBar Minimum="0" Maximum="1" Value="{Binding Progress, Mode=OneWay}"
+                                 Height="5" Margin="0,0,0,5"/>
+                    <TextBlock Text="{Binding Status}" TextWrapping="Wrap"/>
+                </StackPanel>
+            </Border>
+        </Grid>
+    </Grid>
+</Window>

@@ -81,6 +81,24 @@ if (args is ["title-ui-test", var titleSourcePath, var titlePlaylistIdText, var 
     return 0;
 }
 
+if (args is ["convert-saved-title", var savedSourcePath, var savedOutputRoot, var savedPlaylistIdText])
+{
+    var model = new MainViewModel();
+    await model.OpenSourceAsync(savedSourcePath);
+    await model.ChoosePlaylistAsync(model.Playlists.Single(x => x.Id == int.Parse(savedPlaylistIdText)));
+    model.OutputFolder = savedOutputRoot;
+    model.IsCdSelected = true;
+    var expectedFiles = model.Tracks.Count(x => x.IsSelected);
+    if (expectedFiles == 0 || !model.CanConvert)
+        throw new InvalidDataException("Saved title is not ready for conversion.");
+    await model.ConvertAsync();
+    if (string.IsNullOrWhiteSpace(model.SavedFolder) ||
+        Directory.GetFiles(model.SavedFolder, "*.flac", SearchOption.TopDirectoryOnly).Length != expectedFiles)
+        throw new InvalidDataException($"Saved title conversion failed: {model.Status}");
+    Console.WriteLine($"Converted {expectedFiles} saved tracks: {model.SavedFolder}");
+    return 0;
+}
+
 if (args is ["title-layout-test", var layoutSourcePath, var layoutOutputRoot, var layoutPlaylistIdText, var layoutTitleName])
 {
     var checkLog = new AppLog();
@@ -121,6 +139,27 @@ if (args is ["title-layout-test", var layoutSourcePath, var layoutOutputRoot, va
         tags.GetProperty("CHAPTERNUMBER").GetString() != first.Number.ToString())
         throw new InvalidDataException("FLAC album, disc, or chapter tags do not match the selected title.");
     Console.WriteLine($"Title layout and persistence verified: {layoutOutput}");
+    return 0;
+}
+
+if (args is ["convert-bd-chapter", var chapterSourcePath, var chapterOutputRoot,
+    var chapterPlaylistIdText, var chapterNumberText])
+{
+    var chapterLog = new AppLog();
+    var chapterPaths = new ToolPaths();
+    var chapterRunner = new ProcessRunner(chapterLog);
+    var chapterProbe = new FfprobeService(chapterPaths, chapterRunner);
+    var chapterReader = new DiscService(chapterProbe, chapterLog);
+    var chapterDisc = chapterReader.Analyze(chapterSourcePath);
+    var chapterPlaylist = chapterDisc.Playlists.Single(x => x.Id == int.Parse(chapterPlaylistIdText)
+        && x.Format == DiscFormat.BluRay);
+    var (chapterStreams, chapterTracks) = await chapterReader.AnalyzePlaylistAsync(
+        chapterDisc, chapterPlaylist, CancellationToken.None);
+    var chapterTrack = chapterTracks.Single(x => x.Number == int.Parse(chapterNumberText));
+    var chapterOutput = await new ConversionService(chapterPaths, chapterRunner, chapterProbe, chapterLog)
+        .ConvertAsync(chapterDisc, chapterPlaylist, chapterStreams.First(), [chapterTrack], OutputQuality.Cd,
+            chapterOutputRoot, new Progress<ConversionProgress>(), CancellationToken.None);
+    Console.WriteLine($"Converted full BD chapter {chapterTrack.Number}: {chapterOutput}");
     return 0;
 }
 

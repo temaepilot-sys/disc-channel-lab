@@ -113,7 +113,25 @@ public sealed class ConversionService(ToolPaths paths, ProcessRunner runner, Ffp
                     var partInfo = await probe.ProbeFileAsync(part, token);
                     ValidateFormat(partInfo, expectedRate, expectedDepth, stream, saveStereoDownmix, channel is not null);
                     if (partInfo.SampleCount != sampleCount)
-                        throw new InvalidDataException($"{title} の音声区間を正確に読み取れませんでした。");
+                    {
+                        var missing = partInfo.SampleCount is { } actualCount ? sampleCount - actualCount : -1;
+                        var clipEnd = segment.Clip.PlaylistStartTicks + segment.Clip.OutTicks - segment.Clip.InTicks;
+                        if (segment.EndTicks != clipEnd || missing <= 0 || missing > expectedRate / 50)
+                            throw new InvalidDataException($"{title} の音声区間を正確に読み取れませんでした。");
+                        var padded = part + ".padded.flac";
+                        await runner.RunAsync(paths.Ffmpeg,
+                            ["-hide_banner", "-nostdin", "-v", "error", "-i", part,
+                             "-map", "0:a:0", "-map_metadata", "0",
+                             "-af", $"apad=whole_len={sampleCount},atrim=end_sample={sampleCount}",
+                             "-c:a", "flac", "-sample_fmt", quality == OutputQuality.Cd ? "s16" : "s32",
+                             "-y", padded], token);
+                        var paddedInfo = await probe.ProbeFileAsync(padded, token);
+                        ValidateFormat(paddedInfo, expectedRate, expectedDepth, stream, saveStereoDownmix, channel is not null);
+                        if (paddedInfo.SampleCount != sampleCount)
+                            throw new InvalidDataException($"{title} の末尾を補正できませんでした。");
+                        File.Move(padded, part, overwrite: true);
+                        log.Write($"PADDED {missing} trailing samples at clip end for {title}");
+                    }
                     parts.Add(part);
                 }
 

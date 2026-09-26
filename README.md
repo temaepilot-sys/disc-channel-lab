@@ -23,6 +23,7 @@ The app reads supported, unprotected Blu-ray, DVD-Audio, and DVD-Video sources t
 - Export multichannel FLAC, a configurable stereo mix, or one mono FLAC per source channel.
 - Edit the disc name, title name, track names, and artists in the table or bulk editor. The title name is saved per disc and title.
 - Save FLACs under `<output>/<disc name>/<title name>/<track>.flac`. Each FLAC uses the title name as its `ALBUM` tag and retains the disc name and chapter number in separate tags. Optional chapter folders go beneath the title folder; they are off by default.
+- If a playlist extends slightly beyond the audio at a clip's end, conversion may add up to 20 ms of silence to preserve the requested sample count. Larger gaps still fail validation.
 - Read saved Blu-ray track, chapter, and album edits from the earlier `Disc2Flac` app when the disc matches.
 - Open a disc drive, a disc folder, or a mounted ISO. Protected sources are unsupported.
 

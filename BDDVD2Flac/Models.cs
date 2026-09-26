@@ -19,6 +19,7 @@ public sealed class PlaylistInfo : INotifyPropertyChanged
     public DvdAudioTitle? DvdAudio { get; init; }
     public int DvdVideoTitle { get; init; }
     private int _displayOrder;
+    private string? _titleName;
     private IReadOnlyList<string?> _chapterTitles = [];
     public int DisplayOrder
     {
@@ -51,6 +52,20 @@ public sealed class PlaylistInfo : INotifyPropertyChanged
     public string DisplayNumber => DisplayOrder.ToString("00");
     public string TitleLabel => Format == DiscFormat.DvdAudio ? $"A {DvdAudio?.TitleSet:00}/{DvdAudio?.TitleNumber:00}"
         : Format == DiscFormat.DvdVideo ? $"V {DvdVideoTitle:00}" : $"BD {DisplayNumber}";
+    public string TitleName
+    {
+        get => _titleName ?? (Format == DiscFormat.DvdAudio
+            ? $"DVD-Audio {DvdAudio?.TitleSet:00}-{DvdAudio?.TitleNumber:00}"
+            : Format == DiscFormat.DvdVideo ? $"DVD-Video {DvdVideoTitle:00}" : TitleLabel);
+        set
+        {
+            var name = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+            if (_titleName == name) return;
+            _titleName = name;
+            Changed(nameof(TitleName));
+            Changed(nameof(DisplayName));
+        }
+    }
     public string DurationLabel => Duration.ToString(@"hh\:mm\:ss");
     public string ChapterCountLabel => LanguageService.T($"{ChapterStarts.Count}チャプター");
     public bool IsRepeatedShortClipLoop => ChapterStarts.Count == 1 && Clips.Count >= 20 &&
@@ -76,7 +91,7 @@ public sealed class PlaylistInfo : INotifyPropertyChanged
             return info.LengthInTextElements > 19 ? info.SubstringByTextElements(0, 19) + "…" : summary;
         }
     }
-    public string DisplayName => $"{(Format == DiscFormat.DvdAudio ? $"DVD-Audio {DvdAudio?.TitleSet:00}/{DvdAudio?.TitleNumber:00}" : Format == DiscFormat.DvdVideo ? $"DVD-Video {DvdVideoTitle:00}" : DisplayNumber)} · {DurationLabel} · {ChapterCountLabel} · {ChapterSummary}";
+    public string DisplayName => $"{(Format == DiscFormat.DvdAudio ? $"DVD-Audio {DvdAudio?.TitleSet:00}/{DvdAudio?.TitleNumber:00}" : Format == DiscFormat.DvdVideo ? $"DVD-Video {DvdVideoTitle:00}" : DisplayNumber)} · {DurationLabel} · {ChapterCountLabel} · {TitleName} · {ChapterSummary}";
     public override string ToString() => DisplayName;
     public event PropertyChangedEventHandler? PropertyChanged;
     public void RefreshLanguage()

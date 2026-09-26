@@ -6,6 +6,7 @@ public sealed record BulkEditPlan(string AlbumTitle, IReadOnlyList<BulkTrackChan
     IReadOnlyList<int> ArtistTargets, bool ApplyArtist, string? Artist)
 {
     public IReadOnlyList<string?>? ChapterTitles { get; init; }
+    public string? TitleName { get; init; }
 }
 
 public static class BulkEditService

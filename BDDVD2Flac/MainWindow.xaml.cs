@@ -134,7 +134,7 @@ public partial class MainWindow : Window
         }
         var targets = selectedOnly ? selected : Enumerable.Range(0, tracks.Length).ToArray();
         if (targets.Length == 0) return;
-        var dialog = new BulkEditWindow(_model.AlbumTitle, tracks, targets, selected,
+        var dialog = new BulkEditWindow(_model.AlbumTitle, _model.TitleName, tracks, targets, selected,
             _model.ChapterTitles, showChapterTab) { Owner = this };
         _driveTimer.Stop();
         try

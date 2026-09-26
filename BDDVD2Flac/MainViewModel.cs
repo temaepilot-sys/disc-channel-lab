@@ -28,6 +28,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private string _selectedIsoPath = "";
     private string? _isoRoot;
     private string _albumTitle = "ディスクを入れてください";
+    private string _titleName = "";
     private string _metadataDetails = "";
     private string _outputFolder = Environment.GetFolderPath(Environment.SpecialFolder.MyMusic);
     private string _status = "光学ドライブを確認しています";
@@ -46,7 +47,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private bool _continuousPlayback = true;
     private double _volume = 100;
     private bool _perceivedVolume = true;
-    private bool _groupByChapter = true;
+    private bool _groupByChapter;
     private bool _saveStereoDownmix;
     private bool _saveIndividualChannels;
     private ChannelChoice? _selectedPreviewChannel;
@@ -67,6 +68,32 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public string Source { get => _source; set => Set(ref _source, value); }
     public string SelectedIsoPath { get => _selectedIsoPath; private set => Set(ref _selectedIsoPath, value); }
     public string AlbumTitle { get => _disc is null ? LanguageService.T(_albumTitle) : _albumTitle; private set => Set(ref _albumTitle, value); }
+    public string TitleName
+    {
+        get => _titleName;
+        set
+        {
+            if (_disc is null || _loadedPlaylist is null) return;
+            var title = value.Trim();
+            if (title.Length == 0)
+            {
+                Status = "タイトル名を入力してください。";
+                Changed();
+                return;
+            }
+            if (title == _titleName) return;
+            try { _editStore.SaveTitleName(_disc, _loadedPlaylist, title); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
+            {
+                _log.Write($"TITLE NAME SAVE FAILED: {ex}");
+                Status = $"タイトル名を保存できませんでした: {ex.Message}";
+                Changed();
+                return;
+            }
+            _loadedPlaylist.TitleName = title;
+            Set(ref _titleName, title);
+        }
+    }
     public string MetadataDetails { get => _metadataDetails; private set => Set(ref _metadataDetails, value); }
     public string OutputFolder { get => _outputFolder; set { if (Set(ref _outputFolder, value)) Changed(nameof(CanConvert)); } }
     public bool GroupByChapter { get => _groupByChapter; set => Set(ref _groupByChapter, value); }
@@ -326,7 +353,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
             foreach (var stream in Streams) stream.RefreshLanguage();
             foreach (var candidate in SplitCandidates) candidate.RefreshLanguage();
             if (_disc is not null) RefreshMetadata();
-            foreach (var name in new[] { nameof(AlbumTitle), nameof(Status), nameof(PlayPauseText),
+            foreach (var name in new[] { nameof(AlbumTitle), nameof(TitleName), nameof(Status), nameof(PlayPauseText),
                 nameof(SelectedTrackTitle), nameof(SelectedChapterText), nameof(SelectedStreamNote),
                 nameof(VolumeDetails) }) Changed(name);
         }
@@ -411,6 +438,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
             {
                 playlist.ChapterTitles = _editStore.LoadChapterTitles(_disc, playlist) ??
                     Enumerable.Repeat<string?>(null, playlist.ChapterStarts.Count).ToArray();
+                playlist.TitleName = _editStore.LoadTitleName(_disc, playlist) ?? playlist.TitleName;
                 Playlists.Add(playlist);
             }
             var ambiguous = Playlists.Count > 1 &&
@@ -418,7 +446,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
                             Math.Abs(Playlists[0].ChapterStarts.Count - Playlists[1].ChapterStarts.Count) <= 2;
             SelectedPlaylist = Playlists.FirstOrDefault(playlist =>
                 _editStore.Load(_disc, playlist) is not null ||
-                _editStore.LoadChapterTitles(_disc, playlist) is not null) ?? Playlists.FirstOrDefault();
+                _editStore.LoadChapterTitles(_disc, playlist) is not null ||
+                _editStore.LoadTitleName(_disc, playlist) is not null) ?? Playlists.FirstOrDefault();
             if (SelectedPlaylist is not null) await LoadPlaylistCoreAsync(SelectedPlaylist, _work.Token);
             Status = PlaylistStatus(ambiguous);
         }
@@ -458,6 +487,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
         _navigation.ClearCache();
         _disc = null;
         _loadedPlaylist = null;
+        _titleName = "";
+        Changed(nameof(TitleName));
         SelectedPlaylist = null;
         Playlists.Clear();
         Streams.Clear();
@@ -505,6 +536,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
             Tracks.Add(track);
         }
         _loadedPlaylist = playlist;
+        _titleName = playlist.TitleName;
+        Changed(nameof(TitleName));
         SelectedTrack = Tracks.FirstOrDefault();
         UpdateActions();
     }
@@ -548,7 +581,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
         if (!CanEditTracks || _disc is null || _loadedPlaylist is null ||
             plan.Tracks.Any(change => change.Index < 0 || change.Index >= Tracks.Count) ||
             plan.ArtistTargets.Any(index => index < 0 || index >= Tracks.Count) ||
-            plan.ChapterTitles is { } titles && titles.Count != _loadedPlaylist.ChapterStarts.Count) return false;
+            plan.ChapterTitles is { } titles && titles.Count != _loadedPlaylist.ChapterStarts.Count ||
+            plan.TitleName is { } titleName && string.IsNullOrWhiteSpace(titleName)) return false;
         try
         {
             if (plan.ChapterTitles is { } chapterTitles &&
@@ -556,11 +590,13 @@ public sealed class MainViewModel : INotifyPropertyChanged
                 _editStore.SaveChapterTitles(_disc, _loadedPlaylist, chapterTitles);
             if (_disc.AlbumTitle != plan.AlbumTitle)
                 _editStore.SaveAlbumTitle(_disc, plan.AlbumTitle);
+            if (plan.TitleName is { } requestedTitleName && _loadedPlaylist.TitleName != requestedTitleName.Trim())
+                _editStore.SaveTitleName(_disc, _loadedPlaylist, requestedTitleName);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
         {
-            _log.Write($"ALBUM EDIT SAVE FAILED: {ex}");
-            Status = $"アルバム名を保存できませんでした: {ex.Message}";
+            _log.Write($"METADATA EDIT SAVE FAILED: {ex}");
+            Status = $"曲名情報を保存できませんでした: {ex.Message}";
             return false;
         }
 
@@ -578,6 +614,12 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
         finally { _suspendEditSave = false; }
         _disc.AlbumTitle = plan.AlbumTitle;
+        if (plan.TitleName is { } editedTitleName)
+        {
+            _loadedPlaylist.TitleName = editedTitleName;
+            _titleName = _loadedPlaylist.TitleName;
+            Changed(nameof(TitleName));
+        }
         if (plan.ChapterTitles is { } editedChapters) _loadedPlaylist.ChapterTitles = editedChapters;
         RefreshMetadata();
         Changed(nameof(SelectedChapterText));

@@ -99,6 +99,11 @@
                     <TextBlock Text="{local:Loc Key='ディスク名（親フォルダー）'}" Margin="0,0,0,4"/>
                     <TextBlock Text="{Binding AlbumTitle}" FontSize="16" FontWeight="SemiBold"
                                TextWrapping="Wrap" Margin="0,0,0,6"/>
+                    <TextBlock Text="{local:Loc Key='タイトル名（アルバム・サブフォルダー）'}"
+                               TextWrapping="Wrap" Margin="0,0,0,4"/>
+                    <TextBox Text="{Binding TitleName, Mode=TwoWay, UpdateSourceTrigger=LostFocus}"
+                             IsEnabled="{Binding CanEditTracks}" MinHeight="30"
+                             VerticalContentAlignment="Center" Margin="0,0,0,8"/>
                     <TextBlock Text="{Binding MetadataDetails}" TextWrapping="Wrap" FontSize="12"
                                Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,7"/>
                     <TextBlock Text="{Binding SelectedChapterText}" TextWrapping="Wrap" FontSize="12"
@@ -135,7 +140,7 @@
                     <DockPanel Grid.Row="0" Margin="0,0,0,7">
                         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
                             <Button Content="{local:Loc Key='全行を一括編集'}" Click="BulkEditAll_Click" IsEnabled="{Binding CanEditTracks}"
-                                    ToolTip="{local:Loc Key='全行の曲名と、アルバム名をテキストで編集します'}"/>
+                                    ToolTip="{local:Loc Key='全行の曲名と、ディスク名・タイトル名をテキストで編集します'}"/>
                             <Button Content="{local:Loc Key='選択行を一括編集'}" Click="BulkEditSelected_Click" IsEnabled="{Binding CanEditTracks}"
                                     ToolTip="{local:Loc Key='表で Ctrl または Shift を使って選んだ行を、上から順に編集します'}"/>
                             <Button Content="{local:Loc Key='すべて選択'}" Click="SelectAll_Click"/>
@@ -277,7 +282,7 @@
                         <TextBox Text="{Binding OutputFolder, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                  MinHeight="30" VerticalContentAlignment="Center"/>
                     </DockPanel>
-                    <CheckBox Content="{local:Loc Key='チャプターごとにフォルダーを作成する'}"
+                    <CheckBox Content="{local:Loc Key='さらにチャプター別フォルダーを作成する'}"
                               IsChecked="{Binding GroupByChapter, Mode=TwoWay}"
                               Margin="0,0,0,5"/>
                     <CheckBox Content="{local:Loc Key='多チャンネル音声を2chステレオのFLACで保存'}"

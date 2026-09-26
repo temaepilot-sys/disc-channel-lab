@@ -14,6 +14,7 @@ public sealed class DvdConversionService(ToolPaths paths, ProcessRunner runner, 
             quality == OutputQuality.HighResolution && !stream.CanMakeHighResolution)
             throw new InvalidOperationException("選択した音質で保存できない音声です。");
         var albumFolder = Path.Combine(outputRoot, ConversionService.SafeName(disc.AlbumTitle));
+        var titleFolder = Path.Combine(albumFolder, ConversionService.SafeName(playlist.TitleName));
         Directory.CreateDirectory(albumFolder);
         var stage = Path.Combine(albumFolder, $".BDDVD2Flac-{Guid.NewGuid():N}");
         Directory.CreateDirectory(stage);
@@ -67,15 +68,12 @@ public sealed class DvdConversionService(ToolPaths paths, ProcessRunner runner, 
                 arguments.AddRange(["-map", $"0:{stream.Index}", "-vn", "-sn", "-dn", "-af", filter,
                     "-c:a", "flac", "-sample_fmt", quality == OutputQuality.Cd ? "s16" : "s32",
                     "-metadata", $"title={title}", "-metadata", $"track={track.Number}",
-                    "-metadata", $"album={chapterTitle ?? disc.AlbumTitle}"]);
-                var titleFolder = playlist.Format == DiscFormat.DvdAudio
-                    ? $"DVD-Audio {playlist.DvdAudio!.TitleSet:00}-{playlist.DvdAudio.TitleNumber:00}"
-                    : $"DVD-Video {playlist.DvdVideoTitle:00}";
+                    "-metadata", $"album={playlist.TitleName}"]);
                 arguments.AddRange(["-metadata", $"SOURCE_FORMAT={(playlist.Format == DiscFormat.DvdAudio ? "DVD-Audio" : "DVD-Video")}",
                     "-metadata", $"DVD_TITLE_NUMBER={(playlist.Format == DiscFormat.DvdAudio ? playlist.DvdAudio!.TitleNumber : playlist.DvdVideoTitle)}"]);
                 if (playlist.Format == DiscFormat.DvdAudio)
                     arguments.AddRange(["-metadata", $"DVD_TITLE_SET={playlist.DvdAudio!.TitleSet}"]);
-                ConversionService.AddDiscTags(arguments, disc, track, chapterRange, chapterTitle);
+                ConversionService.AddDiscTags(arguments, disc, playlist, track, chapterRange, chapterTitle ?? title);
                 if (saveStereoDownmix) ConversionService.AddDownmixTags(arguments, mix);
                 if (channel is not null) ConversionService.AddChannelTags(arguments, stream, channel);
                 arguments.AddRange(["-y", staged]);
@@ -101,8 +99,7 @@ public sealed class DvdConversionService(ToolPaths paths, ProcessRunner runner, 
                 var chapterFolder = chapterRange.Start == chapterRange.End
                     ? $"Chapter {chapterRange.Start:00}" : $"Chapter {chapterRange.Start:00}-{chapterRange.End:00}";
                 if (chapterTitle is not null) chapterFolder += $" - {ConversionService.SafeName(chapterTitle, 80)}";
-                var folder = groupByChapter ? Path.Combine(albumFolder, titleFolder, chapterFolder)
-                    : Path.Combine(albumFolder, titleFolder);
+                var folder = groupByChapter ? Path.Combine(titleFolder, chapterFolder) : titleFolder;
                 if (channel is not null)
                     folder = Path.Combine(folder, $"{track.Number:00} {ConversionService.SafeName(title, 80)} [Multichannel]");
                 var channelSuffix = saveStereoDownmix ? " [Stereo mix]" : stream.Channels == 2 ? "" : stream.Channels == 1 ? " [Mono]"
@@ -120,8 +117,8 @@ public sealed class DvdConversionService(ToolPaths paths, ProcessRunner runner, 
                 Directory.CreateDirectory(Path.GetDirectoryName(item.Final)!);
                 File.Move(item.Staged, item.Final);
             }
-            log.Write($"DVD COMPLETE {produced.Count} files -> {albumFolder}");
-            return albumFolder;
+            log.Write($"DVD COMPLETE {produced.Count} files -> {titleFolder}");
+            return titleFolder;
         }
         finally
         {

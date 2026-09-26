@@ -53,6 +53,41 @@ public sealed class TrackEditsStore
         }
     }
 
+    public string? LoadTitleName(DiscAnalysis disc, PlaylistInfo playlist)
+    {
+        foreach (var path in ReadPaths(disc, $"{playlist.Id:00000}.title.json"))
+        {
+            if (!File.Exists(path)) continue;
+            try
+            {
+                var edit = JsonSerializer.Deserialize<AlbumEdit>(File.ReadAllText(path));
+                if (!string.IsNullOrWhiteSpace(edit?.Title)) return edit.Title.Trim();
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+            {
+                _log.Write($"TITLE NAME LOAD FAILED {path}: {ex.Message}");
+            }
+        }
+        return null;
+    }
+
+    public void SaveTitleName(DiscAnalysis disc, PlaylistInfo playlist, string title)
+    {
+        if (string.IsNullOrWhiteSpace(title)) throw new InvalidDataException("タイトル名を入力してください。");
+        var path = Path.Combine(DiscDirectory(disc), $"{playlist.Id:00000}.title.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            File.WriteAllText(temporary, JsonSerializer.Serialize(new AlbumEdit(title.Trim()), JsonOptions));
+            File.Move(temporary, path, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temporary)) File.Delete(temporary);
+        }
+    }
+
     public IReadOnlyList<string?>? LoadChapterTitles(DiscAnalysis disc, PlaylistInfo playlist)
     {
         foreach (var path in ReadPaths(disc, $"{playlist.Id:00000}.chapters.json"))

@@ -15,7 +15,7 @@ public partial class BulkEditWindow : Window
     private AdornerLayer? _adornerLayer;
     public BulkEditPlan? Plan { get; private set; }
 
-    public BulkEditWindow(string albumTitle, IReadOnlyList<TrackRow> tracks,
+    public BulkEditWindow(string albumTitle, string titleName, IReadOnlyList<TrackRow> tracks,
         IReadOnlyList<int> titleTargets, IReadOnlyList<int> artistTargets,
         IReadOnlyList<string?> chapterTitles, bool showChapterTab = false)
     {
@@ -25,6 +25,7 @@ public partial class BulkEditWindow : Window
         _artistTargets = artistTargets;
         _chapterCount = chapterTitles.Count;
         AlbumBox.Text = albumTitle;
+        TitleBox.Text = titleName;
         TitlesBox.Text = BulkEditService.FormatRows(titleTargets.Select(index => tracks[index]));
         ChapterNamesBox.Text = BulkEditService.FormatChapterTitles(chapterTitles);
         ChapterCountText.Text = LanguageService.T($"全 {_chapterCount} チャプター。上から1行ずつ入力します。空欄の行は従来の名前で保存します。");
@@ -76,9 +77,11 @@ public partial class BulkEditWindow : Window
     {
         try
         {
+            if (string.IsNullOrWhiteSpace(TitleBox.Text)) throw new InvalidDataException("タイトル名を入力してください。");
             Plan = BulkEditService.Parse(_tracks, _titleTargets, _artistTargets,
                 TitlesBox.Text, AlbumBox.Text, ArtistCheck.IsChecked == true, ArtistBox.Text) with
             {
+                TitleName = TitleBox.Text.Trim(),
                 ChapterTitles = BulkEditService.ParseChapterTitles(ChapterNamesBox.Text, _chapterCount)
             };
             DialogResult = true;

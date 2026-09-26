@@ -2,6 +2,7 @@ using Disc2Flac;
 using System.Diagnostics;
 using System.IO;
 using System.Reflection;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -65,6 +66,61 @@ if (args is ["disc-edits-check", var discPath])
         if (rows is not null || chapters is not null)
             Console.WriteLine($"Playlist {checkedPlaylist.Id:00000}: tracks={rows?.Count ?? 0}, chapters={chapters?.Count ?? 0}");
     }
+    return 0;
+}
+
+if (args is ["title-ui-test", var titleSourcePath, var titlePlaylistIdText, var expectedTitleName])
+{
+    var model = new MainViewModel();
+    await model.OpenSourceAsync(titleSourcePath);
+    var uiTitlePlaylist = model.Playlists.Single(x => x.Id == int.Parse(titlePlaylistIdText));
+    await model.ChoosePlaylistAsync(uiTitlePlaylist);
+    if (model.TitleName != expectedTitleName || model.GroupByChapter)
+        throw new InvalidDataException($"Title name or chapter-folder default is wrong: {model.TitleName}, {model.GroupByChapter}");
+    Console.WriteLine($"Title name and chapter-folder default verified: {model.TitleName}");
+    return 0;
+}
+
+if (args is ["title-layout-test", var layoutSourcePath, var layoutOutputRoot, var layoutPlaylistIdText, var layoutTitleName])
+{
+    var checkLog = new AppLog();
+    var checkPaths = new ToolPaths();
+    var checkRunner = new ProcessRunner(checkLog);
+    var checkProbe = new FfprobeService(checkPaths, checkRunner);
+    var checkReader = new DiscService(checkProbe, checkLog);
+    var checkedDisc = checkReader.Analyze(layoutSourcePath);
+    checkedDisc.AlbumTitle = new TrackEditsStore(checkLog).LoadAlbumTitle(checkedDisc) ?? checkedDisc.AlbumTitle;
+    var checkedPlaylist = checkedDisc.Playlists.Single(x => x.Id == int.Parse(layoutPlaylistIdText));
+    var edits = new TrackEditsStore(checkLog, Path.Combine(layoutOutputRoot, ".test-edits"));
+    edits.SaveTitleName(checkedDisc, checkedPlaylist, layoutTitleName);
+    checkedPlaylist.TitleName = edits.LoadTitleName(checkedDisc, checkedPlaylist) ??
+        throw new InvalidDataException("Title name was not persisted.");
+    var (streams, tracks) = await checkReader.AnalyzePlaylistAsync(checkedDisc, checkedPlaylist, CancellationToken.None);
+    var first = tracks.First();
+    var excerpt = new TrackRow
+    {
+        Number = first.Number, StartTicks = first.StartTicks,
+        EndTicks = Math.Min(first.EndTicks, first.StartTicks + 2 * 45000),
+        IsChapter = first.IsChapter, IsSelected = true, Title = "Layout verification"
+    };
+    var layoutOutput = await new ConversionService(checkPaths, checkRunner, checkProbe, checkLog).ConvertAsync(
+        checkedDisc, checkedPlaylist, streams.First(), [excerpt], OutputQuality.Cd,
+        layoutOutputRoot, new Progress<ConversionProgress>(), CancellationToken.None);
+    var expected = Path.Combine(layoutOutputRoot, ConversionService.SafeName(checkedDisc.AlbumTitle),
+        ConversionService.SafeName(layoutTitleName));
+    if (!Path.GetFullPath(layoutOutput).Equals(Path.GetFullPath(expected), StringComparison.OrdinalIgnoreCase) ||
+        Directory.GetFiles(expected, "*.flac", SearchOption.TopDirectoryOnly).Length != 1)
+        throw new InvalidDataException($"Unexpected title folder: {layoutOutput}");
+    var savedFile = Directory.GetFiles(expected, "*.flac", SearchOption.TopDirectoryOnly).Single();
+    var probeResult = await checkRunner.RunAsync(checkPaths.Ffprobe,
+        ["-v", "error", "-show_entries", "format_tags", "-of", "json", savedFile], CancellationToken.None);
+    using var tagsDocument = JsonDocument.Parse(probeResult.Output);
+    var tags = tagsDocument.RootElement.GetProperty("format").GetProperty("tags");
+    if (tags.GetProperty("album").GetString() != layoutTitleName ||
+        tags.GetProperty("DISC_TITLE").GetString() != checkedDisc.AlbumTitle ||
+        tags.GetProperty("CHAPTERNUMBER").GetString() != first.Number.ToString())
+        throw new InvalidDataException("FLAC album, disc, or chapter tags do not match the selected title.");
+    Console.WriteLine($"Title layout and persistence verified: {layoutOutput}");
     return 0;
 }
 
@@ -162,7 +218,7 @@ if (args is ["theme-test"])
             if (((SolidColorBrush)main.Background).Color != Color.FromRgb(0xF5, 0xF7, 0xFA))
                 throw new InvalidDataException("Light theme did not load.");
             ThemeService.Apply(true);
-            var editor = new BulkEditWindow("", [], [], [], []);
+            var editor = new BulkEditWindow("", "Title", [], [], [], []);
             main.SourceCombo.ApplyTemplate();
             var sourcePopup = (Popup)main.SourceCombo.Template.FindName("PART_Popup", main.SourceCombo);
             var popupBorder = (Border)sourcePopup.Child;
@@ -234,7 +290,7 @@ if (args is ["language-test"])
             };
             if (playlist.ChapterCountLabel != "1 chapter")
                 throw new InvalidDataException("English chapter label did not load.");
-            var editor = new BulkEditWindow("Album", [], [], [], []);
+            var editor = new BulkEditWindow("Album", "Title", [], [], [], []);
             if (editor.Title != "Edit tracks and chapter names" ||
                 !editor.TargetText.Text.StartsWith("Edit all", StringComparison.Ordinal))
                 throw new InvalidDataException("Bulk editor did not open in English.");

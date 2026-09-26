@@ -10,7 +10,7 @@ public sealed class ConversionService(ToolPaths paths, ProcessRunner runner, Ffp
     public async Task<string> ConvertAsync(
         DiscAnalysis disc, PlaylistInfo playlist, AudioStreamInfo stream, IReadOnlyList<TrackRow> selected,
         OutputQuality quality, string outputRoot, IProgress<ConversionProgress> progress, CancellationToken token,
-        bool groupByChapter = true, bool saveStereoDownmix = false, StereoMixSettings? mix = null,
+        bool groupByChapter = false, bool saveStereoDownmix = false, StereoMixSettings? mix = null,
         bool saveIndividualChannels = false)
     {
         if (saveStereoDownmix && saveIndividualChannels)
@@ -29,6 +29,7 @@ public sealed class ConversionService(ToolPaths paths, ProcessRunner runner, Ffp
         if (quality == OutputQuality.HighResolution && !stream.CanMakeHighResolution) throw new InvalidOperationException("この音声はハイレゾで保存できません。");
         if (!Directory.Exists(outputRoot)) Directory.CreateDirectory(outputRoot);
         var albumFolder = Path.Combine(outputRoot, SafeName(disc.AlbumTitle));
+        var titleFolder = Path.Combine(albumFolder, SafeName(playlist.TitleName));
         Directory.CreateDirectory(albumFolder);
         var stage = Path.Combine(albumFolder, $".Disc2Flac-{Guid.NewGuid():N}");
         Directory.CreateDirectory(stage);
@@ -48,7 +49,7 @@ public sealed class ConversionService(ToolPaths paths, ProcessRunner runner, Ffp
                 var chapterRange = GetChapterRange(playlist, track);
                 var chapterTitle = chapterRange.Start == chapterRange.End
                     ? playlist.ChapterTitle(chapterRange.Start) : null;
-                var flacAlbum = chapterTitle ?? disc.AlbumTitle;
+                var flacAlbum = playlist.TitleName;
                 var segments = PlaylistSegments.ForRange(playlist, track.StartTicks, track.EndTicks);
                 if (segments.Count == 0) throw new InvalidDataException($"{track.Title} に対応する音声クリップがありません。");
                 var title = string.IsNullOrWhiteSpace(track.Title) ? $"{(track.IsChapter ? "Chapter" : "Track")} {track.Number:00}" : track.Title.Trim();
@@ -96,7 +97,7 @@ public sealed class ConversionService(ToolPaths paths, ProcessRunner runner, Ffp
                         "-metadata", $"title={title}", "-metadata", $"track={track.Number}",
                         "-metadata", $"album={flacAlbum}"
                     };
-                    AddDiscTags(arguments, disc, track, chapterRange, chapterTitle);
+                    AddDiscTags(arguments, disc, playlist, track, chapterRange, chapterTitle ?? title);
                     if (saveStereoDownmix) AddDownmixTags(arguments, mix);
                     if (channel is not null) AddChannelTags(arguments, stream, channel);
                     arguments.AddRange(["-y", part]);
@@ -128,7 +129,7 @@ public sealed class ConversionService(ToolPaths paths, ProcessRunner runner, Ffp
                          "-map", "0:a:0", "-c:a", "flac", "-sample_fmt", quality == OutputQuality.Cd ? "s16" : "s32",
                          "-metadata", $"title={title}", "-metadata", $"track={track.Number}",
                          "-metadata", $"album={flacAlbum}" };
-                    AddDiscTags(joinArguments, disc, track, chapterRange, chapterTitle);
+                    AddDiscTags(joinArguments, disc, playlist, track, chapterRange, chapterTitle ?? title);
                     if (saveStereoDownmix) AddDownmixTags(joinArguments, mix);
                     if (channel is not null) AddChannelTags(joinArguments, stream, channel);
                     joinArguments.AddRange(["-y", staged]);
@@ -144,7 +145,7 @@ public sealed class ConversionService(ToolPaths paths, ProcessRunner runner, Ffp
                 var chapterFolder = chapterRange.Start == chapterRange.End
                     ? $"Chapter {chapterRange.Start:00}" : $"Chapter {chapterRange.Start:00}-{chapterRange.End:00}";
                 if (chapterTitle is not null) chapterFolder += $" - {SafeName(chapterTitle, 80)}";
-                var targetFolder = groupByChapter ? Path.Combine(albumFolder, chapterFolder) : albumFolder;
+                var targetFolder = groupByChapter ? Path.Combine(titleFolder, chapterFolder) : titleFolder;
                 if (channel is not null)
                     targetFolder = Path.Combine(targetFolder, $"{track.Number:00} {SafeName(title, 80)} [Multichannel]");
                 produced.Add((staged, UniquePath(Path.Combine(targetFolder, fileName), produced.Select(x => x.final))));
@@ -158,9 +159,9 @@ public sealed class ConversionService(ToolPaths paths, ProcessRunner runner, Ffp
                 Directory.CreateDirectory(Path.GetDirectoryName(final)!);
                 File.Move(staged, final);
             }
-            log.Write($"COMPLETE {produced.Count} files -> {albumFolder}");
+            log.Write($"COMPLETE {produced.Count} files -> {titleFolder}");
             progress.Report(new ConversionProgress(1, $"{produced.Count} ファイルを保存しました"));
-            return albumFolder;
+            return titleFolder;
         }
         finally
         {
@@ -196,7 +197,7 @@ public sealed class ConversionService(ToolPaths paths, ProcessRunner runner, Ffp
         return (start, end);
     }
 
-    internal static void AddDiscTags(List<string> arguments, DiscAnalysis disc, TrackRow track,
+    internal static void AddDiscTags(List<string> arguments, DiscAnalysis disc, PlaylistInfo playlist, TrackRow track,
         (int Start, int End) chapterRange, string? chapterTitle)
     {
         Add("CHAPTERNUMBER", chapterRange.Start.ToString(CultureInfo.InvariantCulture));
@@ -204,6 +205,11 @@ public sealed class ConversionService(ToolPaths paths, ProcessRunner runner, Ffp
             Add("CHAPTEREND", chapterRange.End.ToString(CultureInfo.InvariantCulture));
         Add("CHAPTERTITLE", chapterTitle);
         Add("DISC_TITLE", disc.AlbumTitle);
+        if (playlist.Format == DiscFormat.BluRay)
+        {
+            Add("BD_PLAYLIST", playlist.Id.ToString("00000", CultureInfo.InvariantCulture));
+            Add("BD_TITLE_NUMBER", playlist.DisplayOrder.ToString(CultureInfo.InvariantCulture));
+        }
         Add("artist", track.Artist ?? disc.Artist);
         Add("album_artist", disc.Artist);
         Add("date", disc.Date);

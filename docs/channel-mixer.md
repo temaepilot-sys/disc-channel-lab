@@ -2,6 +2,8 @@
 
 [日本語](channel-mixer.ja.md)
 
+![Channel mixer in English](screenshots/mixer-english.png)
+
 Select a supported multichannel stream and choose **Open mixer**. Opening it for the first time with a supported stream enables **Apply mixer to playback**. The window is independent of the main controls; closing it preserves playback and settings. Mono and stereo sources continue to use the main player controls. The mixer supports 28 layouts with 3–8 input channels.
 
 ## Levels and meters

@@ -8,9 +8,15 @@ DiscChannelLab は、多チャンネル音声を調べるための Windows ア�
 
 ## スクリーンショット
 
+### メイン画面
+
 ![DiscChannelLab の日本語画面](docs/screenshots/japanese.png)
 
-[英語の画面](docs/screenshots/english.png)
+### チャンネルミキサー
+
+![チャンネルミキサーの日本語画面](docs/screenshots/mixer-japanese.png)
+
+英語のスクリーンショット：[メイン画面](docs/screenshots/english.png) · [チャンネルミキサー](docs/screenshots/mixer-english.png)
 
 ## 主な機能
 

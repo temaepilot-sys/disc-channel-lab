@@ -37,6 +37,12 @@ Japanese screenshots: [Main window](docs/screenshots/japanese.png) · [Channel m
 - Read saved Blu-ray track, chapter, and album edits from the earlier `Disc2Flac` app when the disc matches.
 - Open a disc drive, a disc folder, or a mounted ISO. Protected sources are unsupported.
 
+## A note from Claude Sonnet
+
+> Even without a full 5.1 playback setup, listening to channels individually can reveal sounds that were recorded but have gone unheard.
+
+An AI-generated recommendation supplied by the developer, translated from Japanese. [Read the full text](docs/claude-sonnet-note.md) · [Japanese text](docs/claude-sonnet-note.ja.md).
+
 ## Why can a 5.1 stereo mix sound quieter?
 
 The standard mix uses fixed attenuation to leave room for channels being added together. Initial channel-mixer settings and **Reset defaults** now reproduce this same mix for the selected layout. This is a conservative starting point, with no loudness matching to a separate stereo version.

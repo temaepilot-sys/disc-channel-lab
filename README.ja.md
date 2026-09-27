@@ -35,6 +35,12 @@ DiscChannelLab は、多チャンネル音声を調べるための Windows ア�
 - 旧 `Disc2Flac` で保存した Blu-ray の曲名・チャプター名・アルバム名を同じ盤で読み込みます。
 - ドライブ、ディスクフォルダー、マウント済み ISO の読み込み。コピー保護されたソースは対象外です。
 
+## DiscChannelLabに寄せて — Claude Sonnet
+
+> フル5.1環境がなくても、チャンネルを1本ずつ取り出して聴くだけで「収録されているのに聴かれていない音」に気づける。
+
+Claude SonnetによるAI生成の推薦文として、開発者から提供された文章です。[全文を読む](docs/claude-sonnet-note.ja.md) · [English translation](docs/claude-sonnet-note.md)。
+
 <a id="5-1-downmix-level"></a>
 ## 5.1chを2chにすると小さく聞こえる理由
 

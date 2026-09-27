@@ -25,6 +25,7 @@ internal static class ExperimentalMixerTests
             var model = new MainViewModel();
             model.SelectedStream = stream;
             var afterL = new double[names.Length]; var afterR = new double[names.Length];
+            VerifyStandardDefault(model, stream);
             foreach (var strip in model.MixerStrips) strip.Level = 100;
             StereoPreviewMixer.BuildWeights(names, new(StereoMixSettings.Default, null,
                 model.MixerStrips.Select(x => x.Snapshot()).ToArray()), afterL, afterR);
@@ -36,8 +37,11 @@ internal static class ExperimentalMixerTests
                 Check(Math.Abs(expectedL - afterL[i]) < 1e-10 && Math.Abs(expectedR - afterR[i]) < 1e-10,
                     $"Unity gain/pan mismatch for {layout.Key}/{names[i]}");
             }
+            model.ResetExperimentalMixer();
+            VerifyStandardDefault(model, stream);
             model.DetachLanguage();
         }
+        Console.WriteLine("Initial and reset channel settings reproduce the standard mix for all supported layouts.");
         Console.WriteLine($"Unity gain and equal-power pan verified for all {layouts.Count} supported layouts.");
 
         var audio = Stream(6, "5.1");
@@ -138,7 +142,7 @@ internal static class ExperimentalMixerTests
         Check(!window.CommitInputs(), "Invalid field did not block export");
         level.GetBindingExpression(TextBox.TextProperty)!.UpdateTarget();
         model.ResetExperimentalMixer(); Pump();
-        Check(firstStrip.Pan == -100 && firstStrip.Level == 100 && !firstStrip.Muted, "Reset failed");
+        Check(firstStrip.Pan == -100 && Math.Abs(firstStrip.Level - 100 / (1 + Math.Sqrt(2))) < 1e-9 && !firstStrip.Muted, "Reset failed");
         VerifyPresets(model, output);
         Check(model.MixerStrips.Single(x => x.Code == "FC").Pan == 0 && model.MixerStrips.Single(x => x.Code == "FR").Pan == 100,
             "Default pan positions incorrect");
@@ -164,14 +168,27 @@ internal static class ExperimentalMixerTests
         Render(root, Path.Combine(output, "mixer-dark-en.png"));
         ThemeService.Apply(false); LanguageService.Instance.Apply(true); Pump(); Layout(root, 744, 700);
         Render(root, Path.Combine(output, "mixer-light-ja-small.png"));
+        var levelBeforeClose = firstStrip.Level;
         window.Close();
-        Check(model.ExperimentalMixerEnabled && firstStrip.Level == 100, "Closing changed mixer state");
+        Check(model.ExperimentalMixerEnabled && firstStrip.Level == levelBeforeClose, "Closing changed mixer state");
         var reopened = new MixerWindow(model);
         Layout((FrameworkElement)reopened.Content, 1200, 660);
         Check(ReferenceEquals(model, reopened.DataContext), "Reopening lost shared settings");
         reopened.Close(); model.DetachLanguage();
         Check(errors.Errors.Count == 0, "WPF binding errors: " + string.Join("; ", errors.Errors));
         Console.WriteLine("WPF faders, numeric validation, pan, mute, bypass, reset, close/reopen and dark/light layouts verified.");
+    }
+    private static void VerifyStandardDefault(MainViewModel model, AudioStreamInfo stream)
+    {
+        var names = StereoMixSettings.ChannelNames(stream);
+        var expectedL = new double[names.Count]; var expectedR = new double[names.Count];
+        var actualL = new double[names.Count]; var actualR = new double[names.Count];
+        StereoPreviewMixer.BuildWeights(names, new(StereoMixSettings.Default, null), expectedL, expectedR);
+        StereoPreviewMixer.BuildWeights(names, new(StereoMixSettings.Default, null,
+            model.MixerStrips.Select(x => x.Snapshot()).ToArray()), actualL, actualR);
+        for (var i = 0; i < names.Count; i++)
+            Check(Math.Abs(actualL[i] - expectedL[i]) < 1e-12 && Math.Abs(actualR[i] - expectedR[i]) < 1e-12,
+                $"Standard defaults differ for {stream.ChannelLayout}/{names[i]}");
     }
     private static void Pump() => Dispatcher.CurrentDispatcher.Invoke(() => { }, DispatcherPriority.ContextIdle);
     private static void VerifyPresets(MainViewModel model, string output)
@@ -216,6 +233,27 @@ internal static class ExperimentalMixerTests
         other.SelectedStream = null;
         other.SelectedStream = Stream(5, "5.0");
         Check(other.MixerStrips.Single(x => x.Code == "FL").Snapshot() == restored.Snapshot(), "Changing discs lost channel settings");
+        Check(other.ExperimentalMixerEnabled, "Changing titles/discs silently disabled the channel mixer");
+        other.SelectedStream = Stream(2, "stereo");
+        live = (PreviewMixState)typeof(MainViewModel).GetField("_livePreviewMix", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(other)!;
+        Check(live.Channels is null, "Unsupported stream received channel mixer settings");
+        other.SelectedStream = Stream(6, "5.1");
+        other.ResetExperimentalMixer();
+        foreach (var strip in other.MixerStrips) strip.Level = 100;
+        live = (PreviewMixState)typeof(MainViewModel).GetField("_livePreviewMix", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(other)!;
+        var left = new double[6]; var right = new double[6];
+        StereoPreviewMixer.BuildWeights(StereoMixSettings.ChannelNames(other.SelectedStream), live, left, right);
+        Check(other.ExperimentalMixerEnabled && left[0] == 1 && right[1] == 1,
+            "Returning from stereo used attenuated standard mix despite 100% faders");
+        other.SelectedStream = Stream(8, "7.1");
+        VerifyStandardDefault(other, other.SelectedStream);
+        other.SelectedStream = Stream(6, "5.1");
+        Check(other.MixerStrips.All(x => x.Level == 100), "Returning to a layout lost its custom levels");
+        other.ExperimentalMixerEnabled = false;
+        other.SelectedStream = null;
+        other.SelectedStream = Stream(6, "5.1");
+        Check(!other.ExperimentalMixerEnabled, "An explicit bypass was not preserved across disc changes");
+        Console.WriteLine("Mixer on/off choice survives title/disc/stereo transitions; FL/FR return at unity gain.");
         other.DetachLanguage();
         model.ResetExperimentalMixer(); model.Volume = 100; model.PerceivedVolume = true; model.IncludeMixerMaster = false;
         Console.WriteLine("Independent JSON preset round trip, channel identity, live application, disc switching and atomic invalid-file rejection verified.");

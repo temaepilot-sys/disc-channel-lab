@@ -8,6 +8,21 @@ public sealed record PreviewMixState(StereoMixSettings Mix, string? SoloChannel,
 /// <summary>Applies preview channel gains to decoded PCM while playback is running.</summary>
 public static class StereoPreviewMixer
 {
+    public static ExperimentalChannel[] StandardChannels(AudioStreamInfo stream)
+    {
+        var channels = StereoMixSettings.ChannelNames(stream);
+        var left = new double[channels.Count]; var right = new double[channels.Count];
+        BuildWeights(channels, new(StereoMixSettings.Default, null), left, right);
+        return channels.Select((code, i) =>
+        {
+            // Convert the standard L/R coefficients to gain plus equal-power pan.
+            // The attenuation is visible in the faders; 100% remains true unity.
+            var gain = Math.Sqrt(left[i] * left[i] + right[i] * right[i]);
+            var pan = gain == 0 ? 0 : Math.Atan2(right[i], left[i]) * 4 / Math.PI - 1;
+            return new ExperimentalChannel(code, gain, Math.Clamp(pan, -1, 1), false);
+        }).ToArray();
+    }
+
     public static async Task<long> CopyAsync(Stream source, Stream destination, AudioStreamInfo stream,
         Func<PreviewMixState> settings, Func<double> volume, CancellationToken token,
         Action? firstWrite = null, Action<PreviewMixState>? mixApplied = null, Action<MixerMeterFrame>? mixedLevels = null)

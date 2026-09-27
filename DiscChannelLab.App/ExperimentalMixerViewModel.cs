@@ -12,7 +12,7 @@ public sealed partial class MainViewModel
     private bool _includeMixerMaster;
     private string _mixerVariantName = "Mix 1";
     private bool _applyingMixerPreset;
-    private readonly Dictionary<string, ExperimentalChannel> _rememberedMixerChannels = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, ExperimentalChannel[]> _rememberedMixerLayouts = new(StringComparer.Ordinal);
     public string MixerVariantName { get => _mixerVariantName; set => Set(ref _mixerVariantName, value); }
     public bool IncludeMixerMaster { get => _includeMixerMaster; set => Set(ref _includeMixerMaster, value); }
     public bool CanExportMixer => CanPrepareConversion && CanDownmixStereo;
@@ -39,12 +39,12 @@ public sealed partial class MainViewModel
         }
     }
     private PreviewMixState PreviewState(StereoMixSettings mix, string? solo) =>
-        new(mix, solo, ExperimentalMixerEnabled ? MixerStrips.Select(x => x.Snapshot()).ToArray() : null);
+        new(mix, solo, ExperimentalMixerEnabled && CanUseExperimentalMixer ? MixerStrips.Select(x => x.Snapshot()).ToArray() : null);
 
     public void PublishExperimentalMix()
     {
         if (_applyingMixerPreset) return;
-        if (ExperimentalMixerEnabled && PreviewChannels.Count > 0) SelectedPreviewChannel = PreviewChannels[0];
+        if (ExperimentalMixerEnabled && CanUseExperimentalMixer && PreviewChannels.Count > 0) SelectedPreviewChannel = PreviewChannels[0];
         _activePlaybackMix = CurrentMix;
         _activePreviewChannel = SelectedPreviewChannel?.Code;
         Volatile.Write(ref _livePreviewMix, PreviewState(CurrentMix, _activePreviewChannel));
@@ -82,46 +82,45 @@ public sealed partial class MainViewModel
     private void RebuildMixerStrips()
     {
         SaveMixerDownmix = false;
-        foreach (var strip in MixerStrips) _rememberedMixerChannels[strip.Code] = strip.Snapshot();
+        if (MixerStrips.Count > 0)
+            _rememberedMixerLayouts[string.Join(' ', MixerStrips.Select(x => x.Code))] = MixerStrips.Select(x => x.Snapshot()).ToArray();
         MixerStrips.Clear();
         if (CanUseExperimentalMixer)
         {
+            var defaults = StereoPreviewMixer.StandardChannels(SelectedStream!);
+            var key = string.Join(' ', defaults.Select(x => x.Code));
+            var settings = (_rememberedMixerLayouts.TryGetValue(key, out var remembered) ? remembered : defaults)
+                .ToDictionary(x => x.Code, StringComparer.Ordinal);
             foreach (var input in ChannelMeters)
             {
-                var level = input.Code switch
-                {
-                    "FC" => StereoMixSettings.Default.Center * 100,
-                    "LFE" => StereoMixSettings.Default.Lfe * 100,
-                    "FL" or "FR" or "FLC" or "FRC" => 100,
-                    _ => StereoMixSettings.Default.Surround * 100
-                };
-                var strip = new MixerStrip(input, level, false, PublishExperimentalMix);
-                if (_rememberedMixerChannels.TryGetValue(input.Code, out var previous))
-                {
-                    strip.Level = previous.Gain * 100; strip.Pan = previous.Pan * 100; strip.Muted = previous.Muted;
-                }
+                var setting = settings[input.Code];
+                var strip = new MixerStrip(input, setting.Gain * 100, setting.Muted, PublishExperimentalMix)
+                    { Pan = setting.Pan * 100 };
                 MixerStrips.Add(strip);
             }
         }
-        else ExperimentalMixerEnabled = false;
+        // Loading a title temporarily clears SelectedStream. Keep the user's on/off
+        // choice through that gap and through stereo/unsupported streams.
         Changed(nameof(CanUseExperimentalMixer));
         ResetMixedMeters();
         PublishExperimentalMix();
     }
     public void ResetExperimentalMixer()
     {
-        foreach (var strip in MixerStrips)
+        if (!CanUseExperimentalMixer) return;
+        var defaults = StereoPreviewMixer.StandardChannels(SelectedStream!).ToDictionary(x => x.Code);
+        _applyingMixerPreset = true;
+        try
         {
-            strip.Level = strip.Code switch
+            foreach (var strip in MixerStrips)
             {
-                "FC" => StereoMixSettings.Default.Center * 100,
-                "LFE" => StereoMixSettings.Default.Lfe * 100,
-                "FL" or "FR" or "FLC" or "FRC" => 100,
-                _ => StereoMixSettings.Default.Surround * 100
-            };
-            strip.Pan = strip.DefaultPan;
-            strip.Muted = false;
+                var setting = defaults[strip.Code];
+                strip.Level = setting.Gain * 100;
+                strip.Pan = setting.Pan * 100;
+                strip.Muted = setting.Muted;
+            }
         }
+        finally { _applyingMixerPreset = false; }
         PublishExperimentalMix();
     }
     private void QueueMixedFrame(double position, MixerMeterFrame frame)

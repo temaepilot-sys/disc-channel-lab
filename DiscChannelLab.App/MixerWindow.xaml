@@ -77,6 +77,16 @@
             <TextBlock Text="{Binding SelectedStream.DisplayName}" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource MutedBrush}" Margin="0,4,0,6"/>
             <CheckBox Content="{local:Loc Key='ミキサーを再生に適用'}"
                       IsChecked="{Binding ExperimentalMixerEnabled}" IsEnabled="{Binding CanUseExperimentalMixer}"/>
+            <TextBlock Text="{local:Loc Key='標準ミックスを使用：このフェーダーは再生に適用されていません。'}"
+                       TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,5,0,0">
+                <TextBlock.Style><Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+                    <Setter Property="Visibility" Value="Collapsed"/>
+                    <Style.Triggers><MultiDataTrigger><MultiDataTrigger.Conditions>
+                        <Condition Binding="{Binding CanUseExperimentalMixer}" Value="True"/>
+                        <Condition Binding="{Binding ExperimentalMixerEnabled}" Value="False"/>
+                    </MultiDataTrigger.Conditions><Setter Property="Visibility" Value="Visible"/></MultiDataTrigger></Style.Triggers>
+                </Style></TextBlock.Style>
+            </TextBlock>
         </StackPanel>
         <DockPanel Grid.Row="1">
             <Border DockPanel.Dock="Right" Width="158" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource AccentBrush}"

@@ -56,6 +56,7 @@ public sealed class LanguageService : INotifyPropertyChanged
 
     private static readonly Dictionary<string, string> English = new(StringComparer.Ordinal)
     {
+        ["標準ミックスを使用：このフェーダーは再生に適用されていません。"] = "Standard mix is active: these faders are not applied to playback.",
         ["設定を保存…"] = "Save preset…",
         ["設定を読み込む…"] = "Load preset…",
         ["ミキサー設定を保存"] = "Save mixer preset",

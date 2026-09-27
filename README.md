@@ -31,6 +31,39 @@ The app reads supported, unprotected Blu-ray, DVD-Audio, and DVD-Video sources t
 - Read saved Blu-ray track, chapter, and album edits from the earlier `Disc2Flac` app when the disc matches.
 - Open a disc drive, a disc folder, or a mounted ISO. Protected sources are unsupported.
 
+## Why can a 5.1 stereo mix sound quieter?
+
+The standard mix uses fixed attenuation to leave room for channels being added together. Initial channel-mixer settings and **Reset defaults** now reproduce this same mix for the selected layout. This is a conservative starting point, with no loudness matching to a separate stereo version.
+
+For 5.1 at Master 100%, using `S_L`/`S_R` for the left/right surround channels:
+
+```text
+a = 1/sqrt(2) ≈ 0.70710678
+D = 1 + 2*a ≈ 2.41421356
+L_out = (FL + a*FC + a*S_L) / D
+R_out = (FR + a*FC + a*S_R) / D
+LFE contribution = 0 by default
+```
+
+The relative `1 : 0.7071 : 0.7071` coefficients follow the stereo equations in [ITU-R BS.775-4, Annex 4, Table 2](https://www.itu.int/dms_pubrec/itu-r/rec/bs/R-REC-BS.775-4-202212-I!!PDF-E.pdf). The additional division is this app's fixed headroom policy. The same worst-case scaling rationale is described in the historical [ITU-R BS.1196 (1995), page 88](https://www.itu.int/dms_pubrec/itu-r/rec/bs/R-REC-BS.1196-0-199510-S!!PDF-E.pdf); this is a mathematical reference, not a claim of decoder compliance. [FFmpeg's pan documentation](https://ffmpeg.org/ffmpeg-filters.html#pan-1) also describes normalizing coefficient sums to one.
+
+For normalized input samples with absolute values at most one, the triangle inequality gives `|L_out| <= (1 + a + a)/D = 1`. Thus the sum itself stays within full scale at default settings, even if contributing channels peak together with the same polarity. The scale factor is about `0.41421356`, or `−7.66 dB`, relative to the same unattenuated downmix. Front-only content is reduced by that amount. It is not a prediction of the loudness difference from a separately mastered stereo recording.
+
+The equal-power pan controls express these coefficients as follows:
+
+| 5.1 channel | Default fader | Pan | Contribution to output |
+| --- | ---: | --- | --- |
+| FL / FR | 41.42% | Left / Right | 0.4142 to its own side |
+| FC | 41.42% | Center | 0.2929 to each side |
+| Surround L / R | 29.29% | Left / Right | 0.2929 to its own side |
+| LFE | 0% | Center | None |
+
+The displayed percentages are rounded; internal coefficients retain precision. Setting FL/FR manually to 100% at their original pan positions still gives unity gain and equal Input/Post peaks. Other layouts use layout-dependent defaults; the five-channel reference above does not establish a universal standard for all 28 supported layouts.
+
+LFE exclusion is an explicit default, not bass management; information present only in LFE is omitted. Channel correlation, phase cancellation, channel levels and differences in the source mixes affect perceived loudness and balance. This app does not interpret a disc's artistic downmix intent or automatically match loudness. Fixed scaling preserves dynamics but can leave unused headroom. A measured peak/loudness adjustment would require a separate analysis step and is not applied automatically.
+
+Increasing faders, adding LFE or raising Master invalidates the default peak bound. Resampling and reconstructed true peaks also lie outside that simple sample-sum proof. There is no automatic limiter. Master is included in FLAC export only when explicitly checked. The playback mixer on/off choice now survives title/disc changes; when it is off, a notice identifies the standard mix, whose gains need not match edited fader positions.
+
 ## Reading and diagnostics
 
 The **Reading and diagnostics** panel offers **Retry selected title**, **Inspect all titles**, and **Save diagnostic report**. Initial analysis shows chapter rows before audio probing finishes, then checks remaining titles in the background. Starting playback or another foreground operation stops the background scan. Retry uses longer, bounded probe timeouts. Reports include title states, original/effective chapter boundaries, clip information, errors, and FFmpeg versions; titles not yet inspected are marked accordingly. The report contains disc metadata and local diagnostic details, so review it before sharing.

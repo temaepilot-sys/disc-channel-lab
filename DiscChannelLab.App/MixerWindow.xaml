@@ -51,7 +51,10 @@
                         <TextBox Width="65" Padding="4" HorizontalContentAlignment="Right" KeyDown="Level_KeyDown"
                                  Text="{Binding Level, Mode=TwoWay, UpdateSourceTrigger=LostFocus, StringFormat={}{0:0.##}, ValidatesOnExceptions=True}"/>
                         <TextBlock Text="%" VerticalAlignment="Center" Margin="4,0,0,0"/>
-                        <CheckBox Content="Mute" IsChecked="{Binding Muted}" VerticalAlignment="Center" Margin="9,0,0,0"/>
+                        <StackPanel VerticalAlignment="Center" Margin="9,0,0,0">
+                            <CheckBox Content="Solo" IsChecked="{Binding Solo, Mode=TwoWay}" Margin="0,0,0,6"/>
+                            <CheckBox Content="Mute" IsChecked="{Binding Muted, Mode=TwoWay}"/>
+                        </StackPanel>
                     </StackPanel>
                     <StackPanel Grid.Row="4">
                         <TextBlock Text="{Binding PanText}" HorizontalAlignment="Center" FontSize="12"/>

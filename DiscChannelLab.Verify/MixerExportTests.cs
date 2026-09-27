@@ -83,6 +83,29 @@ internal static class MixerExportTests
         var cdInfo = await probe.ProbeFileAsync(cd, CancellationToken.None);
         Check(cdInfo.SampleRate == 44100 && cdInfo.BitDepth == 16 && cdInfo.SampleCount == 44100, "CD export format mismatch");
 
+        var soloRight = new ChannelMixExport(audio, original.Select(c => c with { Solo = c.Code == "FR" }), "Solo silent FR");
+        await Export(soloRight, OutputQuality.HighResolution);
+        var silentSolo = Directory.GetFiles(folder, "*Solo silent FR*.flac").Single();
+        Check((await Decode(silentSolo, "solo-silent")).All(b => b == 0), "Unselected FL leaked into Solo FLAC");
+        var soloBothChannels = original.Select(c => c with { Solo = c.Code is "FL" or "FR" }).ToArray();
+        var soloBoth = new ChannelMixExport(audio, soloBothChannels, "Solo FL and FR");
+        soloBothChannels[0] = soloBothChannels[0] with { Solo = false };
+        await Export(soloBoth, OutputQuality.HighResolution);
+        var bothSolo = Directory.GetFiles(folder, "*Solo FL and FR*.flac").Single();
+        var bothBytes = await Decode(bothSolo, "solo-both");
+        Check(bothBytes.SequenceEqual(bytes), "Multiple solos changed gain or export snapshot was not frozen");
+        var soloMetadata = await runner.RunAsync(tools.Ffprobe, ["-v", "error", "-show_entries", "format_tags", "-of", "json", bothSolo], CancellationToken.None);
+        using var soloTags = JsonDocument.Parse(soloMetadata.Output);
+        var mixerTag = soloTags.RootElement.GetProperty("format").GetProperty("tags").EnumerateObject()
+            .Single(p => p.Name.Equals("MIXER_SETTINGS", StringComparison.OrdinalIgnoreCase)).Value.GetString()!;
+        using var mixerJson = JsonDocument.Parse(mixerTag);
+        Check(mixerJson.RootElement.GetProperty("Version").GetInt32() == 3 &&
+              mixerJson.RootElement.GetProperty("Channels").EnumerateArray().Count(c => c.GetProperty("Solo").GetBoolean()) == 2,
+            "FLAC metadata lost Solo settings");
+        try { _ = new ChannelMixExport(audio, original.Select(c => c with { Muted = true, Solo = true }), "Invalid switches"); throw new Exception("Dual-on switches accepted"); }
+        catch (InvalidDataException) { }
+        Console.WriteLine("Solo FLAC: excluded channels are silent, multiple solos preserve gain, frozen settings and Solo metadata verified.");
+
         try { _ = new ChannelMixExport(audio, original.Select(x => x with { Gain = 1.001 }), "Over 100"); throw new Exception("Gain above 100% accepted"); }
         catch (InvalidDataException) { }
         var loud = original.Select(x => x with { Gain = x.Code == "FL" ? 1 : 0 }).ToArray();

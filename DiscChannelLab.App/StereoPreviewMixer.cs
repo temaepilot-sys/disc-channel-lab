@@ -176,13 +176,15 @@ public static class StereoPreviewMixer
 
         if (state.Channels is { } experimental)
         {
+            var hasSolo = experimental.Any(x => x.Solo && channels.Contains(x.Code));
             // Independent faders are true channel gains: 100% is unity before pan.
             // Do not apply the group downmix's shared normalization or layout weights.
             for (var i = 0; i < channels.Count; i++)
             {
                 var setting = experimental.FirstOrDefault(x => x.Code == channels[i]);
                 if (setting is null) { left[i] = right[i] = 0; continue; }
-                var gain = setting.Muted || !double.IsFinite(setting.Gain) ? 0 : Math.Clamp(setting.Gain, 0, 1);
+                var gain = setting.Muted || (hasSolo && !setting.Solo) || !double.IsFinite(setting.Gain)
+                    ? 0 : Math.Clamp(setting.Gain, 0, 1);
                 var pan = double.IsFinite(setting.Pan) ? Math.Clamp(setting.Pan, -1, 1) : 0;
                 var angle = (pan + 1) * Math.PI / 4;
                 left[i] = pan == 1 ? 0 : gain * Math.Cos(angle);

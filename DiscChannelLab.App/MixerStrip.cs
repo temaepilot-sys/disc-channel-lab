@@ -6,7 +6,8 @@ public sealed record ExperimentalChannel(
     [property: System.Text.Json.Serialization.JsonRequired] string Code,
     [property: System.Text.Json.Serialization.JsonRequired] double Gain,
     [property: System.Text.Json.Serialization.JsonRequired] double Pan,
-    [property: System.Text.Json.Serialization.JsonRequired] bool Muted);
+    [property: System.Text.Json.Serialization.JsonRequired] bool Muted,
+    bool Solo = false);
 // All values refer to the same PCM window and are displayed together on the playback clock.
 public sealed record MixerMeterFrame(double Seconds, double[] Input, double[] InputRms,
     double[] Left, double[] Right, double[] Output);
@@ -17,6 +18,7 @@ public sealed class MixerStrip : INotifyPropertyChanged
     private double _level;
     private double _pan;
     private bool _muted;
+    private bool _solo;
     public ChannelMeter Input { get; }
     public ChannelMeter PostLeft { get; } = new("L", "L");
     public ChannelMeter PostRight { get; } = new("R", "R");
@@ -60,9 +62,26 @@ public sealed class MixerStrip : INotifyPropertyChanged
     public bool Muted
     {
         get => _muted;
-        set { if (_muted == value) return; _muted = value; Notify(nameof(Muted)); _apply(); }
+        set
+        {
+            if (_muted == value) return;
+            _muted = value;
+            if (value && _solo) { _solo = false; Notify(nameof(Solo)); }
+            Notify(nameof(Muted)); _apply();
+        }
     }
-    public ExperimentalChannel Snapshot() => new(Code, Level / 100, Pan / 100, Muted);
+    public bool Solo
+    {
+        get => _solo;
+        set
+        {
+            if (_solo == value) return;
+            _solo = value;
+            if (value && _muted) { _muted = false; Notify(nameof(Muted)); }
+            Notify(nameof(Solo)); _apply();
+        }
+    }
+    public ExperimentalChannel Snapshot() => new(Code, Level / 100, Pan / 100, Muted, Solo);
     public event PropertyChangedEventHandler? PropertyChanged;
     private void Notify(string name) => PropertyChanged?.Invoke(this, new(name));
     public void RefreshLanguage() => Notify(nameof(Description));

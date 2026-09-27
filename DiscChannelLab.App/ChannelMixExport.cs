@@ -29,7 +29,7 @@ public sealed class ChannelMixExport
             !_channels.Select(x => x.Code).SequenceEqual(names) ||
             !double.IsFinite(MasterGain) || MasterGain is < 0 or > 2 ||
             _channels.Any(x => !double.IsFinite(x.Gain) || x.Gain is < 0 or > 1 ||
-                               !double.IsFinite(x.Pan) || x.Pan is < -1 or > 1))
+                               !double.IsFinite(x.Pan) || x.Pan is < -1 or > 1 || (x.Muted && x.Solo)))
             throw new InvalidDataException("ミキサーの設定または音源のチャンネル配置が不正です。");
     }
     public string Filter(AudioStreamInfo source)
@@ -46,7 +46,7 @@ public sealed class ChannelMixExport
     }
     public void AddTags(List<string> arguments)
     {
-        var json = JsonSerializer.Serialize(new { Version = 2, Layout = _layout,
+        var json = JsonSerializer.Serialize(new { Version = 3, Layout = _layout,
             Name, GainLaw = "independent-unity", PanLaw = "equal-power", MasterGain, Channels = _channels });
         arguments.AddRange(["-metadata", "DOWNMIX=individual channel mixer to stereo",
             "-metadata", $"MIXER_VARIANT={Name}", "-metadata", $"MIXER_SETTINGS={json}"]);

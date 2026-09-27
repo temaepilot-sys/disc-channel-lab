@@ -318,7 +318,7 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
         log.Write($"LIVE PCM MIX channel={state.SoloChannel ?? "stereo"} " +
                   $"mode={(state.SoloChannel is not null ? "solo" : state.Channels is null ? "standard" : "channel-mixer")} " +
                   $"mix={state.Mix.Center:0.###}/{state.Mix.Surround:0.###}/{state.Mix.Lfe:0.###} front={state.Mix.Front:0.###} " +
-                  $"channels={string.Join(';', (state.Channels ?? []).Select(x => $"{x.Code}:gain={x.Gain:0.####},pan={x.Pan:0.####},mute={x.Muted}"))}");
+                  $"channels={string.Join(';', (state.Channels ?? []).Select(x => $"{x.Code}:gain={x.Gain:0.####},pan={x.Pan:0.####},mute={x.Muted},solo={x.Solo}"))}");
 
     public static async Task<long> CopyPcmWithVolumeAsync(Stream source, Stream destination, Func<double> volume,
         CancellationToken token, Action? firstWrite = null)

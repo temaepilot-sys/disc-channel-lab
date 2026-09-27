@@ -15,6 +15,7 @@ internal static class ExperimentalMixerTests
 {
     public static async Task RunAsync(string output)
     {
+        await VerifySoloAudioAsync();
         // Independent channels must have unity gain at 100%, regardless of layout.
         var layouts = (IReadOnlyDictionary<string, string>)typeof(StereoMixSettings)
             .GetField("Layouts", BindingFlags.Static | BindingFlags.NonPublic)!.GetValue(null)!;
@@ -131,9 +132,21 @@ internal static class ExperimentalMixerTests
         var pan = Descendants<Slider>(root).First(x => x.DataContext == firstStrip && x.Orientation == Orientation.Horizontal);
         pan.Value = 100; Pump();
         Check(firstStrip.Pan == 100, "Pan binding failed");
-        var mute = Descendants<CheckBox>(root).First(x => x.DataContext == firstStrip);
+        var mute = Descendants<CheckBox>(root).First(x => x.DataContext == firstStrip && Equals(x.Content, "Mute"));
+        var solo = Descendants<CheckBox>(root).First(x => x.DataContext == firstStrip && Equals(x.Content, "Solo"));
         mute.IsChecked = true; Pump();
         Check(firstStrip.Muted, "Mute binding failed");
+        solo.IsChecked = true; Pump();
+        Check(firstStrip.Solo && !firstStrip.Muted && mute.IsChecked == false, "Solo did not clear Mute in the UI");
+        mute.IsChecked = true; Pump();
+        Check(firstStrip.Muted && !firstStrip.Solo && solo.IsChecked == false, "Mute did not clear Solo in the UI");
+        mute.IsChecked = false; Pump();
+        Check(!firstStrip.Muted && !firstStrip.Solo, "Both switches cannot be off");
+        solo.IsChecked = true;
+        var secondSolo = Descendants<CheckBox>(root).First(x => x.DataContext == model.MixerStrips[1] && Equals(x.Content, "Solo"));
+        secondSolo.IsChecked = true; Pump();
+        Check(firstStrip.Solo && model.MixerStrips[1].Solo, "Solo incorrectly excluded another channel");
+        Check(solo.TranslatePoint(new Point(), root).Y < mute.TranslatePoint(new Point(), root).Y, "Solo is not above Mute");
         var level = Descendants<TextBox>(root).First(x => x.DataContext == firstStrip);
         level.Text = "75"; level.GetBindingExpression(TextBox.TextProperty)!.UpdateSource(); Pump();
         Check(firstStrip.Level == 75, "Numeric input binding failed");
@@ -142,7 +155,7 @@ internal static class ExperimentalMixerTests
         Check(!window.CommitInputs(), "Invalid field did not block export");
         level.GetBindingExpression(TextBox.TextProperty)!.UpdateTarget();
         model.ResetExperimentalMixer(); Pump();
-        Check(firstStrip.Pan == -100 && Math.Abs(firstStrip.Level - 100 / (1 + Math.Sqrt(2))) < 1e-9 && !firstStrip.Muted, "Reset failed");
+        Check(firstStrip.Pan == -100 && Math.Abs(firstStrip.Level - 100 / (1 + Math.Sqrt(2))) < 1e-9 && !firstStrip.Muted && model.MixerStrips.All(x => !x.Solo), "Reset failed");
         VerifyPresets(model, output);
         Check(model.MixerStrips.Single(x => x.Code == "FC").Pan == 0 && model.MixerStrips.Single(x => x.Code == "FR").Pan == 100,
             "Default pan positions incorrect");
@@ -164,6 +177,8 @@ internal static class ExperimentalMixerTests
             model.MixerStrips[i].PostRight.Update(-18 - i * 2, -25);
         }
         model.MixerOutputLeft.Update(-4, -15); model.MixerOutputRight.Update(-6, -17);
+        // Preset checks create view models that reload the user's language preference.
+        LanguageService.Instance.Apply(false);
         Pump(); Layout(root, 1200, 760);
         Render(root, Path.Combine(output, "mixer-dark-en.png"));
         ThemeService.Apply(false); LanguageService.Instance.Apply(true); Pump(); Layout(root, 744, 700);
@@ -197,13 +212,17 @@ internal static class ExperimentalMixerTests
         model.Volume = 175; model.PerceivedVolume = false; model.IncludeMixerMaster = true;
         var fl = model.MixerStrips.Single(x => x.Code == "FL");
         fl.Level = 37.25; fl.Pan = 42; fl.Muted = true;
+        model.MixerStrips.Single(x => x.Code == "FR").Solo = true;
+        model.MixerStrips.Single(x => x.Code == "FC").Solo = true;
         var path = Path.Combine(output, "mixer-preset.json");
         model.CaptureMixerPreset().Save(path);
         var preset = MixerPreset.Load(path);
+        Check(preset.Version == 2, "Solo presets need version 2");
         // Apply to another disc/stream instance; match channel identity rather than JSON order.
         var other = new MainViewModel { SelectedStream = Stream(5, "5.0") };
         other.ApplyMixerPreset(preset with { Channels = preset.Channels.Reverse().ToArray() });
         var restored = other.MixerStrips.Single(x => x.Code == "FL");
+        Check(other.MixerStrips.Where(x => x.Solo).Select(x => x.Code).SequenceEqual(new[] { "FR", "FC" }), "Preset lost multiple solos");
         Check(restored.Level == 37.25 && restored.Pan == 42 && restored.Muted &&
             other.Volume == 175 && !other.PerceivedVolume && other.IncludeMixerMaster &&
             other.MixerVariantName == "Study 日本語" && other.ExperimentalMixerEnabled, "Preset round trip lost settings");
@@ -213,6 +232,7 @@ internal static class ExperimentalMixerTests
         foreach (var bad in new[]
         {
             preset with { Version = 99 },
+            preset with { Channels = preset.Channels.Select(c => c with { Muted = true, Solo = true }).ToArray() },
             preset with { MasterPercent = 201 },
             preset with { Channels = preset.Channels.Select(c => c with { Gain = 1.01 }).ToArray() },
             preset with { Channels = preset.Channels.Select(c => c with { Pan = double.NaN }).ToArray() },
@@ -230,8 +250,18 @@ internal static class ExperimentalMixerTests
         var missingRejected = false;
         try { MixerPreset.Load(malformed); } catch (System.Text.Json.JsonException) { missingRejected = true; }
         Check(missingRejected, "Missing channel gain silently became zero");
+        var legacyPath = Path.Combine(output, "legacy-preset.json");
+        var legacyJson = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!;
+        legacyJson["version"] = 1;
+        foreach (var channel in legacyJson["channels"]!.AsArray()) channel!.AsObject().Remove("solo");
+        File.WriteAllText(legacyPath, legacyJson.ToJsonString());
+        var legacy = MixerPreset.Load(legacyPath);
+        other.ApplyMixerPreset(legacy);
+        Check(other.MixerStrips.All(x => !x.Solo) && other.MixerStrips[0].Muted, "Legacy preset must clear Solo and retain Mute");
+        other.ApplyMixerPreset(preset);
         other.SelectedStream = null;
         other.SelectedStream = Stream(5, "5.0");
+        Check(other.MixerStrips.Count(x => x.Solo) == 2, "Changing discs lost Solo settings");
         Check(other.MixerStrips.Single(x => x.Code == "FL").Snapshot() == restored.Snapshot(), "Changing discs lost channel settings");
         Check(other.ExperimentalMixerEnabled, "Changing titles/discs silently disabled the channel mixer");
         other.SelectedStream = Stream(2, "stereo");
@@ -257,6 +287,54 @@ internal static class ExperimentalMixerTests
         other.DetachLanguage();
         model.ResetExperimentalMixer(); model.Volume = 100; model.PerceivedVolume = true; model.IncludeMixerMaster = false;
         Console.WriteLine("Independent JSON preset round trip, channel identity, live application, disc switching and atomic invalid-file rejection verified.");
+    }
+    private static async Task VerifySoloAudioAsync()
+    {
+        var audio = Stream(6, "5.1");
+        var names = StereoMixSettings.ChannelNames(audio);
+        var pcm = new byte[24000 * 12];
+        for (var frame = 0; frame < 24000; frame++)
+            for (var ch = 0; ch < 6; ch++)
+                BinaryPrimitives.WriteInt16LittleEndian(pcm.AsSpan(frame * 12 + ch * 2, 2), (short)((ch + 1) * 1000));
+        var channels = names.Select(code => new ExperimentalChannel(code,
+            code is "FL" or "FR" or "FC" ? 1 : 0, code == "FR" ? 1 : -1, false, code == "FL")).ToArray();
+        var state = new PreviewMixState(StereoMixSettings.Default, null, channels);
+        var meters = new List<MixerMeterFrame>();
+        using var input = new MemoryStream(pcm);
+        using var output = new MemoryStream();
+        await StereoPreviewMixer.CopyAsync(input, output, audio, () => state, () => 1, CancellationToken.None,
+            mixedLevels: frame =>
+            {
+                meters.Add(frame);
+                // Switch on known PCM windows, independent of wall-clock scheduling.
+                if (meters.Count == 5) state = state with { Channels = channels.Select(c => c with { Solo = c.Code is "FL" or "FR" }).ToArray() };
+                if (meters.Count == 10) state = state with { Channels = channels.Select(c => c with { Solo = c.Code == "FR" }).ToArray() };
+                if (meters.Count == 15) state = state with { Channels = channels.Select(c => c with { Solo = false }).ToArray() };
+                if (meters.Count == 20) state = state with { Channels = channels.Select(c => c with { Solo = false, Muted = c.Code == "FR" }).ToArray() };
+            });
+        var result = output.ToArray();
+        var expected = new[] { (1000, 0), (1000, 2000), (0, 2000), (4000, 2000), (4000, 0) };
+        for (var stage = 0; stage < expected.Length; stage++)
+        {
+            var offset = (stage * 4800 + 4000) * 4;
+            Check(BinaryPrimitives.ReadInt16LittleEndian(result.AsSpan(offset, 2)) == expected[stage].Item1 &&
+                  BinaryPrimitives.ReadInt16LittleEndian(result.AsSpan(offset + 2, 2)) == expected[stage].Item2,
+                $"Live Solo/Mute PCM incorrect in stage {stage}");
+        }
+        Check(meters.Count == 25 && meters.All(m => m.Input.All(double.IsFinite)), "Solo hid input signal meters");
+        Check(double.IsNegativeInfinity(meters[4].Right[1]) && double.IsNegativeInfinity(meters[4].Left[2]) &&
+              double.IsNegativeInfinity(meters[14].Left[0]) && double.IsFinite(meters[19].Left[2]),
+            "Post meters do not follow Solo selection");
+        var applies = 0;
+        MixerStrip? strip = null;
+        strip = new MixerStrip(new ChannelMeter("FL", "FL"), 75, false, () =>
+        {
+            Check(!(strip!.Muted && strip.Solo), "An invalid dual-on state was published");
+            applies++;
+        });
+        strip.Muted = true; strip.Solo = true; strip.Muted = true; strip.Muted = false;
+        Check(applies == 4 && !strip.Solo && !strip.Muted && strip.Level == 75, "Switches must publish once and preserve the gain");
+        Console.WriteLine("Solo: live single/multiple selection, deselection, normal mix restoration, Mute exclusion and Input/Post PCM meters passed.");
     }
     private static void Layout(FrameworkElement root, double width, double height)
     { root.Measure(new Size(width, height)); root.Arrange(new Rect(0, 0, width, height)); root.UpdateLayout(); }

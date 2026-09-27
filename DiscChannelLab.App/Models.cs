@@ -162,7 +162,7 @@ public sealed class AudioStreamInfo : INotifyPropertyChanged
         (HasPartialCoverage ? $" · {LanguageService.T("一部区間のみ")} #{Index}" : "");
     private string CodecLabel => LanguageService.T(Codec switch
     {
-        "pcm_bluray" or "pcm_dvd" => "LPCM",
+        "pcm_bluray" or "pcm_dvd" or "pcm_dvda" => "LPCM",
         "mlp" => "可逆圧縮音声",
         "dts" when Profile == "DTS-HD MA" => "可逆圧縮音声",
         _ => "圧縮音声"

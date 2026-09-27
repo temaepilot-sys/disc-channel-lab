@@ -1,0 +1,142 @@
+<Window x:Class="Disc2Flac.MixerWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:Disc2Flac"
+        Title="{local:Loc Key='チャンネルミキサー'}" Width="1260" Height="820" MinWidth="760" MinHeight="740"
+        WindowStartupLocation="CenterOwner" Background="{DynamicResource AppBackgroundBrush}">
+    <Window.Resources>
+        <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Padding" Value="10,6"/>
+        </Style>
+        <Style x:Key="Meter" TargetType="ProgressBar" BasedOn="{StaticResource {x:Type ProgressBar}}">
+            <Setter Property="Orientation" Value="Vertical"/><Setter Property="Width" Value="13"/>
+            <Setter Property="Minimum" Value="0"/><Setter Property="Maximum" Value="100"/>
+            <Setter Property="Value" Value="{Binding PeakPercent, Mode=OneWay}"/>
+            <Setter Property="Foreground" Value="#40C790"/>
+            <Style.Triggers><DataTrigger Binding="{Binding IsClipping}" Value="True"><Setter Property="Foreground" Value="#FF6565"/></DataTrigger></Style.Triggers>
+        </Style>
+        <DataTemplate x:Key="MeterTemplate">
+            <Grid Width="40">
+                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                <TextBlock Text="{Binding Code}" HorizontalAlignment="Center" FontSize="10" Margin="0,0,0,5"/>
+                <ProgressBar Grid.Row="1" Style="{StaticResource Meter}"/>
+                <TextBlock Grid.Row="2" Text="{Binding PeakText}" FontSize="9" HorizontalAlignment="Center" Margin="0,6,0,0"/>
+            </Grid>
+        </DataTemplate>
+        <DataTemplate x:Key="StripTemplate">
+            <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}"
+                    BorderThickness="1" CornerRadius="5" Margin="0,0,8,0" Padding="8" Width="174">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*" MinHeight="170"/>
+                        <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <TextBlock Text="{Binding Code}" FontSize="20" FontWeight="SemiBold" HorizontalAlignment="Center" ToolTip="{Binding Description}"/>
+                    <Grid Grid.Row="1" Margin="0,8,0,4">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="40"/><ColumnDefinition Width="80"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                        <TextBlock Text="{local:Loc Key='入力'}" FontSize="10" HorizontalAlignment="Center"/>
+                        <TextBlock Grid.Column="1" Text="{local:Loc Key='調整後 L/R'}" FontSize="10" HorizontalAlignment="Center"/>
+                        <TextBlock Grid.Column="2" Text="%" FontSize="10" HorizontalAlignment="Center"/>
+                    </Grid>
+                    <Grid Grid.Row="2">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="40"/><ColumnDefinition Width="40"/><ColumnDefinition Width="40"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                        <ContentControl Content="{Binding Input}" ContentTemplate="{StaticResource MeterTemplate}" VerticalContentAlignment="Stretch"/>
+                        <ContentControl Grid.Column="1" Content="{Binding PostLeft}" ContentTemplate="{StaticResource MeterTemplate}" VerticalContentAlignment="Stretch"/>
+                        <ContentControl Grid.Column="2" Content="{Binding PostRight}" ContentTemplate="{StaticResource MeterTemplate}" VerticalContentAlignment="Stretch"/>
+                        <Slider Grid.Column="3" Orientation="Vertical" Minimum="0" Maximum="100" TickFrequency="25" TickPlacement="BottomRight"
+                                Foreground="{DynamicResource TextBrush}" IsMoveToPointEnabled="True" SmallChange="1" LargeChange="5"
+                                Value="{Binding Fader, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Margin="0,18,0,18"/>
+                    </Grid>
+                    <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,12,0,10">
+                        <TextBox Width="65" Padding="4" HorizontalContentAlignment="Right" KeyDown="Level_KeyDown"
+                                 Text="{Binding Level, Mode=TwoWay, UpdateSourceTrigger=LostFocus, StringFormat={}{0:0.##}, ValidatesOnExceptions=True}"/>
+                        <TextBlock Text="%" VerticalAlignment="Center" Margin="4,0,0,0"/>
+                        <CheckBox Content="Mute" IsChecked="{Binding Muted}" VerticalAlignment="Center" Margin="9,0,0,0"/>
+                    </StackPanel>
+                    <StackPanel Grid.Row="4">
+                        <TextBlock Text="{Binding PanText}" HorizontalAlignment="Center" FontSize="12"/>
+                        <Slider Minimum="-100" Maximum="100" TickFrequency="100" TickPlacement="BottomRight"
+                                Foreground="{DynamicResource TextBrush}" IsMoveToPointEnabled="True" SmallChange="1" LargeChange="10"
+                                Value="{Binding Pan, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                        <DockPanel><TextBlock DockPanel.Dock="Right" Text="R" FontSize="10"/><TextBlock Text="L" FontSize="10"/></DockPanel>
+                    </StackPanel>
+                    <Button Grid.Row="5" Content="{local:Loc Key='元のパン位置'}" Click="PanReset_Click" Margin="0,8,0,0" FontSize="11"/>
+                </Grid>
+            </Border>
+        </DataTemplate>
+    </Window.Resources>
+    <Grid Margin="16">
+        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+        <StackPanel Margin="0,0,0,12">
+            <DockPanel>
+                <Button DockPanel.Dock="Right" Content="{local:Loc Key='デフォルトに戻す'}" Click="Reset_Click" IsEnabled="{Binding CanUseExperimentalMixer}"/>
+                <Button DockPanel.Dock="Right" Content="{local:Loc Key='設定を保存…'}" Click="SavePreset_Click" IsEnabled="{Binding CanUseExperimentalMixer}"/>
+                <Button DockPanel.Dock="Right" Content="{local:Loc Key='設定を読み込む…'}" Click="LoadPreset_Click" IsEnabled="{Binding CanUseExperimentalMixer}"/>
+                <TextBlock Text="{local:Loc Key='チャンネルミキサー'}" FontSize="22" FontWeight="SemiBold"/>
+            </DockPanel>
+            <TextBlock Text="{Binding SelectedStream.DisplayName}" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource MutedBrush}" Margin="0,4,0,6"/>
+            <CheckBox Content="{local:Loc Key='ミキサーを再生に適用'}"
+                      IsChecked="{Binding ExperimentalMixerEnabled}" IsEnabled="{Binding CanUseExperimentalMixer}"/>
+        </StackPanel>
+        <DockPanel Grid.Row="1">
+            <Border DockPanel.Dock="Right" Width="158" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource AccentBrush}"
+                    BorderThickness="1" CornerRadius="5" Padding="12" Margin="6,0,0,0">
+                <Grid>
+                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*" MinHeight="170"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                    <TextBlock Text="Master" FontSize="20" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                    <TextBlock Grid.Row="1" Text="{local:Loc Key='合成後 L/R'}" FontSize="10" HorizontalAlignment="Center" Margin="0,8,0,4"/>
+                    <Grid Grid.Row="2">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="40"/><ColumnDefinition Width="40"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                        <ContentControl Content="{Binding MixerOutputLeft}" ContentTemplate="{StaticResource MeterTemplate}" VerticalContentAlignment="Stretch"/>
+                        <ContentControl Grid.Column="1" Content="{Binding MixerOutputRight}" ContentTemplate="{StaticResource MeterTemplate}" VerticalContentAlignment="Stretch"/>
+                        <Slider Grid.Column="2" Orientation="Vertical" Minimum="0" Maximum="200" TickFrequency="25" TickPlacement="BottomRight"
+                                Foreground="{DynamicResource TextBrush}" IsMoveToPointEnabled="True" SmallChange="1" LargeChange="5"
+                                Value="{Binding Volume, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Margin="0,18,0,18" ToolTip="{Binding VolumeDetails}"/>
+                    </Grid>
+                    <StackPanel Grid.Row="3" Margin="0,12,0,12">
+                        <TextBlock Text="{Binding VolumeText}" HorizontalAlignment="Center" FontSize="16" ToolTip="{Binding VolumeDetails}"/>
+                        <TextBlock Text="{local:Loc Key='赤表示：0 dBFS以上'}" FontSize="10" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                    </StackPanel>
+                    <CheckBox Grid.Row="4" Content="{local:Loc Key='聴感カーブ'}" IsChecked="{Binding PerceivedVolume}" ToolTip="{Binding VolumeDetails}" Margin="0,0,0,4"/>
+                </Grid>
+            </Border>
+            <Grid>
+            <TextBlock Text="{local:Loc Key='対応するマルチチャンネル音声を選択すると、チャンネルごとの操作が表示されます。'}"
+                       TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="14" VerticalAlignment="Center">
+                <TextBlock.Style><Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+                    <Setter Property="Visibility" Value="Collapsed"/>
+                    <Style.Triggers><DataTrigger Binding="{Binding MixerStrips.Count}" Value="0"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers>
+                </Style></TextBlock.Style>
+            </TextBlock>
+            <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" VerticalContentAlignment="Stretch">
+                <ItemsControl ItemsSource="{Binding MixerStrips}" ItemTemplate="{StaticResource StripTemplate}">
+                    <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                </ItemsControl>
+            </ScrollViewer>
+            </Grid>
+        </DockPanel>
+        <StackPanel Grid.Row="2" Margin="0,12,0,0">
+            <Border Background="{DynamicResource SurfaceBrush}" Padding="8" Margin="0,0,0,8">
+                <StackPanel>
+                    <WrapPanel>
+                        <TextBlock Text="{local:Loc Key='ミックス名'}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                        <TextBox Width="120" MaxLength="80" Text="{Binding MixerVariantName, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,12,0"/>
+                        <CheckBox Content="{local:Loc Key='Master音量も保存に適用'}" IsChecked="{Binding IncludeMixerMaster}" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                        <Button Content="{local:Loc Key='このミックスをFLAC保存'}" Click="Export_Click" IsEnabled="{Binding CanExportMixer}"/>
+                    </WrapPanel>
+                    <TextBlock Text="{local:Loc Key='メイン画面の選択曲・音質・保存先を使用。保存開始時に再生を停止します。既存ファイルは上書きしません。'}"
+                               TextWrapping="Wrap" FontSize="10" Foreground="{DynamicResource MutedBrush}" Margin="0,5,0,0"/>
+                </StackPanel>
+            </Border>
+            <TextBlock Text="{local:Loc Key='入力：従来のピーク。調整後 L/R：各チャンネルのフェーダー・パン適用後、Master適用前。合成後 L/R：Master適用後、クリップ前。'}"
+                       TextWrapping="Wrap" FontSize="11" Foreground="{DynamicResource MutedBrush}"/>
+            <TextBlock Text="{local:Loc Key='設定はディスク情報と独立したJSONに保存できます。再生への適用がオフの場合は標準ミックスを使用します。'}"
+                       TextWrapping="Wrap" FontSize="11" Foreground="{DynamicResource MutedBrush}" Margin="0,4,0,8"/>
+            <DockPanel>
+                <Button DockPanel.Dock="Right" Content="{local:Loc Key='閉じる'}" Click="Close_Click"/>
+                <TextBlock Text="{local:Loc Key='フェーダー：0〜100%（聴感カーブ）／パン：等電力カーブ／メーター：−60〜0 dBFS'}"
+                           TextWrapping="Wrap" FontSize="11" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center"/>
+            </DockPanel>
+        </StackPanel>
+    </Grid>
+</Window>

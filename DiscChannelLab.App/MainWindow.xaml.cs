@@ -15,9 +15,10 @@ public partial class MainWindow : Window
 {
     private readonly MainViewModel _model;
     private bool _switchingMixPreview;
+    private MixerWindow? _mixerWindow;
+    private bool _mixerOpened;
     private readonly DispatcherTimer _driveTimer = new() { Interval = TimeSpan.FromSeconds(3) };
     private readonly DispatcherTimer _playTimer = new() { Interval = TimeSpan.FromMilliseconds(30) };
-    private readonly DispatcherTimer _mixTimer = new() { Interval = TimeSpan.FromMilliseconds(50) };
 
     public MainWindow()
     {
@@ -28,7 +29,6 @@ public partial class MainWindow : Window
         LanguageCombo.SelectedIndex = LanguageService.Instance.IsJapanese ? 1 : 0;
         _driveTimer.Tick += async (_, _) => await _model.DetectInsertedDiscAsync();
         _playTimer.Tick += (_, _) => _model.AdvancePlaybackClock();
-        _mixTimer.Tick += async (_, _) => { _mixTimer.Stop(); await ApplyMixControlAsync(); };
         AddHandler(PreviewMouseLeftButtonDownEvent, new MouseButtonEventHandler(Tracks_PreviewMouseLeftButtonDown), true);
         PlayerSeekSlider.AddHandler(PreviewMouseLeftButtonDownEvent, new MouseButtonEventHandler(SeekSlider_MouseDown), true);
         AddHandler(PreviewMouseLeftButtonUpEvent, new MouseButtonEventHandler(SeekSlider_MouseUp), true);
@@ -36,6 +36,25 @@ public partial class MainWindow : Window
         PlayerSeekSlider.KeyUp += SeekSlider_KeyUp;
         PlaylistCombo.DropDownOpened += (_, _) => UpdatePlaylistDropDownWidth();
         SizeChanged += (_, _) => { if (PlaylistCombo.IsDropDownOpen) UpdatePlaylistDropDownWidth(); };
+    }
+
+    private void OpenMixer_Click(object sender, RoutedEventArgs e)
+    {
+        if (_mixerWindow is not null)
+        {
+            if (_mixerWindow.WindowState == WindowState.Minimized) _mixerWindow.WindowState = WindowState.Normal;
+            _mixerWindow.Activate();
+            return;
+        }
+        if (!_mixerOpened && _model.CanUseExperimentalMixer)
+        {
+            SelectStereoMixPreview();
+            _model.ExperimentalMixerEnabled = true;
+            _mixerOpened = true;
+        }
+        _mixerWindow = new MixerWindow(_model) { Owner = this };
+        _mixerWindow.Closed += (_, _) => _mixerWindow = null;
+        _mixerWindow.Show();
     }
 
     private void UpdatePlaylistDropDownWidth()
@@ -68,10 +87,10 @@ public partial class MainWindow : Window
 
     private void Window_Closing(object? sender, CancelEventArgs e)
     {
+        _mixerWindow?.Close();
         CommitTrackEdits();
         _driveTimer.Stop();
         _playTimer.Stop();
-        _mixTimer.Stop();
         _model.Cancel();
         _model.DetachLanguage();
     }
@@ -203,72 +222,6 @@ public partial class MainWindow : Window
         return null;
     }
 
-    private void MixSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
-    {
-        if (_model is null || !IsLoaded || _model.IsRefreshingLanguage) return;
-        _mixTimer.Stop();
-        _mixTimer.Start();
-    }
-
-    private async void MixSlider_MouseUp(object sender, MouseButtonEventArgs e)
-    {
-        _mixTimer.Stop();
-        await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Background);
-        if (sender is Slider slider) slider.GetBindingExpression(Slider.ValueProperty)?.UpdateSource();
-        await ApplyMixControlAsync();
-    }
-
-    private async void MixSlider_KeyUp(object sender, KeyEventArgs e)
-    {
-        if (!IsSeekKey(e.Key)) return;
-        await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Background);
-        if (sender is Slider slider) slider.GetBindingExpression(Slider.ValueProperty)?.UpdateSource();
-        await ApplyMixControlAsync();
-    }
-
-    private async void MixInput_LostFocus(object sender, RoutedEventArgs e)
-    {
-        if (sender is not TextBox input) return;
-        input.GetBindingExpression(TextBox.TextProperty)?.UpdateSource();
-        if (!Validation.GetHasError(input)) await ApplyMixControlAsync();
-    }
-
-    private async void MixInput_KeyDown(object sender, KeyEventArgs e)
-    {
-        if (e.Key != Key.Enter || sender is not TextBox input) return;
-        input.GetBindingExpression(TextBox.TextProperty)?.UpdateSource();
-        if (!Validation.GetHasError(input)) await ApplyMixControlAsync();
-        e.Handled = true;
-    }
-
-    private async void MixMute_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is not CheckBox mute) return;
-        var checkedState = mute.IsChecked == true;
-        switch (mute.Tag as string)
-        {
-            case "Front": _model.FrontMixMuted = checkedState; break;
-            case "Center": _model.CenterMixMuted = checkedState; break;
-            case "Surround": _model.SurroundMixMuted = checkedState; break;
-            case "LFE": _model.LfeMixMuted = checkedState; break;
-        }
-        mute.GetBindingExpression(ToggleButton.IsCheckedProperty)?.UpdateSource();
-        await ApplyMixControlAsync();
-    }
-
-    private async void ResetStereoMix_Click(object sender, RoutedEventArgs e)
-    {
-        SelectStereoMixPreview();
-        await _model.ResetStereoMixAsync();
-    }
-
-    private async Task ApplyMixControlAsync()
-    {
-        _mixTimer.Stop();
-        SelectStereoMixPreview();
-        await _model.ApplyStereoMixAsync();
-    }
-
     private void SelectStereoMixPreview()
     {
         if (_model.SelectedPreviewChannel?.Code is null || _model.PreviewChannels.Count == 0) return;
@@ -356,6 +309,7 @@ public partial class MainWindow : Window
 
     private async void Save_Click(object sender, RoutedEventArgs e)
     {
+        if (_model.SaveMixerDownmix && _mixerWindow?.CommitInputs() == false) return;
         CommitTrackEdits();
         await _model.ConvertAsync();
     }

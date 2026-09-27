@@ -10,6 +10,36 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Threading;
 
+if (args is ["mixer-dvd-export-test", var mixerDvdRoot, var mixerDvdOutput])
+{
+    await MixerExportTests.RunDvdAsync(mixerDvdRoot, mixerDvdOutput);
+    return 0;
+}
+
+if (args is ["dvd-audio-integrity-test", var integrityRoot, var integrityOutput])
+{
+    await DvdAudioIntegrityTests.RunAsync(integrityRoot, integrityOutput);
+    return 0;
+}
+
+if (args is ["mixer-export-test", var exportTestRoot])
+{
+    await MixerExportTests.RunAsync(exportTestRoot);
+    return 0;
+}
+
+if (args is ["meter-alignment-test"])
+{
+    await MeterAlignmentTests.RunAsync();
+    return 0;
+}
+
+if (args is ["mixer-prototype-test", var mixerOutput])
+{
+    await ExperimentalMixerTests.RunAsync(mixerOutput);
+    return 0;
+}
+
 if (args is ["seek-pacing-test"])
 {
     await MeterSeekRegressionTests.PacingAsync();
@@ -508,12 +538,10 @@ if (args is ["playback-controls-test"])
             root.Measure(new Size(1200, 850));
             root.Arrange(new Rect(0, 0, 1200, 850));
             root.UpdateLayout();
-            if (!main.StereoMixExpander.IsEnabled)
-                throw new InvalidDataException("Stereo mix panel is disabled during playback.");
-            main.StereoMixExpander.IsExpanded = true;
-            main.StereoMixExpander.IsExpanded = false;
-            if (main.StereoMixExpander.IsExpanded)
-                throw new InvalidDataException("Stereo mix panel did not close during playback.");
+            if (main.FindName("StereoMixExpander") is not null || !main.OpenMixerButton.IsEnabled)
+                throw new InvalidDataException("Main window still has the old mixer or cannot open the new mixer.");
+            var mixer = new MixerWindow(model);
+            mixer.Close();
             var findRow = typeof(MainWindow).GetMethod("FindPlayableTrackRow", BindingFlags.Static | BindingFlags.NonPublic)!;
             var row = new DataGridRow();
             if (!ReferenceEquals(findRow.Invoke(null, [row]), row) ||

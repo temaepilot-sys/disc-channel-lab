@@ -11,8 +11,13 @@ public sealed class ConversionService(ToolPaths paths, ProcessRunner runner, Ffp
         DiscAnalysis disc, PlaylistInfo playlist, AudioStreamInfo stream, IReadOnlyList<TrackRow> selected,
         OutputQuality quality, string outputRoot, IProgress<ConversionProgress> progress, CancellationToken token,
         bool groupByChapter = false, bool saveStereoDownmix = false, StereoMixSettings? mix = null,
-        bool saveIndividualChannels = false)
+        bool saveIndividualChannels = false, ChannelMixExport? channelMix = null)
     {
+        if (channelMix is not null)
+        {
+            channelMix.Validate(stream);
+            saveStereoDownmix = true;
+        }
         if (saveStereoDownmix && saveIndividualChannels)
             throw new InvalidOperationException("2ch保存とチャンネル別保存は同時に選べません。");
         if (saveIndividualChannels && !StereoMixSettings.Supports(stream))
@@ -23,7 +28,7 @@ public sealed class ConversionService(ToolPaths paths, ProcessRunner runner, Ffp
         if (playlist.Format != DiscFormat.BluRay)
             return await new DvdConversionService(paths, runner, probe, log).ConvertAsync(
                 disc, playlist, stream, selected, quality, outputRoot, progress, token, groupByChapter,
-                saveStereoDownmix, mix, saveIndividualChannels);
+                saveStereoDownmix, mix, saveIndividualChannels, channelMix);
         if (selected.Count == 0) throw new InvalidOperationException("保存する曲またはチャプターを選択してください。");
         if (quality == OutputQuality.Cd && !stream.CanMakeCd) throw new InvalidOperationException("この音声はCD音質への変換条件を満たしていません。");
         if (quality == OutputQuality.HighResolution && !stream.CanMakeHighResolution) throw new InvalidOperationException("この音声はハイレゾで保存できません。");
@@ -84,7 +89,7 @@ public sealed class ConversionService(ToolPaths paths, ProcessRunner runner, Ffp
                         ? $"aresample=44100:osf=s16:dither_method=triangular,atrim=end_sample={sampleCount},asetpts=PTS-STARTPTS"
                         : $"aresample={expectedRate},atrim=end_sample={sampleCount},asetpts=PTS-STARTPTS";
                     if (channel is not null) filter = StereoMixSettings.SoloFilter(stream, channel, stereo: false) + "," + filter;
-                    else if (saveStereoDownmix) filter = mix.PanFilter(stream) + "," + filter;
+                    else if (saveStereoDownmix) filter = (channelMix?.Filter(stream) ?? mix.PanFilter(stream)) + "," + filter;
                     var arguments = new List<string>
                     {
                         "-hide_banner", "-nostdin", "-v", "error", "-progress", "pipe:1",
@@ -95,7 +100,8 @@ public sealed class ConversionService(ToolPaths paths, ProcessRunner runner, Ffp
                         "-metadata", $"album={flacAlbum}"
                     };
                     AddDiscTags(arguments, disc, playlist, track, chapterRange, chapterTitle ?? title);
-                    if (saveStereoDownmix) AddDownmixTags(arguments, mix);
+                    if (channelMix is not null) channelMix.AddTags(arguments);
+                    else if (saveStereoDownmix) AddDownmixTags(arguments, mix);
                     if (channel is not null) AddChannelTags(arguments, stream, channel);
                     arguments.AddRange(["-y", part]);
                     var completedParts = partIndex;
@@ -145,7 +151,8 @@ public sealed class ConversionService(ToolPaths paths, ProcessRunner runner, Ffp
                          "-metadata", $"title={title}", "-metadata", $"track={track.Number}",
                          "-metadata", $"album={flacAlbum}" };
                     AddDiscTags(joinArguments, disc, playlist, track, chapterRange, chapterTitle ?? title);
-                    if (saveStereoDownmix) AddDownmixTags(joinArguments, mix);
+                    if (channelMix is not null) channelMix.AddTags(joinArguments);
+                    else if (saveStereoDownmix) AddDownmixTags(joinArguments, mix);
                     if (channel is not null) AddChannelTags(joinArguments, stream, channel);
                     joinArguments.AddRange(["-y", staged]);
                     await runner.RunAsync(paths.Ffmpeg, joinArguments, token);
@@ -154,7 +161,7 @@ public sealed class ConversionService(ToolPaths paths, ProcessRunner runner, Ffp
                     if (joined.SampleCount != ToSample(track.EndTicks, expectedRate) - ToSample(track.StartTicks, expectedRate))
                         throw new InvalidDataException($"{title} の結合後のサンプル数が一致しません。");
                 }
-                var channelSuffix = saveStereoDownmix ? " [Stereo mix]" : stream.Channels == 2 ? "" : stream.Channels == 1 ? " [Mono]" : $" [{SafeName(stream.ChannelLayout)}]";
+                var channelSuffix = channelMix is not null ? channelMix.FileSuffix : saveStereoDownmix ? " [Stereo mix]" : stream.Channels == 2 ? "" : stream.Channels == 1 ? " [Mono]" : $" [{SafeName(stream.ChannelLayout)}]";
                 var fileName = channel is null ? $"{track.Number:00} {SafeName(title)}{channelSuffix}.flac"
                     : $"{SafeName(title)} - {channel}.flac";
                 var chapterFolder = chapterRange.Start == chapterRange.End

@@ -23,15 +23,19 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
         Func<double>? volume = null, StereoMixSettings? mix = null, string? soloChannel = null,
         Action<long, double, double[], double[]>? channelLevels = null,
         Action<long, double>? playbackPosition = null,
-        Func<PreviewMixState>? liveMix = null)
+        Func<PreviewMixState>? liveMix = null, Action<long, MixerMeterFrame>? mixedLevels = null)
     {
         var ffplay = paths.Ffplay ?? throw new FileNotFoundException("再生用の ffplay.exe が見つかりません。");
         mix ??= StereoMixSettings.Default;
+        // The live PCM mixer supplies input and output levels in one timestamped frame.
+        // Do not also feed input meters from the independently buffered FFmpeg log.
+        if (liveMix is not null && mixedLevels is not null && StereoMixSettings.Supports(stream))
+            channelLevels = null;
         if (channelLevels is not null && !await MeterFiltersAvailableAsync(token)) channelLevels = null;
         if (playlist.Format != DiscFormat.BluRay)
         {
             await PlayDvdAsync(ffplay, disc, playlist, stream, startTicks, endTicks,
-                token, segmentStarted, volume ?? (() => 1), mix, soloChannel, channelLevels, playbackPosition, liveMix);
+                token, segmentStarted, volume ?? (() => 1), mix, soloChannel, channelLevels, playbackPosition, liveMix, mixedLevels);
             return;
         }
         foreach (var segment in PlaylistSegments.ForRange(playlist, startTicks, endTicks))
@@ -40,7 +44,7 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
             var (sourcePath, seekTicks, source) = await GetSourceAsync(disc, stream, segment, token);
             await PlaySegmentAsync(ffplay, sourcePath, source, seekTicks, segment.EndTicks - segment.StartTicks,
                 token, () => segmentStarted?.Invoke(segment.StartTicks), volume ?? (() => 1), mix, soloChannel,
-                segment.StartTicks, channelLevels, playbackPosition, liveMix);
+                segment.StartTicks, channelLevels, playbackPosition, liveMix, mixedLevels);
         }
     }
 
@@ -67,7 +71,7 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
         AudioStreamInfo stream, long startTicks, long endTicks, CancellationToken token,
         Action<long>? segmentStarted, Func<double> volume, StereoMixSettings mix, string? soloChannel,
         Action<long, double, double[], double[]>? channelLevels, Action<long, double>? playbackPosition,
-        Func<PreviewMixState>? liveMix)
+        Func<PreviewMixState>? liveMix, Action<long, MixerMeterFrame>? mixedLevels)
     {
         var inputArgs = new List<string>();
         Func<Stream, CancellationToken, Task>? writeInput = null;
@@ -146,7 +150,7 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
             {
                 submittedBytes = liveChannels
                     ? await StereoPreviewMixer.CopyAsync(decoder.StandardOutput.BaseStream, player.StandardInput.BaseStream,
-                        stream, liveMix!, volume, token, () => segmentStarted?.Invoke(startTicks), LogLiveMix)
+                        stream, liveMix!, volume, token, () => segmentStarted?.Invoke(startTicks), LogLiveMix, frame => mixedLevels?.Invoke(startTicks, frame))
                     : await CopyPcmWithVolumeAsync(decoder.StandardOutput.BaseStream, player.StandardInput.BaseStream,
                         volume, token, () => segmentStarted?.Invoke(startTicks));
             }
@@ -194,7 +198,7 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
         long durationTicks, CancellationToken token, Action onStarted, Func<double> volume,
         StereoMixSettings mix, string? soloChannel, long segmentStartTicks,
         Action<long, double, double[], double[]>? channelLevels, Action<long, double>? playbackPosition,
-        Func<PreviewMixState>? liveMix)
+        Func<PreviewMixState>? liveMix, Action<long, MixerMeterFrame>? mixedLevels)
     {
         var samples = (long)Math.Round(durationTicks * 48000d / 45000d, MidpointRounding.AwayFromZero);
         var inputSeekTicks = Math.Max(0, seekTicks - 45000);
@@ -254,7 +258,7 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
             {
                 if (liveChannels)
                     await StereoPreviewMixer.CopyAsync(decoder.StandardOutput.BaseStream, player.StandardInput.BaseStream,
-                        stream, liveMix!, volume, token, onStarted, LogLiveMix);
+                        stream, liveMix!, volume, token, onStarted, LogLiveMix, frame => mixedLevels?.Invoke(segmentStartTicks, frame));
                 else
                     await CopyPcmWithVolumeAsync(decoder.StandardOutput.BaseStream, player.StandardInput.BaseStream,
                         volume, token, onStarted);

@@ -274,7 +274,7 @@ public sealed partial class FfprobeService(ToolPaths paths, ProcessRunner runner
                 var profile = String(stream, "profile");
                 if (format == DiscFormat.BluRay && codec != "pcm_bluray" &&
                     !(codec == "dts" && profile == "DTS-HD MA") ||
-                    format == DiscFormat.DvdAudio && codec is not ("pcm_dvd" or "mlp") ||
+                    format == DiscFormat.DvdAudio && codec is not ("pcm_dvd" or "pcm_dvda" or "mlp") ||
                     format == DiscFormat.DvdVideo && codec is not ("pcm_dvd" or "ac3" or "eac3" or "mp2" or "dts"))
                     continue;
                 var depth = Number(stream, "bits_per_raw_sample");

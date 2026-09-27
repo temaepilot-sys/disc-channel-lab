@@ -11,6 +11,7 @@ public sealed class ChannelMeter(string code, string description) : INotifyPrope
     public string Description => LanguageService.T(description);
     public double PeakPercent => double.IsFinite(_peakDb) ? Math.Clamp((_peakDb + 60) * 100 / 60, 0, 100) : 0;
     public string PeakText => Format(_peakDb);
+    public bool IsClipping => double.IsFinite(_peakDb) && _peakDb >= 0;
     public string Details => LanguageService.T($"{Description} · ピーク {Format(_peakDb)} / 実効 {Format(_rmsDb)}");
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -29,6 +30,7 @@ public sealed class ChannelMeter(string code, string description) : INotifyPrope
         _rmsDb = rmsDb;
         PropertyChanged?.Invoke(this, new(nameof(PeakPercent)));
         PropertyChanged?.Invoke(this, new(nameof(PeakText)));
+        PropertyChanged?.Invoke(this, new(nameof(IsClipping)));
         PropertyChanged?.Invoke(this, new(nameof(Details)));
     }
 

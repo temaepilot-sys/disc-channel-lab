@@ -57,15 +57,29 @@ internal static class MeterSeekRegressionTests
                     await model.OpenSourceAsync(root);
                     model.StopInspection();
                     await model.InspectionTask;
+                    if (!model.Streams.Any(StereoMixSettings.Supports))
+                    {
+                        foreach (var title in model.Playlists.ToArray())
+                        {
+                            await model.ChoosePlaylistAsync(title);
+                            if (model.Streams.Any(StereoMixSettings.Supports)) break;
+                        }
+                    }
+                    model.SelectedStream = model.Streams.FirstOrDefault(StereoMixSettings.Supports)
+                        ?? throw new InvalidDataException("No multichannel source found for mixer test.");
+                    Console.WriteLine("Testing: " + model.SelectedStream.DisplayName);
                     model.SelectedTrack = model.Tracks.Where(x => x.DurationSeconds > 310).MaxBy(x => x.DurationSeconds)
                         ?? throw new InvalidDataException("A track longer than 310 seconds is required.");
                     model.ContinuousPlayback = false;
+                    model.ExperimentalMixerEnabled = true;
+                    var mixedChanged = 0;
+                    model.MixerOutputLeft.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(ChannelMeter.PeakPercent) && model.MixerOutputLeft.PeakPercent > 0) mixedChanged++; };
                     var changed = 0;
                     foreach (var meter in model.ChannelMeters)
                         meter.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(ChannelMeter.PeakPercent) && meter.PeakPercent > 0) changed++; };
                     var clock = (Stopwatch)typeof(MainViewModel).GetField("_playClock", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(model)!;
-                    var queue = (Queue<(double Position, double[] Peaks, double[] Rms)>)typeof(MainViewModel)
-                        .GetField("_meterFrames", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(model)!;
+                    var queue = (Queue<(double Position, MixerMeterFrame Frame)>)typeof(MainViewModel)
+                        .GetField("_mixedFrames", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(model)!;
                     timer.Start();
                     await model.SeekAsync(5);
                     await model.TogglePlaybackAsync();
@@ -76,10 +90,11 @@ internal static class MeterSeekRegressionTests
                         while (!clock.IsRunning && model.IsPlaying && timeout.Elapsed.TotalSeconds < 20) await Task.Delay(20);
                         if (!clock.IsRunning) throw new InvalidDataException($"Playback did not start at {position}s: {model.Status}");
                         changed = 0;
+                        mixedChanged = 0;
                         await Task.Delay(1600);
                         var ahead = queue.TryPeek(out var frame) ? frame.Position - model.PreviewSeconds : 0;
-                        Console.WriteLine($"Seek {position:0}s: {changed} meter updates; next frame {ahead:0.000}s ahead; {model.Status}");
-                        if (changed < 10 || ahead > 1)
+                        Console.WriteLine($"Seek {position:0}s: {changed} input meter updates; {mixedChanged} mixed updates; next frame {ahead:0.000}s ahead; {model.Status}");
+                        if (changed < 10 || mixedChanged < 10 || ahead > 1)
                             throw new InvalidDataException($"Meters stopped or ran ahead after seeking to {position}s.");
                     }
                 }

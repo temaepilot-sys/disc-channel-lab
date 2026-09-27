@@ -18,7 +18,8 @@ The app reads supported, unprotected Blu-ray, DVD-Audio, and DVD-Video sources t
 - Keep available chapters visible when audio is absent, unsupported, or cannot be analyzed. Titles show their inspection state; repeated menu clips are ranked below likely music titles.
 - Recover Blu-ray audio by inspecting individual clips when playlist probing fails. Audio IDs are matched across clips even when stream indexes change; streams present in only part of a title are labeled.
 - Preview audio with play/pause, previous/next track, seeking, and volume control.
-- Set front, center, surround, and LFE mix levels with sliders or numeric input; mute a group or reset the defaults. Sliders use the same perceptual curve as playback volume, while numeric inputs show the actual channel gain. Each group changes independently; muting every group silences the stereo mix. Changes update running audio without restarting the player.
+- Open a separate channel mixer with vertical Input/Post meters, individual faders, numeric gain, mute, and left/right pan. Channel gain ranges from 0–100%; Master ranges from 0–200%. Changes update running audio without restarting playback.
+- Export the channel mixer to stereo FLAC and save or load reusable JSON presets independently of disc and track metadata. See [Channel mixer](docs/channel-mixer.md).
 - Preview volume uses a quadratic low-volume curve by default, with a linear-gain option for analysis. Both keep 100% at unity and 200% at twice the amplitude. Hover over the slider for actual gain and dB; changes ramp over 10 ms.
 - See each input channel's peak level during playback, before stereo mixing and volume adjustment. The meters use 20 ms analysis windows and follow the audio player's clock. Hover over a meter to see its peak and RMS values in dBFS.
 - Start in dark mode and English by default. Use the **Language** menu for Japanese and the **Dark mode** checkbox for a light theme; both choices are saved for the next launch.
@@ -53,9 +54,9 @@ The regression checks generate their own small clips and cover original boundari
 - .NET 10 SDK to build; .NET 10 Desktop Runtime to run the public build.
 - An FFmpeg installation supplied by the user. `ffmpeg.exe` and `ffprobe.exe` are required; `ffplay.exe` is required for preview playback. Place them in a `tools` folder beside the app or make them available on `PATH`.
 
-The live channel meters use FFmpeg's `astats` and `ametadata` filters. Preview playback still works without these filters, but the meters remain unavailable.
+For supported multichannel stereo playback, Input/Post/Output meters are measured together from PCM in the app. Other playback paths use FFmpeg's `astats` and `ametadata` filters; those meters remain unavailable if the filters are missing.
 
-The FFmpeg build must provide the demuxers, protocols, and decoders needed for your discs. In particular, FFmpeg's [DVD-Video demuxer](https://ffmpeg.org/ffmpeg-formats.html#dvdvideo) requires GPL library support and `libdvdnav`/`libdvdread`. Consult [FFmpeg's licensing guidance](https://ffmpeg.org/legal.html) for the FFmpeg build you choose. This repository does not contain or download FFmpeg binaries.
+The FFmpeg build must provide the demuxers, protocols, and decoders needed for your discs. DVD-Audio LPCM requires the `pcm_dvda` decoder; check with `ffmpeg -hide_banner -decoders`. Older builds can misidentify this audio and fail to play it. In particular, FFmpeg's [DVD-Video demuxer](https://ffmpeg.org/ffmpeg-formats.html#dvdvideo) requires GPL library support and `libdvdnav`/`libdvdread`. Consult [FFmpeg's licensing guidance](https://ffmpeg.org/legal.html) for the FFmpeg build you choose. This repository does not contain or download FFmpeg binaries.
 
 ## Build
 

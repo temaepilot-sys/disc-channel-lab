@@ -39,6 +39,11 @@ if ($requiredPacks | Where-Object { -not (Test-Path -LiteralPath $_ -PathType Le
     python (Join-Path $root 'fetch-runtime-packs.py') $runtimeVersion $offlineSource
     if ($LASTEXITCODE -ne 0) { throw '.NET 10 実行パックの取得に失敗しました。' }
 }
+# Prefer user-supplied tools in the local tools/ffmpeg/bin directory.
+$localTools = Join-Path $root 'tools\ffmpeg\bin'
+if (Test-Path -LiteralPath (Join-Path $localTools 'ffmpeg.exe')) {
+    $env:PATH = $localTools + [IO.Path]::PathSeparator + $env:PATH
+}
 $ffmpeg = Get-Command 'ffmpeg.exe' -ErrorAction SilentlyContinue
 $ffprobe = Get-Command 'ffprobe.exe' -ErrorAction SilentlyContinue
 $ffplay = Get-Command 'ffplay.exe' -ErrorAction SilentlyContinue
@@ -48,7 +53,7 @@ if ($null -eq $ffmpeg -or $null -eq $ffprobe -or $null -eq $ffplay) {
 $protocols = & $ffmpeg.Source -hide_banner -protocols
 $decoders = & $ffmpeg.Source -hide_banner -decoders
 if (($protocols -join "`n") -notmatch 'bluray' -or ($decoders -join "`n") -notmatch 'pcm_bluray' -or
-    ($decoders -join "`n") -notmatch '\bmlp\b' -or ($decoders -join "`n") -notmatch 'pcm_dvd' -or
+    ($decoders -join "`n") -notmatch '\bmlp\b' -or ($decoders -join "`n") -notmatch 'pcm_dvda' -or
     ($decoders -join "`n") -notmatch '\bdca\b') {
     throw 'FFmpeg に Blu-ray / DVD-Audio 用デコーダーがありません。'
 }

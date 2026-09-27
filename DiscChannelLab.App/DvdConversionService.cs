@@ -7,8 +7,14 @@ public sealed class DvdConversionService(ToolPaths paths, ProcessRunner runner, 
     public async Task<string> ConvertAsync(DiscAnalysis disc, PlaylistInfo playlist, AudioStreamInfo stream,
         IReadOnlyList<TrackRow> selected, OutputQuality quality, string outputRoot,
         IProgress<ConversionProgress> progress, CancellationToken token, bool groupByChapter,
-        bool saveStereoDownmix, StereoMixSettings mix, bool saveIndividualChannels)
+        bool saveStereoDownmix, StereoMixSettings mix, bool saveIndividualChannels, ChannelMixExport? channelMix = null)
     {
+        if (channelMix is not null)
+        {
+            channelMix.Validate(stream);
+            if (saveIndividualChannels) throw new InvalidOperationException("2ch保存とチャンネル別保存は同時に選べません。");
+            saveStereoDownmix = true;
+        }
         if (selected.Count == 0) throw new InvalidOperationException("保存する曲を選択してください。");
         if (quality == OutputQuality.Cd && !stream.CanMakeCd ||
             quality == OutputQuality.HighResolution && !stream.CanMakeHighResolution)
@@ -64,7 +70,7 @@ public sealed class DvdConversionService(ToolPaths paths, ProcessRunner runner, 
                     ? $"aresample=44100:osf=s16:dither_method=triangular,atrim=start_sample={skipSamples}:end_sample={skipSamples + sampleCount},asetpts=PTS-STARTPTS"
                     : $"atrim=start_sample={skipSamples}:end_sample={skipSamples + sampleCount},asetpts=PTS-STARTPTS";
                 if (channel is not null) filter = StereoMixSettings.SoloFilter(stream, channel, stereo: false) + "," + filter;
-                else if (saveStereoDownmix) filter = mix.PanFilter(stream) + "," + filter;
+                else if (saveStereoDownmix) filter = (channelMix?.Filter(stream) ?? mix.PanFilter(stream)) + "," + filter;
                 arguments.AddRange(["-map", $"0:{stream.Index}", "-vn", "-sn", "-dn", "-af", filter,
                     "-c:a", "flac", "-sample_fmt", quality == OutputQuality.Cd ? "s16" : "s32",
                     "-metadata", $"title={title}", "-metadata", $"track={track.Number}",
@@ -74,7 +80,8 @@ public sealed class DvdConversionService(ToolPaths paths, ProcessRunner runner, 
                 if (playlist.Format == DiscFormat.DvdAudio)
                     arguments.AddRange(["-metadata", $"DVD_TITLE_SET={playlist.DvdAudio!.TitleSet}"]);
                 ConversionService.AddDiscTags(arguments, disc, playlist, track, chapterRange, chapterTitle ?? title);
-                if (saveStereoDownmix) ConversionService.AddDownmixTags(arguments, mix);
+                if (channelMix is not null) channelMix.AddTags(arguments);
+                else if (saveStereoDownmix) ConversionService.AddDownmixTags(arguments, mix);
                 if (channel is not null) ConversionService.AddChannelTags(arguments, stream, channel);
                 arguments.AddRange(["-y", staged]);
                 progress.Report(new ConversionProgress((index * channels.Length + channelIndex) / (double)(selected.Count * channels.Length),
@@ -102,7 +109,7 @@ public sealed class DvdConversionService(ToolPaths paths, ProcessRunner runner, 
                 var folder = groupByChapter ? Path.Combine(titleFolder, chapterFolder) : titleFolder;
                 if (channel is not null)
                     folder = Path.Combine(folder, $"{track.Number:00} {ConversionService.SafeName(title, 80)} [Multichannel]");
-                var channelSuffix = saveStereoDownmix ? " [Stereo mix]" : stream.Channels == 2 ? "" : stream.Channels == 1 ? " [Mono]"
+                var channelSuffix = channelMix is not null ? channelMix.FileSuffix : saveStereoDownmix ? " [Stereo mix]" : stream.Channels == 2 ? "" : stream.Channels == 1 ? " [Mono]"
                     : $" [{ConversionService.SafeName(stream.ChannelLayout)}]";
                 var name = channel is null ? $"{track.Number:00} {ConversionService.SafeName(title)}{channelSuffix}.flac"
                     : $"{ConversionService.SafeName(title)} - {channel}.flac";

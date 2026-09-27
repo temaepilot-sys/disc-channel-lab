@@ -136,18 +136,25 @@ public sealed class AudioStreamInfo : INotifyPropertyChanged
     public string Language { get; init; } = "";
     public IReadOnlyList<string> CoveredClipIds { get; init; } = [];
     public IReadOnlyList<string> InspectedClipIds { get; init; } = [];
+    public string? SilentTailClipId { get; init; }
     public int TotalClips { get; init; }
-    public bool HasPartialCoverage => TotalClips > 0 && CoveredClipIds.Count < TotalClips;
-    public AudioStreamInfo WithCoverage(IReadOnlyList<string> covered, IReadOnlyList<string> inspected, int total) => new()
+    public bool HasPartialCoverage => TotalClips > 0 && CoveredClipIds.Count + (SilentTailClipId is null ? 0 : 1) < TotalClips;
+    public AudioStreamInfo WithCoverage(IReadOnlyList<string> covered, IReadOnlyList<string> inspected, int total,
+        string? silentTailClipId = null) => new()
     {
         Index = Index, Codec = Codec, Profile = Profile, TransportId = TransportId, Language = Language,
         SampleRate = SampleRate, Channels = Channels, ChannelLayout = ChannelLayout, BitDepth = BitDepth,
         StartTimeTicks = StartTimeTicks, SampleCount = SampleCount, CoveredClipIds = covered,
-        InspectedClipIds = inspected, TotalClips = total
+        InspectedClipIds = inspected, TotalClips = total, SilentTailClipId = silentTailClipId
     };
     public bool Covers(PlaylistInfo playlist, TrackRow track) => playlist.Clips
         .Where(clip => clip.PlaylistStartTicks < track.EndTicks && clip.PlaylistStartTicks + clip.OutTicks - clip.InTicks > track.StartTicks)
-        .All(clip => !InspectedClipIds.Contains(clip.Id) || CoveredClipIds.Contains(clip.Id));
+        .All(clip => TotalClips == 0 || CoveredClipIds.Contains(clip.Id) || IsSilentTail(playlist, clip));
+    public bool IsSilentTail(PlaylistInfo playlist, ClipInfo clip) => SilentTailClipId == clip.Id &&
+        playlist.Clips.LastOrDefault() == clip && clip.OutTicks > clip.InTicks &&
+        clip.OutTicks - clip.InTicks <= 2 * 45000 &&
+        clip.PlaylistStartTicks + clip.OutTicks - clip.InTicks == playlist.DurationTicks;
+    public string SilenceInput => $"anullsrc=r={SampleRate}:cl={(Channels == 1 ? "mono" : Channels == 2 ? "stereo" : ChannelLayout)}";
     public required int SampleRate { get; init; }
     public required int Channels { get; init; }
     public required string ChannelLayout { get; init; }
@@ -159,7 +166,8 @@ public sealed class AudioStreamInfo : INotifyPropertyChanged
     public bool CanMakeCd => HasSupportedChannels && BitDepth >= 16 && SampleRate >= 44100;
     public bool CanMakeHighResolution => HasSupportedChannels && BitDepth >= 24 && SampleRate >= 88200;
     public string DisplayName => $"{CodecLabel} · {(Channels == 1 ? "Mono" : IsStereo ? "Stereo" : $"{Channels}ch ({ChannelLayout})")} · {SampleRate / 1000d:0.0}kHz / {(BitDepth is null ? LanguageService.T("深度不明") : $"{BitDepth}bit")}" +
-        (HasPartialCoverage ? $" · {LanguageService.T("一部区間のみ")} #{Index}" : "");
+        (HasPartialCoverage ? $" · {LanguageService.T("一部区間のみ")} #{Index}" : "") +
+        (SilentTailClipId is not null ? $" · {LanguageService.T("末尾の映像区間は無音")}" : "");
     private string CodecLabel => LanguageService.T(Codec switch
     {
         "pcm_bluray" or "pcm_dvd" or "pcm_dvda" => "LPCM",
@@ -225,6 +233,7 @@ public sealed record ChapterMetadata(string? Title, string? Artist)
 public sealed record PlaylistProbeResult(IReadOnlyList<AudioStreamInfo> Streams,
     IReadOnlyDictionary<int, ChapterMetadata> Chapters, IReadOnlyDictionary<string, string> Tags)
 {
+    public bool ConfirmedShortVideoOnly { get; init; }
     public int DetectedAudioCount { get; init; }
     public AudioAvailability Availability { get; init; }
     public IReadOnlyList<string> Diagnostics { get; init; } = [];

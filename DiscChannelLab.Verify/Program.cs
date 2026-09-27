@@ -10,6 +10,17 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Threading;
 
+if (args is ["silent-tail-test", var tailOutput])
+{
+    await SilentTailTests.SyntheticAsync(tailOutput);
+    return 0;
+}
+if (args is ["silent-tail-disc-test", var tailDisc, var tailDiscOutput])
+{
+    await SilentTailTests.DiscAsync(tailDisc, tailDiscOutput);
+    return 0;
+}
+
 if (args is ["mixer-dvd-export-test", var mixerDvdRoot, var mixerDvdOutput])
 {
     await MixerExportTests.RunDvdAsync(mixerDvdRoot, mixerDvdOutput);

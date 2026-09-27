@@ -32,16 +32,25 @@ public sealed partial class FfprobeService
         var file = new FileInfo(path);
         var key = $"{path}|{file.Length}|{file.LastWriteTimeUtc.Ticks}|{deep}";
         if (_clipProbes.TryGetValue(key, out var cached)) return cached;
-        var result = await WithTimeout(ct => runner.RunAsync(paths.Ffprobe,
-            ["-v", "error", "-probesize", deep ? "32000000" : "4000000", "-analyzeduration", deep ? "20000000" : "5000000",
-             "-of", "json", "-show_streams", "-show_format", path], ct), token, deep ? 20 : 8);
+        // A full packet scan is required before treating a small video-only file as silence.
+        var fullScan = deep && file.Length <= 32_000_000;
+        var args = new List<string> { "-v", "error", "-probesize", deep ? "32000000" : "4000000",
+            "-analyzeduration", deep ? "20000000" : "5000000", "-of", "json", "-show_streams", "-show_format" };
+        if (fullScan) args.Add("-count_packets");
+        args.Add(path);
+        var result = await WithTimeout(ct => runner.RunAsync(paths.Ffprobe, args, ct), token, deep ? 20 : 8);
         using var document = JsonDocument.Parse(result.Output);
         var root = document.RootElement;
         var start = root.TryGetProperty("format", out var format) ? ParseTicks(String(format, "start_time")) : null;
         var audio = DescribeAudio(root);
+        var duration = format.ValueKind == JsonValueKind.Object ? ParseTicks(String(format, "duration")) : null;
+        var videoOnly = fullScan && string.IsNullOrWhiteSpace(result.Error) && audio.Count == 0 &&
+            duration is > 0 and <= 90000 && root.TryGetProperty("streams", out var elements) &&
+            elements.EnumerateArray().Any(s => String(s, "codec_type") == "video" &&
+                Number(s, "nb_read_packets") is > 0);
         var parsed = new PlaylistProbeResult(ReadSupportedAudioStreams(root, formatStartTicks: start),
             new Dictionary<int, ChapterMetadata>(), new Dictionary<string, string>())
-            { DetectedAudioCount = audio.Count, Diagnostics = audio };
+            { DetectedAudioCount = audio.Count, Diagnostics = audio, ConfirmedShortVideoOnly = videoOnly };
         token.ThrowIfCancellationRequested();
         _clipProbes[key] = parsed;
         return parsed;
@@ -114,10 +123,18 @@ public sealed partial class FfprobeService
         int Coverage(AudioStreamInfo stream) => clips.Values.Count(clip =>
         { try { AudioStreamMatcher.Resolve(stream, clip.Streams); return true; } catch (InvalidDataException) { return false; } });
         streams = streams.OrderByDescending(Coverage).ThenByDescending(x => x.IsStereo).ToList();
+        var tail = playlist.Clips.LastOrDefault();
+        var silentTail = tail is not null && playlist.Clips.Count > 1 &&
+            tail.OutTicks - tail.InTicks is > 0 and <= 90000 &&
+            tail.PlaylistStartTicks + tail.OutTicks - tail.InTicks == playlist.DurationTicks &&
+            playlist.Clips.Count(c => c.Id == tail.Id) == 1 &&
+            clips.TryGetValue(tail.Id, out var tailProbe) && tailProbe.ConfirmedShortVideoOnly ? tail.Id : null;
+        if (silentTail is not null)
+            notes.Add($"Verified video-only tail {silentTail}: full packet scan found no audio; preserve duration as silence.");
         if (playlist.Format == DiscFormat.BluRay)
             streams = streams.Select(stream => stream.WithCoverage(clips.Where(pair =>
                 { try { AudioStreamMatcher.Resolve(stream, pair.Value.Streams); return true; } catch (InvalidDataException) { return false; } })
-                .Select(x => x.Key).ToArray(), clips.Keys.ToArray(), playlist.Clips.DistinctBy(x => x.Id).Count())).ToList();
+                .Select(x => x.Key).ToArray(), clips.Keys.ToArray(), playlist.Clips.DistinctBy(x => x.Id).Count(), silentTail)).ToList();
         AudioStreamInfo? verified = null;
         foreach (var stream in streams)
         {
@@ -137,7 +154,7 @@ public sealed partial class FfprobeService
         var state = streams.Count == 0
             ? failed ? AudioAvailability.Failed : audioCount > 0 ? AudioAvailability.Unsupported : AudioAvailability.NoAudio
             : verified is null ? AudioAvailability.Failed
-            : playlist.Format == DiscFormat.BluRay && (failed || streams.Any(x => Coverage(x) < playlist.Clips.DistinctBy(c => c.Id).Count()))
+            : playlist.Format == DiscFormat.BluRay && (failed || streams.Any(x => x.HasPartialCoverage))
                 ? AudioAvailability.Partial : AudioAvailability.Ready;
         return new PlaylistProbeResult(streams,
             primary?.Chapters ?? new Dictionary<int, ChapterMetadata>(), primary?.Tags ?? new Dictionary<string, string>())

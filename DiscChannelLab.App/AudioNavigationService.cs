@@ -41,10 +41,12 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
         foreach (var segment in PlaylistSegments.ForRange(playlist, startTicks, endTicks))
         {
             token.ThrowIfCancellationRequested();
-            var (sourcePath, seekTicks, source) = await GetSourceAsync(disc, stream, segment, token);
+            var silent = stream.IsSilentTail(playlist, segment.Clip);
+            var (sourcePath, seekTicks, source) = silent
+                ? (stream.SilenceInput, 0L, stream) : await GetSourceAsync(disc, stream, segment, token);
             await PlaySegmentAsync(ffplay, sourcePath, source, seekTicks, segment.EndTicks - segment.StartTicks,
                 token, () => segmentStarted?.Invoke(segment.StartTicks), volume ?? (() => 1), mix, soloChannel,
-                segment.StartTicks, channelLevels, playbackPosition, liveMix, mixedLevels);
+                segment.StartTicks, channelLevels, playbackPosition, liveMix, mixedLevels, silent);
         }
     }
 
@@ -198,7 +200,7 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
         long durationTicks, CancellationToken token, Action onStarted, Func<double> volume,
         StereoMixSettings mix, string? soloChannel, long segmentStartTicks,
         Action<long, double, double[], double[]>? channelLevels, Action<long, double>? playbackPosition,
-        Func<PreviewMixState>? liveMix, Action<long, MixerMeterFrame>? mixedLevels)
+        Func<PreviewMixState>? liveMix, Action<long, MixerMeterFrame>? mixedLevels, bool silent = false)
     {
         var samples = (long)Math.Round(durationTicks * 48000d / 45000d, MidpointRounding.AwayFromZero);
         var inputSeekTicks = Math.Max(0, seekTicks - 45000);
@@ -206,7 +208,7 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
         var skipSamples = (long)Math.Round(skipTicks * 48000d / 45000d, MidpointRounding.AwayFromZero);
         var liveChannels = liveMix is not null && StereoMixSettings.Supports(stream);
         var filter = PreviewFilter(stream, skipSamples, samples, liveChannels, mix, soloChannel, channelLevels is not null);
-        var outputArgs = new List<string> { "-map", $"0:{stream.Index}", "-af", filter };
+        var outputArgs = new List<string> { "-map", $"0:{(silent ? 0 : stream.Index)}", "-af", filter };
         outputArgs.AddRange(["-vn", "-sn", "-dn", "-ac", liveChannels ? stream.Channels.ToString() : "2",
             "-c:a", "pcm_s16le", "-f", "s16le", "pipe:1"]);
         if (liveChannels) outputArgs.InsertRange(outputArgs.Count - 3, ["-ch_layout", stream.ChannelLayout]);
@@ -215,11 +217,12 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
             UseShellExecute = false, CreateNoWindow = true,
             RedirectStandardOutput = true, RedirectStandardError = true
         };
-        foreach (var argument in new[]
-        {
-            "-hide_banner", "-nostdin", "-v", channelLevels is null ? "error" : "info", "-ss", Seconds(inputSeekTicks),
-            "-t", Seconds(durationTicks + skipTicks + 4500), "-i", sourcePath
-        }.Concat(outputArgs)) decodeInfo.ArgumentList.Add(argument);
+        var inputArgs = new List<string> { "-hide_banner", "-nostdin", "-v", channelLevels is null ? "error" : "info" };
+        if (silent) inputArgs.AddRange(["-f", "lavfi"]);
+        else inputArgs.AddRange(["-ss", Seconds(inputSeekTicks)]);
+        inputArgs.AddRange(["-t", Seconds(durationTicks + skipTicks + 4500), "-i", sourcePath]);
+        foreach (var argument in inputArgs.Concat(outputArgs)) decodeInfo.ArgumentList.Add(argument);
+        if (silent) log.Write($"SILENT TAIL preview at={segmentStartTicks} duration={durationTicks}");
         var playInfo = new ProcessStartInfo(ffplay)
         {
             UseShellExecute = false, CreateNoWindow = true,

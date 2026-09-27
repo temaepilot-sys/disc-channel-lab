@@ -67,7 +67,9 @@ public sealed class ConversionService(ToolPaths paths, ProcessRunner runner, Ffp
                     var segment = segments[partIndex];
                     var sourcePath = Path.Combine(disc.Root, "BDMV", "STREAM", $"{segment.Clip.Id}.m2ts");
                     if (!File.Exists(sourcePath)) throw new FileNotFoundException($"音声クリップが見つかりません: {sourcePath}");
-                    if (!checkedClips.TryGetValue(segment.Clip.Id, out var source))
+                    var silent = stream.IsSilentTail(playlist, segment.Clip);
+                    var source = stream;
+                    if (!silent && !checkedClips.TryGetValue(segment.Clip.Id, out source))
                     {
                         source = AudioStreamMatcher.Resolve(stream, await probe.ProbeClipAsync(sourcePath, token));
                         if (quality == OutputQuality.Cd ? !source.CanMakeCd :
@@ -79,7 +81,7 @@ public sealed class ConversionService(ToolPaths paths, ProcessRunner runner, Ffp
                     }
 
                     var sourceStartTicks = PlaylistSegments.SourceTicks(segment);
-                    var seekTicks = sourceStartTicks - source.StartTimeTicks!.Value;
+                    var seekTicks = silent ? 0 : sourceStartTicks - source.StartTimeTicks!.Value;
                     if (seekTicks < 0) throw new InvalidDataException($"クリップ {segment.Clip.Id} の音声開始位置が不正です。");
                     var durationTicks = segment.EndTicks - segment.StartTicks;
                     var sampleCount = ToSample(segment.EndTicks, expectedRate) - ToSample(segment.StartTicks, expectedRate);
@@ -92,13 +94,22 @@ public sealed class ConversionService(ToolPaths paths, ProcessRunner runner, Ffp
                     else if (saveStereoDownmix) filter = (channelMix?.Filter(stream) ?? mix.PanFilter(stream)) + "," + filter;
                     var arguments = new List<string>
                     {
-                        "-hide_banner", "-nostdin", "-v", "error", "-progress", "pipe:1",
-                        "-ss", Seconds(seekTicks), "-t", Seconds(durationTicks + 4500), "-i", sourcePath,
-                        "-map", $"0:{source.Index}", "-vn", "-sn", "-dn", "-af", filter,
-                        "-c:a", "flac", "-sample_fmt", quality == OutputQuality.Cd ? "s16" : "s32",
+                        "-hide_banner", "-nostdin", "-v", "error", "-progress", "pipe:1"
+                    };
+                    if (silent)
+                    {
+                        arguments.AddRange(["-f", "lavfi", "-t", Seconds(durationTicks + 4500), "-i", stream.SilenceInput]);
+                        log.Write($"SILENT TAIL export clip={segment.Clip.Id} duration={durationTicks} samples={sampleCount}");
+                    }
+                    else arguments.AddRange(["-ss", Seconds(seekTicks), "-t", Seconds(durationTicks + 4500), "-i", sourcePath]);
+                    // Keep FLAC block sizes consistent across real audio and generated silence.
+                    // The concat demuxer shares the first part's STREAMINFO with later parts.
+                    arguments.AddRange([
+                        "-map", $"0:{(silent ? 0 : source.Index)}", "-vn", "-sn", "-dn", "-af", filter,
+                        "-c:a", "flac", "-frame_size", "4096", "-sample_fmt", quality == OutputQuality.Cd ? "s16" : "s32",
                         "-metadata", $"title={title}", "-metadata", $"track={track.Number}",
                         "-metadata", $"album={flacAlbum}"
-                    };
+                    ]);
                     AddDiscTags(arguments, disc, playlist, track, chapterRange, chapterTitle ?? title);
                     if (channelMix is not null) channelMix.AddTags(arguments);
                     else if (saveStereoDownmix) AddDownmixTags(arguments, mix);
@@ -126,7 +137,7 @@ public sealed class ConversionService(ToolPaths paths, ProcessRunner runner, Ffp
                             ["-hide_banner", "-nostdin", "-v", "error", "-i", part,
                              "-map", "0:a:0", "-map_metadata", "0",
                              "-af", $"apad=whole_len={sampleCount},atrim=end_sample={sampleCount}",
-                             "-c:a", "flac", "-sample_fmt", quality == OutputQuality.Cd ? "s16" : "s32",
+                             "-c:a", "flac", "-frame_size", "4096", "-sample_fmt", quality == OutputQuality.Cd ? "s16" : "s32",
                              "-y", padded], token);
                         var paddedInfo = await probe.ProbeFileAsync(padded, token);
                         ValidateFormat(paddedInfo, expectedRate, expectedDepth, stream, saveStereoDownmix, channel is not null);
@@ -146,8 +157,8 @@ public sealed class ConversionService(ToolPaths paths, ProcessRunner runner, Ffp
                     File.WriteAllText(listPath, "ffconcat version 1.0\n" +
                         string.Join("", parts.Select(x => $"file '{Path.GetFileName(x)}'\n")), Encoding.ASCII);
                     var joinArguments = new List<string>
-                    { "-hide_banner", "-nostdin", "-v", "error", "-f", "concat", "-safe", "0", "-i", listPath,
-                         "-map", "0:a:0", "-c:a", "flac", "-sample_fmt", quality == OutputQuality.Cd ? "s16" : "s32",
+                    { "-hide_banner", "-nostdin", "-v", "error", "-xerror", "-f", "concat", "-safe", "0", "-i", listPath,
+                         "-map", "0:a:0", "-c:a", "flac", "-frame_size", "4096", "-sample_fmt", quality == OutputQuality.Cd ? "s16" : "s32",
                          "-metadata", $"title={title}", "-metadata", $"track={track.Number}",
                          "-metadata", $"album={flacAlbum}" };
                     AddDiscTags(joinArguments, disc, playlist, track, chapterRange, chapterTitle ?? title);

@@ -62,6 +62,11 @@ if (args is ["seek-meter-test", var seekRoot])
     return 0;
 }
 
+if (args is ["chapter-audio-test", var chapterAudioRoot, var chapterAudioOutput])
+{
+    await ReadingRegressionTests.ChapterAudioAsync(chapterAudioRoot, chapterAudioOutput);
+    return 0;
+}
 if (args is ["reading-tests"])
 {
     await ReadingRegressionTests.RunAsync();

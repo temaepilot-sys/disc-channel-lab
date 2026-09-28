@@ -58,6 +58,24 @@ internal static class ReadingRegressionTests
         Directory.CreateDirectory(Path.Combine(root, "BDMV", "STREAM"));
         var log = new AppLog(); var tools = new ToolPaths(); var runner = new ProcessRunner(log);
         var probe = new FfprobeService(tools, runner);
+        foreach (var codec in new[] { "ac3", "eac3" })
+        {
+            var id = codec == "ac3" ? "00010" : "00011";
+            var path = Path.Combine(root, "BDMV", "STREAM", id + ".m2ts");
+            await runner.RunAsync(tools.Ffmpeg, ["-v", "error", "-f", "lavfi", "-i",
+                "aevalsrc=0.1*sin(2*PI*440*t)|0|0|0|0|0:s=48000:c=5.1(side)", "-t", "1",
+                "-c:a", codec, "-b:a", "448k", "-f", "mpegts", "-mpegts_m2ts_mode", "1", "-y", path], CancellationToken.None);
+            var compressed = (await probe.ProbeClipAsync(path, CancellationToken.None)).Single();
+            Check(compressed.Codec == codec && compressed.Channels == 6 && compressed.SampleRate == 48000 &&
+                  compressed.CanMakeCd && !compressed.CanMakeHighResolution && StereoMixSettings.Supports(compressed),
+                $"Blu-ray {codec} was hidden or has incorrect playback/export capabilities.");
+            var compressedTitle = new PlaylistInfo { Id = int.Parse(id), ChapterStarts = [0, 22500], DurationTicks = 45000,
+                Clips = [new(id, compressed.StartTimeTicks!.Value, compressed.StartTimeTicks.Value + 45000, 0)] };
+            var inspected = await probe.ProbePlaylistAsync(root, compressedTitle, CancellationToken.None);
+            Check(inspected.Availability == AudioAvailability.Ready && inspected.Streams.Single().Codec == codec &&
+                  !inspected.Streams[0].HasPartialCoverage, $"Blu-ray {codec} failed clip fallback or decode validation.");
+        }
+        Console.WriteLine("PASS: Blu-ray AC-3/E-AC-3 detected as 5.1/48kHz, decode verified, mixer/CD export enabled.");
         var first = Path.Combine(root, "BDMV", "STREAM", "00001.m2ts");
         var second = Path.Combine(root, "BDMV", "STREAM", "00002.m2ts");
         await runner.RunAsync(tools.Ffmpeg, ["-v", "error", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo",
@@ -192,5 +210,56 @@ internal static class ReadingRegressionTests
             Console.WriteLine($"PASS: disc UI selection, chapter toggle/edit preservation, partial stream coverage, exact tail FLAC export, unsupported title chapter display. Output: {root}");
         }
         finally { model.Cancel(); model.DetachLanguage(); }
+    }
+
+    public static async Task ChapterAudioAsync(string source, string output)
+    {
+        // Exercise the real playback pipeline without sending test audio to the speakers.
+        var previousDriver = Environment.GetEnvironmentVariable("SDL_AUDIODRIVER");
+        Environment.SetEnvironmentVariable("SDL_AUDIODRIVER", "dummy");
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(3));
+            var token = timeout.Token;
+            var log = new AppLog(); var tools = new ToolPaths(); var runner = new ProcessRunner(log);
+            var probe = new FfprobeService(tools, runner); var reader = new DiscService(probe, log);
+            var disc = reader.Analyze(source);
+            var title = disc.Playlists.MaxBy(x => x.DurationTicks)!;
+            var inspected = await reader.InspectPlaylistAsync(disc, title, token);
+            Check(inspected.Availability == AudioAvailability.Ready, "Main title is not ready: " + title.AnalysisDetails);
+            var audio = inspected.Streams.First();
+            Console.WriteLine($"Main title {title.Id}: codec={audio.Codec}, {audio.Channels}ch, {audio.SampleRate}Hz; {title.ChapterStarts.Count} chapters");
+            Check(StereoMixSettings.Supports(audio), "A supported multichannel source is required.");
+            var playback = new AudioNavigationService(tools, runner, probe, log);
+            var conversion = new ConversionService(tools, runner, probe, log);
+            var state = new PreviewMixState(StereoMixSettings.Default, null, StereoPreviewMixer.StandardChannels(audio));
+            var excerpts = DiscService.BuildTracks(disc, title).Select(track => new TrackRow
+            {
+                Number = track.Number, Title = $"Chapter {track.Number:00} check", StartTicks = track.StartTicks,
+                EndTicks = Math.Min(track.StartTicks + 90000, track.EndTicks), IsChapter = false
+            }).ToArray();
+            foreach (var track in excerpts)
+            {
+                var started = false; var frames = new List<MixerMeterFrame>();
+                await playback.PlayAsync(disc, title, audio, track.StartTicks, track.EndTicks, token,
+                    segmentStarted: _ => started = true, liveMix: () => state, mixedLevels: (_, frame) => frames.Add(frame));
+                Check(started && frames.Count > 0 && frames.All(f => f.Input.Length == audio.Channels && f.Output.Length == 2),
+                    $"Chapter {track.Number} did not deliver playback PCM and meters.");
+                Console.WriteLine($"Chapter {track.Number}: seek {track.StartTicks / 45000d:0.###}s, playback started, {frames.Count} meter windows.");
+            }
+            var folder = await conversion.ConvertAsync(disc, title, audio, excerpts, OutputQuality.Cd, output,
+                new Progress<ConversionProgress>(), token);
+            var files = Directory.GetFiles(folder, "*.flac", SearchOption.AllDirectories).OrderBy(Path.GetFileName).ToArray();
+            Check(files.Length == excerpts.Length, "Missing chapter FLACs.");
+            for (var i = 0; i < files.Length; i++)
+            {
+                var saved = await probe.ProbeFileAsync(files[i], token);
+                Check(saved.Channels == audio.Channels && saved.SampleRate == 44100 && saved.BitDepth == 16 &&
+                      saved.SampleCount == ConversionService.ToSample(excerpts[i].EndTicks, 44100) - ConversionService.ToSample(excerpts[i].StartTicks, 44100),
+                    $"Chapter {i + 1} export format/sample count mismatch.");
+            }
+            Console.WriteLine($"PASS: every chapter playback/seek/mixer meters and CD FLAC samples. Output: {folder}");
+        }
+        finally { Environment.SetEnvironmentVariable("SDL_AUDIODRIVER", previousDriver); }
     }
 }

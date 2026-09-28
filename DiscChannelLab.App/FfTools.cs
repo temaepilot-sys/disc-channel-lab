@@ -272,7 +272,9 @@ public sealed partial class FfprobeService(ToolPaths paths, ProcessRunner runner
                 if (String(stream, "codec_type") != "audio") continue;
                 var codec = String(stream, "codec_name");
                 var profile = String(stream, "profile");
-                if (format == DiscFormat.BluRay && codec != "pcm_bluray" &&
+                // These compressed streams already use the external decoder on DVD.
+                // Blu-ray playlist and direct-clip probes must accept them too.
+                if (format == DiscFormat.BluRay && codec is not ("pcm_bluray" or "ac3" or "eac3") &&
                     !(codec == "dts" && profile == "DTS-HD MA") ||
                     format == DiscFormat.DvdAudio && codec is not ("pcm_dvd" or "pcm_dvda" or "mlp") ||
                     format == DiscFormat.DvdVideo && codec is not ("pcm_dvd" or "ac3" or "eac3" or "mp2" or "dts"))

@@ -5,6 +5,32 @@
         Title="{local:Loc Key='チャンネルミキサー'}" Width="1260" Height="820" MinWidth="760" MinHeight="740"
         WindowStartupLocation="CenterOwner" Background="{DynamicResource AppBackgroundBrush}">
     <Window.Resources>
+        <Style x:Key="FaderLinkButton" TargetType="ToggleButton">
+            <Setter Property="Background" Value="{DynamicResource InputBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
+            <Setter Property="Padding" Value="10,4"/>
+            <Setter Property="MinWidth" Value="95"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="1" CornerRadius="3" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                              TextElement.Foreground="{TemplateBinding Foreground}"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="{DynamicResource SelectionBrush}"/></Trigger>
+                <Trigger Property="IsChecked" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource AccentBrush}"/>
+                    <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}"/>
+                </Trigger>
+                <Trigger Property="IsKeyboardFocused" Value="True"><Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}"/></Trigger>
+            </Style.Triggers>
+        </Style>
         <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
             <Setter Property="Padding" Value="10,6"/>
         </Style>
@@ -83,6 +109,20 @@
             <TextBlock Text="{Binding SelectedStream.DisplayName}" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource MutedBrush}" Margin="0,4,0,6"/>
             <CheckBox Content="{local:Loc Key='ミキサーを再生に適用'}"
                       IsChecked="{Binding ExperimentalMixerEnabled}" IsEnabled="{Binding CanUseExperimentalMixer}"/>
+            <WrapPanel Margin="0,8,0,0">
+                <WrapPanel.Style><Style TargetType="WrapPanel">
+                    <Style.Triggers><DataTrigger Binding="{Binding MixerFaderLinks.Count}" Value="0"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers>
+                </Style></WrapPanel.Style>
+                <TextBlock Text="{local:Loc Key='フェーダーリンク'}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                <ItemsControl ItemsSource="{Binding MixerFaderLinks}">
+                    <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate><DataTemplate>
+                        <ToggleButton Content="{Binding Label}" IsChecked="{Binding IsLinked, Mode=TwoWay}"
+                                      Style="{StaticResource FaderLinkButton}" Margin="0,0,6,0"
+                                      ToolTip="{local:Loc Key='オンにすると左側の値に揃え、以後は左右どちらの操作でも同じ音量になります。'}"/>
+                    </DataTemplate></ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </WrapPanel>
             <TextBlock Text="{local:Loc Key='標準ミックスを使用：このフェーダーは再生に適用されていません。'}"
                        TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,5,0,0">
                 <TextBlock.Style><Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">

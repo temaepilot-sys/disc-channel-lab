@@ -21,6 +21,7 @@ public sealed class MixerStrip : INotifyPropertyChanged
     private bool _muted;
     private bool _solo;
     private bool _invertPolarity;
+    internal MixerFaderLink? FaderLink { get; set; }
     public ChannelMeter Input { get; }
     public ChannelMeter PostLeft { get; } = new("L", "L");
     public ChannelMeter PostRight { get; } = new("R", "R");
@@ -41,10 +42,17 @@ public sealed class MixerStrip : INotifyPropertyChanged
         set
         {
             if (!double.IsFinite(value) || value is < 0 or > 100) throw new ArgumentOutOfRangeException(nameof(value), "0–100%");
+            if (FaderLink is { IsLinked: true } link) { link.SetLevel(value); return; }
             if (_level == value) return;
-            _level = value; Notify(nameof(Level)); Notify(nameof(Fader)); _apply();
+            _level = value; NotifyLevel(); _apply();
         }
     }
+    internal bool SetLevelSilently(double value)
+    {
+        if (_level == value) return false;
+        _level = value; return true;
+    }
+    internal void NotifyLevel() { Notify(nameof(Level)); Notify(nameof(Fader)); }
     public double Fader
     {
         get => 100 * Math.Sqrt(Level / 100);

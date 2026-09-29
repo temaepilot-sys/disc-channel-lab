@@ -13,6 +13,7 @@ public sealed record MixerPreset
     public required bool PerceivedMaster { get; init; }
     public required bool IncludeMasterInExport { get; init; }
     public required ExperimentalChannel[] Channels { get; init; }
+    public string[] LinkedFaderPairs { get; init; } = [];
 
     private static readonly JsonSerializerOptions Options = new()
     {
@@ -23,7 +24,7 @@ public sealed record MixerPreset
 
     public void Validate()
     {
-        if (Format != "DiscChannelLab.MixerPreset" || Version is not (1 or 2 or 3) || Name is null || Name.Length > 80 ||
+        if (Format != "DiscChannelLab.MixerPreset" || Version is not (1 or 2 or 3 or 4) || Name is null || Name.Length > 80 ||
             !double.IsFinite(MasterPercent) || MasterPercent is < 0 or > 200 ||
             Channels is null || Channels.Length is < 3 or > 8 ||
             Channels.Any(c => c is null || string.IsNullOrWhiteSpace(c.Code) ||
@@ -32,6 +33,19 @@ public sealed record MixerPreset
                 (Version < 3 && c.InvertPolarity)) ||
             Channels.Select(c => c.Code).Distinct(StringComparer.Ordinal).Count() != Channels.Length)
             throw new InvalidDataException(LanguageService.T("ミキサー設定ファイルの形式または値が不正です。"));
+        if (LinkedFaderPairs is null || LinkedFaderPairs.Length > 3 ||
+            (Version < 4 && LinkedFaderPairs.Length > 0) ||
+            LinkedFaderPairs.Distinct(StringComparer.Ordinal).Count() != LinkedFaderPairs.Length ||
+            LinkedFaderPairs.Any(pair => !MixerFaderLink.SupportedPairs.Contains(pair)))
+            throw new InvalidDataException(LanguageService.T("ミキサー設定ファイルの形式または値が不正です。"));
+        foreach (var pair in LinkedFaderPairs)
+        {
+            var codes = pair.Split('/');
+            var left = Channels.SingleOrDefault(c => c.Code == codes[0]);
+            var right = Channels.SingleOrDefault(c => c.Code == codes[1]);
+            if (left is null || right is null || left.Gain != right.Gain)
+                throw new InvalidDataException(LanguageService.T("ミキサー設定ファイルの形式または値が不正です。"));
+        }
     }
 
     public static MixerPreset Load(string path)

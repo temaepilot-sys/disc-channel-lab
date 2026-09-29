@@ -124,6 +124,21 @@ internal static class MixerExportTests
             "FLAC metadata lost polarity settings");
         Console.WriteLine("Polarity FLAC: all decoded samples inverted exactly, negative pan coefficients accepted, frozen settings and metadata preserved.");
 
+        var linkedLeft = new MixerStrip(new ChannelMeter("FL", "FL"), 40, false, () => { }) { Pan = 100 };
+        var linkedRight = new MixerStrip(new ChannelMeter("FR", "FR"), 80, false, () => { }) { Pan = 100 };
+        var link = new MixerFaderLink(linkedLeft, linkedRight, () => { }) { IsLinked = true };
+        linkedRight.Level = 25;
+        var linkedMix = new ChannelMixExport(audio, original.Select(c => c.Code == "FL" ? linkedLeft.Snapshot()
+            : c.Code == "FR" ? linkedRight.Snapshot() : c), "Linked faders");
+        linkedLeft.Level = 90;
+        await Export(linkedMix, OutputQuality.HighResolution);
+        var linkedFile = Directory.GetFiles(folder, "*Linked faders*.flac").Single();
+        var linkedPcm = await Decode(linkedFile, "linked-faders");
+        var linkedLevel = BinaryPrimitives.ReadInt32LittleEndian(linkedPcm.AsSpan(12000 * 8 + 4, 4)) / 2147483648d;
+        Check(Math.Abs(linkedLevel - .75 * .25) < 1e-6 && BinaryPrimitives.ReadInt32LittleEndian(linkedPcm.AsSpan(12000 * 8, 4)) == 0,
+            "Linked right fader did not control FL gain in captured FLAC export");
+        Console.WriteLine("Linked faders: right-side adjustment changes FL export gain; later edits preserve the captured job.");
+
         try { _ = new ChannelMixExport(audio, original.Select(x => x with { Gain = 1.001 }), "Over 100"); throw new Exception("Gain above 100% accepted"); }
         catch (InvalidDataException) { }
         var loud = original.Select(x => x with { Gain = x.Code == "FL" ? 1 : 0 }).ToArray();

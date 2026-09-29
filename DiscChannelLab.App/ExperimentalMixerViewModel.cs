@@ -5,6 +5,7 @@ namespace Disc2Flac;
 public sealed partial class MainViewModel
 {
     public ObservableCollection<MixerStrip> MixerStrips { get; } = [];
+    public ObservableCollection<MixerFaderLink> MixerFaderLinks { get; } = [];
     public ChannelMeter MixerOutputLeft { get; } = new("L", "L");
     public ChannelMeter MixerOutputRight { get; } = new("R", "R");
     private bool _experimentalMixerEnabled;
@@ -12,7 +13,8 @@ public sealed partial class MainViewModel
     private bool _includeMixerMaster;
     private string _mixerVariantName = "Mix 1";
     private bool _applyingMixerPreset;
-    private readonly Dictionary<string, ExperimentalChannel[]> _rememberedMixerLayouts = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, (ExperimentalChannel[] Channels, string[] Links)> _rememberedMixerLayouts = new(StringComparer.Ordinal);
+    private string[] CaptureFaderLinks() => MixerFaderLinks.Where(x => x.IsLinked).Select(x => x.Pair).ToArray();
     public string MixerVariantName { get => _mixerVariantName; set => Set(ref _mixerVariantName, value); }
     public bool IncludeMixerMaster { get => _includeMixerMaster; set => Set(ref _includeMixerMaster, value); }
     public bool CanExportMixer => CanPrepareConversion && CanDownmixStereo;
@@ -51,9 +53,9 @@ public sealed partial class MainViewModel
     }
     public MixerPreset CaptureMixerPreset() => new()
     {
-        Format = "DiscChannelLab.MixerPreset", Version = 3, Name = MixerVariantName,
+        Format = "DiscChannelLab.MixerPreset", Version = 4, Name = MixerVariantName,
         MasterPercent = Volume, PerceivedMaster = PerceivedVolume, IncludeMasterInExport = IncludeMixerMaster,
-        Channels = MixerStrips.Select(x => x.Snapshot()).ToArray()
+        Channels = MixerStrips.Select(x => x.Snapshot()).ToArray(), LinkedFaderPairs = CaptureFaderLinks()
     };
     public void ApplyMixerPreset(MixerPreset preset)
     {
@@ -65,6 +67,7 @@ public sealed partial class MainViewModel
         _applyingMixerPreset = true;
         try
         {
+            foreach (var link in MixerFaderLinks) link.IsLinked = false;
             var channels = preset.Channels.ToDictionary(x => x.Code, StringComparer.Ordinal);
             foreach (var strip in MixerStrips)
             {
@@ -73,6 +76,7 @@ public sealed partial class MainViewModel
                 strip.Solo = channel.Solo;
                 strip.InvertPolarity = channel.InvertPolarity;
             }
+            foreach (var link in MixerFaderLinks) link.IsLinked = preset.LinkedFaderPairs.Contains(link.Pair);
             MixerVariantName = preset.Name;
             Volume = preset.MasterPercent; PerceivedVolume = preset.PerceivedMaster;
             IncludeMixerMaster = preset.IncludeMasterInExport;
@@ -83,15 +87,25 @@ public sealed partial class MainViewModel
     }
     private void RebuildMixerStrips()
     {
+        _applyingMixerPreset = true;
+        try { RebuildMixerStripsCore(); }
+        finally { _applyingMixerPreset = false; }
+        PublishExperimentalMix();
+    }
+    private void RebuildMixerStripsCore()
+    {
         SaveMixerDownmix = false;
         if (MixerStrips.Count > 0)
-            _rememberedMixerLayouts[string.Join(' ', MixerStrips.Select(x => x.Code))] = MixerStrips.Select(x => x.Snapshot()).ToArray();
+            _rememberedMixerLayouts[string.Join(' ', MixerStrips.Select(x => x.Code))] =
+                (MixerStrips.Select(x => x.Snapshot()).ToArray(), CaptureFaderLinks());
+        MixerFaderLinks.Clear();
         MixerStrips.Clear();
         if (CanUseExperimentalMixer)
         {
             var defaults = StereoPreviewMixer.StandardChannels(SelectedStream!);
             var key = string.Join(' ', defaults.Select(x => x.Code));
-            var settings = (_rememberedMixerLayouts.TryGetValue(key, out var remembered) ? remembered : defaults)
+            var found = _rememberedMixerLayouts.TryGetValue(key, out var remembered);
+            var settings = (found ? remembered.Channels : defaults)
                 .ToDictionary(x => x.Code, StringComparer.Ordinal);
             foreach (var input in ChannelMeters)
             {
@@ -100,12 +114,21 @@ public sealed partial class MainViewModel
                     { Pan = setting.Pan * 100, Solo = setting.Solo, InvertPolarity = setting.InvertPolarity };
                 MixerStrips.Add(strip);
             }
+            foreach (var pair in MixerFaderLink.SupportedPairs)
+            {
+                var codes = pair.Split('/');
+                var left = MixerStrips.FirstOrDefault(x => x.Code == codes[0]);
+                var right = MixerStrips.FirstOrDefault(x => x.Code == codes[1]);
+                if (left is null || right is null) continue;
+                var link = new MixerFaderLink(left, right, PublishExperimentalMix);
+                MixerFaderLinks.Add(link);
+                link.IsLinked = found && remembered.Links.Contains(pair);
+            }
         }
         // Loading a title temporarily clears SelectedStream. Keep the user's on/off
         // choice through that gap and through stereo/unsupported streams.
         Changed(nameof(CanUseExperimentalMixer));
         ResetMixedMeters();
-        PublishExperimentalMix();
     }
     public void ResetExperimentalMixer()
     {
@@ -114,6 +137,7 @@ public sealed partial class MainViewModel
         _applyingMixerPreset = true;
         try
         {
+            foreach (var link in MixerFaderLinks) link.IsLinked = false;
             foreach (var strip in MixerStrips)
             {
                 var setting = defaults[strip.Code];

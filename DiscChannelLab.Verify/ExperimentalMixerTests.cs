@@ -113,6 +113,7 @@ internal static class ExperimentalMixerTests
         Directory.CreateDirectory(output);
         var app = new App(); app.InitializeComponent();
         SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext());
+        VerifyFaderLinks(output);
         var errors = new CaptureTrace();
         PresentationTraceSources.DataBindingSource.Listeners.Add(errors);
         var model = new MainViewModel();
@@ -130,6 +131,20 @@ internal static class ExperimentalMixerTests
         firstFader.Value = 50;
         Pump();
         Check(Math.Abs(firstStrip.Level - 25) < 1e-8, "Fader listening curve binding failed");
+        var linkButton = Descendants<ToggleButton>(root).Single(x => x.DataContext is MixerFaderLink link && link.Pair == "FL/FR");
+        linkButton.IsChecked = true; Pump();
+        var rightStrip = model.MixerStrips.Single(x => x.Code == "FR");
+        Check(rightStrip.Level == firstStrip.Level && ((MixerFaderLink)linkButton.DataContext).IsLinked, "Link button did not equalize gains");
+        var rightFader = Descendants<Slider>(root).Single(x => x.DataContext == rightStrip && x.Orientation == Orientation.Vertical);
+        rightFader.Value = 60; Pump();
+        Check(firstStrip.Level == rightStrip.Level && Math.Abs(firstStrip.Level - 36) < 1e-8 && Math.Abs(firstFader.Value - 60) < 1e-8,
+            "Right fader did not update the left fader");
+        var rightLevel = Descendants<TextBox>(root).First(x => x.DataContext == rightStrip);
+        rightLevel.Text = "37.25"; rightLevel.GetBindingExpression(TextBox.TextProperty)!.UpdateSource(); Pump();
+        Check(firstStrip.Level == 37.25 && rightStrip.Level == 37.25, "Linked numeric entry did not update both gains");
+        linkButton.IsChecked = false; Pump();
+        rightFader.Value = 80; Pump();
+        Check(firstStrip.Level == 37.25 && Math.Abs(rightStrip.Level - 64) < 1e-8, "Unlinking did not restore independent gain");
         var pan = Descendants<Slider>(root).First(x => x.DataContext == firstStrip && x.Orientation == Orientation.Horizontal);
         pan.Value = 100; Pump();
         Check(firstStrip.Pan == 100, "Pan binding failed");
@@ -222,7 +237,7 @@ internal static class ExperimentalMixerTests
         var path = Path.Combine(output, "mixer-preset.json");
         model.CaptureMixerPreset().Save(path);
         var preset = MixerPreset.Load(path);
-        Check(preset.Version == 3, "Polarity presets need version 3");
+        Check(preset.Version == 4, "Fader link presets need version 4");
         // Apply to another disc/stream instance; match channel identity rather than JSON order.
         var other = new MainViewModel { SelectedStream = Stream(5, "5.0") };
         other.ApplyMixerPreset(preset with { Channels = preset.Channels.Reverse().ToArray() });
@@ -305,6 +320,87 @@ internal static class ExperimentalMixerTests
         other.DetachLanguage();
         model.ResetExperimentalMixer(); model.Volume = 100; model.PerceivedVolume = true; model.IncludeMixerMaster = false;
         Console.WriteLine("Independent JSON preset round trip, channel identity, live application, disc switching and atomic invalid-file rejection verified.");
+    }
+    private static void VerifyFaderLinks(string output)
+    {
+        var model = new MainViewModel { SelectedStream = Stream(8, "7.1"), ExperimentalMixerEnabled = true };
+        Check(model.MixerFaderLinks.Select(x => x.Pair).SequenceEqual(new[] { "FL/FR", "SL/SR", "BL/BR" }) &&
+              model.MixerFaderLinks.All(x => !x.IsLinked), "Incorrect available/default links");
+        var fl = model.MixerStrips.Single(x => x.Code == "FL");
+        var fr = model.MixerStrips.Single(x => x.Code == "FR");
+        var sl = model.MixerStrips.Single(x => x.Code == "SL");
+        var sr = model.MixerStrips.Single(x => x.Code == "SR");
+        fl.Level = 25; fr.Level = 75; sl.Level = 40; sr.Level = 90;
+        var front = model.MixerFaderLinks[0]; var surround = model.MixerFaderLinks[1];
+        front.IsLinked = true;
+        Check(fl.Level == 25 && fr.Level == 25 && sl.Level == 40 && sr.Level == 90, "Enabling front link chose wrong reference or changed surround");
+        surround.IsLinked = true;
+        sr.Level = 12.34;
+        Check(sl.Level == 12.34 && fl.Level == 25 && fr.Level == 25, "Surround link changed front gain");
+        foreach (var level in new[] { 0d, 37.25, 100d })
+        {
+            fr.Level = level;
+            Check(fl.Level == level && fr.Level == level, "Linked gain mismatch");
+            var live = (PreviewMixState)typeof(MainViewModel).GetField("_livePreviewMix", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(model)!;
+            Check(live.Channels!.Single(x => x.Code == "FL").Gain == level / 100 &&
+                  live.Channels!.Single(x => x.Code == "FR").Gain == level / 100, "Live playback snapshot contains unequal linked gains");
+        }
+        fl.Pan = 25; fl.Solo = true; fl.InvertPolarity = true; fr.Muted = true;
+        Check(fr.Pan == 100 && !fr.Solo && !fr.InvertPolarity && fl.Solo && !fl.Muted, "Link incorrectly coupled other controls");
+        var beforeInvalid = fl.Level;
+        try { fr.Level = double.NaN; throw new Exception("Invalid linked gain accepted"); } catch (ArgumentOutOfRangeException) { }
+        Check(fl.Level == beforeInvalid && fr.Level == beforeInvalid, "Invalid gain partially updated a linked pair");
+        front.IsLinked = false;
+        fl.Level = 20; fr.Level = 80;
+        Check(fl.Level == 20 && fr.Level == 80, "Independent gains were not restored");
+        front.IsLinked = true;
+        var path = Path.Combine(output, "linked-preset.json");
+        model.CaptureMixerPreset().Save(path);
+        var preset = MixerPreset.Load(path);
+        model.ResetExperimentalMixer();
+        Check(model.MixerFaderLinks.All(x => !x.IsLinked), "Reset retained links");
+        model.ApplyMixerPreset(preset with { Channels = preset.Channels.Reverse().ToArray() });
+        Check(model.MixerFaderLinks.Count(x => x.IsLinked) == 2 && fl.Level == 20 && fr.Level == 20 && sl.Level == 12.34 && sr.Level == 12.34,
+            "Preset lost links or levels");
+        foreach (var invalid in new[]
+        {
+            preset with { Version = 3 },
+            preset with { LinkedFaderPairs = ["FL/FC"] },
+            preset with { LinkedFaderPairs = ["FL/FR", "FL/FR"] },
+            preset with { LinkedFaderPairs = null! },
+            preset with { Channels = preset.Channels.Select(c => c.Code == "FR" ? c with { Gain = .81 } : c).ToArray() }
+        })
+        {
+            var rejected = false;
+            try { model.ApplyMixerPreset(invalid); } catch (InvalidDataException) { rejected = true; }
+            Check(rejected && model.CaptureMixerPreset().Channels.SequenceEqual(preset.Channels) &&
+                  model.CaptureMixerPreset().LinkedFaderPairs.SequenceEqual(preset.LinkedFaderPairs), "Invalid links partially changed settings");
+        }
+        model.SelectedStream = Stream(6, "5.1(side)");
+        Check(model.MixerFaderLinks.Select(x => x.Pair).SequenceEqual(new[] { "FL/FR", "SL/SR" }) && model.MixerFaderLinks.All(x => !x.IsLinked),
+            "New layout inherited unrelated links");
+        model.SelectedStream = Stream(8, "7.1");
+        Check(model.MixerFaderLinks.Count(x => x.IsLinked) == 2, "Returning to layout lost links");
+        var old = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!;
+        old["version"] = 3; old.AsObject().Remove("linkedFaderPairs");
+        var oldPath = Path.Combine(output, "v3-preset.json"); File.WriteAllText(oldPath, old.ToJsonString());
+        model.ApplyMixerPreset(MixerPreset.Load(oldPath));
+        Check(model.MixerFaderLinks.All(x => !x.IsLinked), "Old preset must turn links off");
+        var missingPair = new MainViewModel { SelectedStream = Stream(6, "5.1") };
+        var missingPreset = missingPair.CaptureMixerPreset() with { LinkedFaderPairs = ["SL/SR"] };
+        try { missingPreset.Validate(); throw new Exception("Missing pair accepted"); } catch (InvalidDataException) { }
+        missingPair.DetachLanguage(); model.DetachLanguage();
+        // Observers must never see a one-sided update, and audio publishes once.
+        var applies = 0;
+        var left = new MixerStrip(new ChannelMeter("FL", "FL"), 30, false, () => applies++);
+        var right = new MixerStrip(new ChannelMeter("FR", "FR"), 70, false, () => applies++);
+        var pair = new MixerFaderLink(left, right, () => applies++);
+        left.PropertyChanged += (_, _) => Check(left.Level == right.Level, "Left notification saw unequal gains");
+        right.PropertyChanged += (_, _) => Check(left.Level == right.Level, "Right notification saw unequal gains");
+        pair.IsLinked = true; applies = 0;
+        right.Level = 66;
+        Check(applies == 1 && left.Level == 66, "Linked edit must publish one complete audio update");
+        Console.WriteLine("Fader links: independent pairs, either-side gain/fader edits, atomic live updates, presets, layout restore, legacy and invalid-file handling passed.");
     }
     private static async Task VerifySoloAudioAsync()
     {

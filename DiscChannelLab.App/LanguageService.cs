@@ -168,6 +168,8 @@ public sealed class LanguageService : INotifyPropertyChanged
         ["バーは聴感カーブ、数値は実際の比率です。"] = "Sliders use a perceptual curve; numbers show actual mix levels.",
         ["デフォルトに戻す"] = "Reset to defaults", ["ミュート"] = "Mute",
         ["極性反転"] = "Invert polarity",
+        ["フェーダーリンク"] = "Fader links",
+        ["オンにすると左側の値に揃え、以後は左右どちらの操作でも同じ音量になります。"] = "Enable to match the left channel's level; then adjusting either side sets both to the same gain.",
         ["極性反転：波形の正負を反転します。"] = "Invert polarity: reverse the sign of this channel's waveform.",
         ["ミックスを調整すると試聴音をステレオミックスに切り替えます。"] =
             "Adjusting the mix switches preview to the stereo mix.",

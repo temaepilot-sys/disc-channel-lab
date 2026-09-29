@@ -167,6 +167,8 @@ public sealed class LanguageService : INotifyPropertyChanged
         ["ステレオミックス比率（試聴にも適用）"] = "Stereo mix levels (also used for preview)",
         ["バーは聴感カーブ、数値は実際の比率です。"] = "Sliders use a perceptual curve; numbers show actual mix levels.",
         ["デフォルトに戻す"] = "Reset to defaults", ["ミュート"] = "Mute",
+        ["極性反転"] = "Invert polarity",
+        ["極性反転：波形の正負を反転します。"] = "Invert polarity: reverse the sign of this channel's waveform.",
         ["ミックスを調整すると試聴音をステレオミックスに切り替えます。"] =
             "Adjusting the mix switches preview to the stereo mix.",
         ["前方左右"] = "Front L/R", ["センター"] = "Center", ["サラウンド"] = "Surround",

@@ -51,7 +51,7 @@ public sealed partial class MainViewModel
     }
     public MixerPreset CaptureMixerPreset() => new()
     {
-        Format = "DiscChannelLab.MixerPreset", Version = 2, Name = MixerVariantName,
+        Format = "DiscChannelLab.MixerPreset", Version = 3, Name = MixerVariantName,
         MasterPercent = Volume, PerceivedMaster = PerceivedVolume, IncludeMasterInExport = IncludeMixerMaster,
         Channels = MixerStrips.Select(x => x.Snapshot()).ToArray()
     };
@@ -71,6 +71,7 @@ public sealed partial class MainViewModel
                 var channel = channels[strip.Code];
                 strip.Level = channel.Gain * 100; strip.Pan = channel.Pan * 100; strip.Muted = channel.Muted;
                 strip.Solo = channel.Solo;
+                strip.InvertPolarity = channel.InvertPolarity;
             }
             MixerVariantName = preset.Name;
             Volume = preset.MasterPercent; PerceivedVolume = preset.PerceivedMaster;
@@ -96,7 +97,7 @@ public sealed partial class MainViewModel
             {
                 var setting = settings[input.Code];
                 var strip = new MixerStrip(input, setting.Gain * 100, setting.Muted, PublishExperimentalMix)
-                    { Pan = setting.Pan * 100, Solo = setting.Solo };
+                    { Pan = setting.Pan * 100, Solo = setting.Solo, InvertPolarity = setting.InvertPolarity };
                 MixerStrips.Add(strip);
             }
         }
@@ -120,6 +121,7 @@ public sealed partial class MainViewModel
                 strip.Pan = setting.Pan * 100;
                 strip.Muted = setting.Muted;
                 strip.Solo = false;
+                strip.InvertPolarity = false;
             }
         }
         finally { _applyingMixerPreset = false; }

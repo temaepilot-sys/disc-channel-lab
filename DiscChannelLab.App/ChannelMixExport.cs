@@ -39,14 +39,15 @@ public sealed class ChannelMixExport
         StereoPreviewMixer.BuildWeights(StereoMixSettings.ChannelNames(source),
             new PreviewMixState(StereoMixSettings.Default, null, _channels), left, right);
         string Terms(double[] coefficients) => string.Join('+', coefficients.Select((gain, i) =>
-            $"{(gain * MasterGain).ToString("0.################", CultureInfo.InvariantCulture)}*c{i}"));
+            $"{(gain * MasterGain).ToString("0.################", CultureInfo.InvariantCulture)}*c{i}"))
+            .Replace("+-", "-", StringComparison.Ordinal);
         // Keep summing in floating point. Integer encoding saturates at full scale;
         // there is no auto-normalization, limiter, or integer wrap-around.
         return $"aformat=sample_fmts=dbl,pan=stereo|c0={Terms(left)}|c1={Terms(right)}";
     }
     public void AddTags(List<string> arguments)
     {
-        var json = JsonSerializer.Serialize(new { Version = 3, Layout = _layout,
+        var json = JsonSerializer.Serialize(new { Version = 4, Layout = _layout,
             Name, GainLaw = "independent-unity", PanLaw = "equal-power", MasterGain, Channels = _channels });
         arguments.AddRange(["-metadata", "DOWNMIX=individual channel mixer to stereo",
             "-metadata", $"MIXER_VARIANT={Name}", "-metadata", $"MIXER_SETTINGS={json}"]);

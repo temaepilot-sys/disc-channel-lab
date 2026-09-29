@@ -7,7 +7,8 @@ public sealed record ExperimentalChannel(
     [property: System.Text.Json.Serialization.JsonRequired] double Gain,
     [property: System.Text.Json.Serialization.JsonRequired] double Pan,
     [property: System.Text.Json.Serialization.JsonRequired] bool Muted,
-    bool Solo = false);
+    bool Solo = false,
+    bool InvertPolarity = false);
 // All values refer to the same PCM window and are displayed together on the playback clock.
 public sealed record MixerMeterFrame(double Seconds, double[] Input, double[] InputRms,
     double[] Left, double[] Right, double[] Output);
@@ -19,6 +20,7 @@ public sealed class MixerStrip : INotifyPropertyChanged
     private double _pan;
     private bool _muted;
     private bool _solo;
+    private bool _invertPolarity;
     public ChannelMeter Input { get; }
     public ChannelMeter PostLeft { get; } = new("L", "L");
     public ChannelMeter PostRight { get; } = new("R", "R");
@@ -81,7 +83,16 @@ public sealed class MixerStrip : INotifyPropertyChanged
             Notify(nameof(Solo)); _apply();
         }
     }
-    public ExperimentalChannel Snapshot() => new(Code, Level / 100, Pan / 100, Muted, Solo);
+    public bool InvertPolarity
+    {
+        get => _invertPolarity;
+        set
+        {
+            if (_invertPolarity == value) return;
+            _invertPolarity = value; Notify(nameof(InvertPolarity)); _apply();
+        }
+    }
+    public ExperimentalChannel Snapshot() => new(Code, Level / 100, Pan / 100, Muted, Solo, InvertPolarity);
     public event PropertyChangedEventHandler? PropertyChanged;
     private void Notify(string name) => PropertyChanged?.Invoke(this, new(name));
     public void RefreshLanguage() => Notify(nameof(Description));

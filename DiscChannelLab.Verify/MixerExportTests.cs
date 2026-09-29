@@ -99,12 +99,30 @@ internal static class MixerExportTests
         var mixerTag = soloTags.RootElement.GetProperty("format").GetProperty("tags").EnumerateObject()
             .Single(p => p.Name.Equals("MIXER_SETTINGS", StringComparison.OrdinalIgnoreCase)).Value.GetString()!;
         using var mixerJson = JsonDocument.Parse(mixerTag);
-        Check(mixerJson.RootElement.GetProperty("Version").GetInt32() == 3 &&
+        Check(mixerJson.RootElement.GetProperty("Version").GetInt32() == 4 &&
               mixerJson.RootElement.GetProperty("Channels").EnumerateArray().Count(c => c.GetProperty("Solo").GetBoolean()) == 2,
             "FLAC metadata lost Solo settings");
         try { _ = new ChannelMixExport(audio, original.Select(c => c with { Muted = true, Solo = true }), "Invalid switches"); throw new Exception("Dual-on switches accepted"); }
         catch (InvalidDataException) { }
         Console.WriteLine("Solo FLAC: excluded channels are silent, multiple solos preserve gain, frozen settings and Solo metadata verified.");
+
+        var invertedChannels = original.Select(c => c with { Gain = 1, InvertPolarity = true }).ToArray();
+        var inverted = new ChannelMixExport(audio, invertedChannels, "Polarity reversal");
+        invertedChannels[0] = invertedChannels[0] with { InvertPolarity = false };
+        await Export(inverted, OutputQuality.HighResolution);
+        var invertedFile = Directory.GetFiles(folder, "*Polarity reversal*.flac").Single();
+        var invertedPcm = await Decode(invertedFile, "inverted");
+        Check(invertedPcm.Length == bytes.Length, "Polarity changed sample count");
+        for (var i = 0; i < bytes.Length; i += 4)
+            Check(BinaryPrimitives.ReadInt32LittleEndian(invertedPcm.AsSpan(i, 4)) ==
+                  -BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(i, 4)), "FLAC polarity did not invert exact PCM samples");
+        var invertedMetadata = await runner.RunAsync(tools.Ffprobe, ["-v", "error", "-show_entries", "format_tags", "-of", "json", invertedFile], CancellationToken.None);
+        using var invertedTags = JsonDocument.Parse(invertedMetadata.Output);
+        using var invertedJson = JsonDocument.Parse(invertedTags.RootElement.GetProperty("format").GetProperty("tags").EnumerateObject()
+            .Single(p => p.Name.Equals("MIXER_SETTINGS", StringComparison.OrdinalIgnoreCase)).Value.GetString()!);
+        Check(invertedJson.RootElement.GetProperty("Channels").EnumerateArray().All(c => c.GetProperty("InvertPolarity").GetBoolean()),
+            "FLAC metadata lost polarity settings");
+        Console.WriteLine("Polarity FLAC: all decoded samples inverted exactly, negative pan coefficients accepted, frozen settings and metadata preserved.");
 
         try { _ = new ChannelMixExport(audio, original.Select(x => x with { Gain = 1.001 }), "Over 100"); throw new Exception("Gain above 100% accepted"); }
         catch (InvalidDataException) { }

@@ -16,6 +16,7 @@ internal static class ExperimentalMixerTests
     public static async Task RunAsync(string output)
     {
         await VerifySoloAudioAsync();
+        await VerifyPolarityAudioAsync();
         // Independent channels must have unity gain at 100%, regardless of layout.
         var layouts = (IReadOnlyDictionary<string, string>)typeof(StereoMixSettings)
             .GetField("Layouts", BindingFlags.Static | BindingFlags.NonPublic)!.GetValue(null)!;
@@ -147,6 +148,9 @@ internal static class ExperimentalMixerTests
         secondSolo.IsChecked = true; Pump();
         Check(firstStrip.Solo && model.MixerStrips[1].Solo, "Solo incorrectly excluded another channel");
         Check(solo.TranslatePoint(new Point(), root).Y < mute.TranslatePoint(new Point(), root).Y, "Solo is not above Mute");
+        var polarity = Descendants<CheckBox>(root).First(x => x.DataContext == firstStrip && Equals(x.Content, "Ø"));
+        polarity.IsChecked = true; Pump();
+        Check(firstStrip.InvertPolarity && firstStrip.Solo && !firstStrip.Muted, "Polarity binding failed or changed Solo/Mute");
         var level = Descendants<TextBox>(root).First(x => x.DataContext == firstStrip);
         level.Text = "75"; level.GetBindingExpression(TextBox.TextProperty)!.UpdateSource(); Pump();
         Check(firstStrip.Level == 75, "Numeric input binding failed");
@@ -155,7 +159,7 @@ internal static class ExperimentalMixerTests
         Check(!window.CommitInputs(), "Invalid field did not block export");
         level.GetBindingExpression(TextBox.TextProperty)!.UpdateTarget();
         model.ResetExperimentalMixer(); Pump();
-        Check(firstStrip.Pan == -100 && Math.Abs(firstStrip.Level - 100 / (1 + Math.Sqrt(2))) < 1e-9 && !firstStrip.Muted && model.MixerStrips.All(x => !x.Solo), "Reset failed");
+        Check(firstStrip.Pan == -100 && Math.Abs(firstStrip.Level - 100 / (1 + Math.Sqrt(2))) < 1e-9 && !firstStrip.Muted && model.MixerStrips.All(x => !x.Solo && !x.InvertPolarity), "Reset failed");
         VerifyPresets(model, output);
         Check(model.MixerStrips.Single(x => x.Code == "FC").Pan == 0 && model.MixerStrips.Single(x => x.Code == "FR").Pan == 100,
             "Default pan positions incorrect");
@@ -212,18 +216,19 @@ internal static class ExperimentalMixerTests
         model.Volume = 175; model.PerceivedVolume = false; model.IncludeMixerMaster = true;
         var fl = model.MixerStrips.Single(x => x.Code == "FL");
         fl.Level = 37.25; fl.Pan = 42; fl.Muted = true;
+        fl.InvertPolarity = true;
         model.MixerStrips.Single(x => x.Code == "FR").Solo = true;
         model.MixerStrips.Single(x => x.Code == "FC").Solo = true;
         var path = Path.Combine(output, "mixer-preset.json");
         model.CaptureMixerPreset().Save(path);
         var preset = MixerPreset.Load(path);
-        Check(preset.Version == 2, "Solo presets need version 2");
+        Check(preset.Version == 3, "Polarity presets need version 3");
         // Apply to another disc/stream instance; match channel identity rather than JSON order.
         var other = new MainViewModel { SelectedStream = Stream(5, "5.0") };
         other.ApplyMixerPreset(preset with { Channels = preset.Channels.Reverse().ToArray() });
         var restored = other.MixerStrips.Single(x => x.Code == "FL");
         Check(other.MixerStrips.Where(x => x.Solo).Select(x => x.Code).SequenceEqual(new[] { "FR", "FC" }), "Preset lost multiple solos");
-        Check(restored.Level == 37.25 && restored.Pan == 42 && restored.Muted &&
+        Check(restored.Level == 37.25 && restored.Pan == 42 && restored.Muted && restored.InvertPolarity &&
             other.Volume == 175 && !other.PerceivedVolume && other.IncludeMixerMaster &&
             other.MixerVariantName == "Study 日本語" && other.ExperimentalMixerEnabled, "Preset round trip lost settings");
         var live = (PreviewMixState)typeof(MainViewModel).GetField("_livePreviewMix", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(other)!;
@@ -232,6 +237,7 @@ internal static class ExperimentalMixerTests
         foreach (var bad in new[]
         {
             preset with { Version = 99 },
+            preset with { Version = 2 },
             preset with { Channels = preset.Channels.Select(c => c with { Muted = true, Solo = true }).ToArray() },
             preset with { MasterPercent = 201 },
             preset with { Channels = preset.Channels.Select(c => c with { Gain = 1.01 }).ToArray() },
@@ -253,11 +259,23 @@ internal static class ExperimentalMixerTests
         var legacyPath = Path.Combine(output, "legacy-preset.json");
         var legacyJson = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!;
         legacyJson["version"] = 1;
-        foreach (var channel in legacyJson["channels"]!.AsArray()) channel!.AsObject().Remove("solo");
+        foreach (var channel in legacyJson["channels"]!.AsArray())
+        {
+            channel!.AsObject().Remove("solo");
+            channel.AsObject().Remove("invertPolarity");
+        }
         File.WriteAllText(legacyPath, legacyJson.ToJsonString());
         var legacy = MixerPreset.Load(legacyPath);
         other.ApplyMixerPreset(legacy);
-        Check(other.MixerStrips.All(x => !x.Solo) && other.MixerStrips[0].Muted, "Legacy preset must clear Solo and retain Mute");
+        Check(other.MixerStrips.All(x => !x.Solo && !x.InvertPolarity) && other.MixerStrips[0].Muted, "Legacy preset must clear Solo/polarity and retain Mute");
+        var v2Json = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!;
+        v2Json["version"] = 2;
+        foreach (var channel in v2Json["channels"]!.AsArray()) channel!.AsObject().Remove("invertPolarity");
+        File.WriteAllText(legacyPath, v2Json.ToJsonString());
+        other.ApplyMixerPreset(preset);
+        other.ApplyMixerPreset(MixerPreset.Load(legacyPath));
+        Check(other.MixerStrips.All(x => !x.InvertPolarity) && other.MixerStrips.Count(x => x.Solo) == 2,
+            "Version 2 preset must clear polarity and retain Solo");
         other.ApplyMixerPreset(preset);
         other.SelectedStream = null;
         other.SelectedStream = Stream(5, "5.0");
@@ -335,6 +353,45 @@ internal static class ExperimentalMixerTests
         strip.Muted = true; strip.Solo = true; strip.Muted = true; strip.Muted = false;
         Check(applies == 4 && !strip.Solo && !strip.Muted && strip.Level == 75, "Switches must publish once and preserve the gain");
         Console.WriteLine("Solo: live single/multiple selection, deselection, normal mix restoration, Mute exclusion and Input/Post PCM meters passed.");
+    }
+    private static async Task VerifyPolarityAudioAsync()
+    {
+        var audio = Stream(6, "5.1");
+        var pcm = new byte[19200 * 12];
+        for (var i = 0; i < 19200; i++)
+        {
+            BinaryPrimitives.WriteInt16LittleEndian(pcm.AsSpan(i * 12, 2), 1000);
+            BinaryPrimitives.WriteInt16LittleEndian(pcm.AsSpan(i * 12 + 2, 2), 1000);
+        }
+        // Identical channels routed to the same output: reversing one must cancel.
+        var channels = StereoMixSettings.ChannelNames(audio).Select(c =>
+            new ExperimentalChannel(c, 1, -1, false, c is "FL" or "FR")).ToArray();
+        var state = new PreviewMixState(StereoMixSettings.Default, null, channels);
+        var meters = new List<MixerMeterFrame>();
+        using var input = new MemoryStream(pcm); using var output = new MemoryStream();
+        await StereoPreviewMixer.CopyAsync(input, output, audio, () => state, () => 1, CancellationToken.None,
+            mixedLevels: frame =>
+            {
+                meters.Add(frame);
+                if (meters.Count == 5) state = state with { Channels = channels.Select(c => c with { InvertPolarity = c.Code == "FR" }).ToArray() };
+                if (meters.Count == 10) state = state with { Channels = channels.Select(c => c with { InvertPolarity = true }).ToArray() };
+                if (meters.Count == 15) state = state with { Channels = channels };
+            });
+        var result = output.ToArray();
+        var expected = new[] { 2000, 0, -2000, 2000 };
+        for (var stage = 0; stage < expected.Length; stage++)
+        {
+            var offset = (stage * 4800 + 4000) * 4;
+            Check(BinaryPrimitives.ReadInt16LittleEndian(result.AsSpan(offset, 2)) == expected[stage] &&
+                  BinaryPrimitives.ReadInt16LittleEndian(result.AsSpan(offset + 2, 2)) == 0,
+                $"Live polarity reversal/cancellation incorrect at stage {stage}");
+            var meter = meters[stage * 5 + 4];
+            Check(meter.Input[0] == meter.Left[0] && meter.Input[1] == meter.Left[1],
+                "Polarity changed individual Input/Post peak magnitudes");
+        }
+        Check(double.IsNegativeInfinity(meters[9].Output[0]) && meters[4].Output[0] == meters[14].Output[0],
+            "Output peak did not reflect cancellation or inverted amplitude");
+        Console.WriteLine("Polarity: live inversion/restoration, two-channel cancellation, Solo coexistence and unchanged Input/Post magnitudes passed.");
     }
     private static void Layout(FrameworkElement root, double width, double height)
     { root.Measure(new Size(width, height)); root.Arrange(new Rect(0, 0, width, height)); root.UpdateLayout(); }

@@ -48,12 +48,15 @@
                                 Value="{Binding Fader, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Margin="0,18,0,18"/>
                     </Grid>
                     <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,12,0,10">
-                        <TextBox Width="65" Padding="4" HorizontalContentAlignment="Right" KeyDown="Level_KeyDown"
+                        <TextBox Width="65" Padding="4" VerticalAlignment="Center" HorizontalContentAlignment="Right" KeyDown="Level_KeyDown"
                                  Text="{Binding Level, Mode=TwoWay, UpdateSourceTrigger=LostFocus, StringFormat={}{0:0.##}, ValidatesOnExceptions=True}"/>
                         <TextBlock Text="%" VerticalAlignment="Center" Margin="4,0,0,0"/>
                         <StackPanel VerticalAlignment="Center" Margin="9,0,0,0">
                             <CheckBox Content="Solo" IsChecked="{Binding Solo, Mode=TwoWay}" Margin="0,0,0,6"/>
                             <CheckBox Content="Mute" IsChecked="{Binding Muted, Mode=TwoWay}"/>
+                            <CheckBox Content="Ø" IsChecked="{Binding InvertPolarity, Mode=TwoWay}" Margin="0,6,0,0"
+                                      ToolTip="{local:Loc Key='極性反転：波形の正負を反転します。'}"
+                                      AutomationProperties.Name="{local:Loc Key='極性反転'}"/>
                         </StackPanel>
                     </StackPanel>
                     <StackPanel Grid.Row="4">

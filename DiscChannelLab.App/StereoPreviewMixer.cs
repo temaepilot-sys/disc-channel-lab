@@ -185,6 +185,7 @@ public static class StereoPreviewMixer
                 if (setting is null) { left[i] = right[i] = 0; continue; }
                 var gain = setting.Muted || (hasSolo && !setting.Solo) || !double.IsFinite(setting.Gain)
                     ? 0 : Math.Clamp(setting.Gain, 0, 1);
+                if (setting.InvertPolarity) gain = -gain;
                 var pan = double.IsFinite(setting.Pan) ? Math.Clamp(setting.Pan, -1, 1) : 0;
                 var angle = (pan + 1) * Math.PI / 4;
                 left[i] = pan == 1 ? 0 : gain * Math.Cos(angle);

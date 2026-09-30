@@ -1,0 +1,71 @@
+Space sketch / DiscChannelLab local visualization protocol v1
+
+Purpose
+  One-way observation. DiscChannelLab owns transport, decoding, mixing and sound output.
+  The viewer owns FFT and graphics, and never plays received live PCM.
+  No DiscChannelLab implementation assembly is required by the distributed viewer.
+
+Activation
+  Player opens an asynchronous, current-user-only NamedPipeServerStream (direction Out).
+  Name: DiscChannelLab.SpaceSketch.v1.<process-id>.<random-hex>
+  Viewer launch arguments: --live-pipe <name>
+  Viewer connects with NamedPipeClientStream (direction In, current-user-only).
+  No pipe access from remote hosts or other Windows users is intended.
+
+Envelope
+  int32 little-endian payload length, then exactly that many payload bytes.
+  Accepted length: 2..262144 bytes. First payload byte identifies the message type.
+
+Type 1: playback clock
+  Byte 1, followed by UTF-8 JSON (no BOM):
+  {"Version":1,"Epoch":7,"Name":"Track name","Codec":"pcm_bluray",
+   "SourceSampleRate":96000,"Position":12.34,"Duration":300.0,
+   "Playing":true,"ClockMilliseconds":123456789}
+  Position and Duration are seconds relative to the current track.
+  ClockMilliseconds is Environment.TickCount64 on the same Windows machine.
+  The player sends a clock about every 30ms while connected, even when paused.
+  Playing means the player's playback clock is running, not merely decoder startup.
+  Epoch changes on transport changes. Old-epoch PCM is rejected.
+
+Type 2: PCM block
+  Byte 2
+  int32 Epoch
+  float64 Seconds: position of the FIRST sample relative to current track
+  BinaryWriter UTF-8 string: comma-separated channel codes (7-bit encoded byte length)
+  int32 FrameCount (1..4096)
+  Input:  FrameCount * channels * int16 little-endian, interleaved
+  Post:   FrameCount * channels * float32 little-endian, interleaved
+  Output: FrameCount * 2 * int16 little-endian, interleaved FL/FR
+  PCM rate is always 48000Hz; int16 values are normalized by dividing by 32768.
+  Known codes: FL FR FC LFE SL SR BL BR BC FLC FRC TFL TFR.
+  The receiver checks sizes and codes and does not guess multichannel ordering.
+
+Signal definitions
+  Input: decoder PCM before the managed mixer, for supported multichannel layouts.
+  Post: sample * sqrt(left_weight^2 + right_weight^2) * master_gain.
+        This is the channel's combined stereo contribution level, not one physical speaker output.
+        Mute/Solo and the actual per-sample gain ramps are reflected.
+        Equal-power pan preserves this level; inspect Output to see left/right changes.
+        Individual spectral energy does not encode the polarity sign.
+  Output: the exact, clipped PCM bytes sent to ffplay.
+          Coherent summation and polarity cancellation are preserved.
+  The non-multichannel playback path already has decoded stereo before this tap;
+  its Input/Post are reported as FL/FR, not reconstructed original speakers.
+
+Timing and failure behavior
+  PCM is observed only after successful submission to the playback stream.
+  The publisher never waits for visualization. A bounded queue keeps at most 12 messages.
+  If the receiver stalls, oldest messages are dropped; audio continues unchanged.
+  A missing block, new epoch, or channel-layout change resets FFT and smoothing history.
+  Analysis is bounded to 192 frames (roughly two seconds at the default hop).
+  Browser polling is 50ms, at most one outstanding request.
+  Frames are selected by the player's clock, not by drawing frame count.
+  More than 500ms without a clock stops extrapolation and reports a lost connection.
+  Hardware output latency is not measured by this protocol.
+  Disconnects and reconnects do not restart DiscChannelLab playback.
+
+Rendering
+  GLSL ES shared uniforms have explicit, matching precision qualifiers.
+  uPoint is mediump in both vertex and fragment shaders; vColor is also explicit.
+  Reference: https://www.khronos.org/files/opengles_shading_language.pdf
+  A renderer initialization error does not disable synthetic demo playback.

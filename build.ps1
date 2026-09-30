@@ -42,3 +42,14 @@ if ($unexpectedTools.Count -gt 0) {
     throw "Public output unexpectedly contains FFmpeg tools: $($unexpectedTools -join ', ')"
 }
 Write-Output "Public build complete: $destination"
+
+# The viewer is a separate process, auto-detected beside the player in SpaceSketch/.
+$viewerDestination = Join-Path $destination 'SpaceSketch'
+& $dotnetExe publish (Join-Path $projectRoot 'DiscChannelLab.Visualizer\DiscChannelLab.Visualizer.csproj') `
+    -c $Configuration -r win-x64 --self-contained false -o $viewerDestination '-p:DebugType=None'
+if ($LASTEXITCODE -ne 0) { throw 'Visualizer build failed.' }
+$analysisSettings = Join-Path $viewerDestination 'AudioVisualizationSettings.json'
+if (-not (Test-Path -LiteralPath $analysisSettings)) {
+    Copy-Item -LiteralPath (Join-Path $projectRoot 'DiscChannelLab.Visualizer\AudioVisualizationSettings.json') -Destination $analysisSettings
+}
+Write-Output "Visualizer build complete: $viewerDestination"

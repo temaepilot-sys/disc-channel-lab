@@ -25,7 +25,8 @@ public static class StereoPreviewMixer
 
     public static async Task<long> CopyAsync(Stream source, Stream destination, AudioStreamInfo stream,
         Func<PreviewMixState> settings, Func<double> volume, CancellationToken token,
-        Action? firstWrite = null, Action<PreviewMixState>? mixApplied = null, Action<MixerMeterFrame>? mixedLevels = null)
+        Action? firstWrite = null, Action<PreviewMixState>? mixApplied = null, Action<MixerMeterFrame>? mixedLevels = null,
+        PreviewPcmTap? visualization = null)
     {
         var channels = StereoMixSettings.ChannelNames(stream);
         if (channels.Count != stream.Channels)
@@ -86,6 +87,7 @@ public static class StereoPreviewMixer
                 gainStep = (targetGain - gain) / 480;
             }
 
+            var post = visualization?.Enabled() == true ? new float[frames * channels.Count] : null;
             for (var frame = 0; frame < frames; frame++)
             {
                 if (rampFrames > 0)
@@ -112,6 +114,9 @@ public static class StereoPreviewMixer
                     var contributionRight = sample * right[channel];
                     leftSample += contributionLeft;
                     rightSample += contributionRight;
+                    if (post is not null)
+                        post[frame * channels.Count + channel] = (float)(sample / 32768d *
+                            Math.Sqrt(left[channel] * left[channel] + right[channel] * right[channel]) * gain);
                     if (mixedLevels is not null)
                     {
                         var normalized = sample / 32768d;
@@ -134,6 +139,9 @@ public static class StereoPreviewMixer
                 BinaryPrimitives.WriteInt16LittleEndian(output.AsSpan(frame * 4 + 2, 2), Clip(rightSample * gain));
             }
             await destination.WriteAsync(output.AsMemory(0, frames * 4), token).ConfigureAwait(false);
+            if (post is not null)
+                visualization!.TryPublish(new(submittedFrames / (double)sampleRate, channels.ToArray(),
+                    input.AsSpan(0, complete).ToArray(), post, output.AsSpan(0, frames * 4).ToArray()));
             if (!started) { started = true; firstWrite?.Invoke(); }
             submittedFrames += frames;
             // Never announce peaks for PCM that has not yet been submitted to the player.

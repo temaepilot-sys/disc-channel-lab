@@ -18,6 +18,16 @@ DiscChannelLab は、多チャンネル音声を調べるための Windows ア�
 
 英語のスクリーンショット：[メイン画面](docs/screenshots/english.png) · [チャンネルミキサー](docs/screenshots/mixer-english.png)
 
+## 3Dビジュアライザー — Space sketch
+
+再生中の各チャンネルを、周波数ごとの色付き粒子で可視化する別窓ビューアーを追加しました。リスナーを中心に音が空間を満たす様子を眺めたり、Input／Post／最終2ch出力を比較できます。英語UI、視点移動、UI非表示、JSON設定保存に対応します。
+
+![ビジュアライザーの全体表示](docs/screenshots/visualizer.png)
+
+![リスナー視点](docs/screenshots/listener.png)
+
+[使い方・ミキサーの反映範囲・動作条件](docs/visualizer.ja.md)。粒子の広がりは演出であり、精密な音場シミュレーションではありません。
+
 ## 主な機能
 
 - タイトル、チャプター、曲、音声ストリーム、チャンネル配置の確認。
@@ -97,7 +107,7 @@ Blu-rayの末尾にある短い映像のみのクリップは、元の時間を�
 ## 動作に必要なもの
 
 - Windows x64。
-- ビルドには .NET 10 SDK、公開用ビルドの実行には .NET 10 Desktop Runtime。
+- ビルドには .NET 10 SDK、公開用本体の実行には .NET 10 Desktop Runtime。ビューアーにはx64のASP.NET Core Runtime 10とWebGL対応Microsoft Edgeも必要です。
 - 利用者が用意した FFmpeg。変換には `ffmpeg.exe` と `ffprobe.exe`、試聴には `ffplay.exe` が必要です。アプリと同じ場所の `tools` フォルダーに置くか、`PATH` に追加してください。
 
 対応するマルチチャンネルのステレオ試聴では、入力・調整後・出力のピークをアプリ内の同じPCM区間から計測します。それ以外の再生経路は FFmpeg の `astats` と `ametadata` フィルターを使い、これらがない場合はメーターを更新できません。
@@ -111,6 +121,8 @@ FFmpeg に必要なプロトコルやデコーダーは入力ディスクによ�
 ```powershell
 ./build.ps1
 ```
+
+ビルド時に`artifacts/public-win-x64/SpaceSketch`へビューアーも作成します。本体の「3D Viewer」から起動できます。ビューアーの実行には、Desktop Runtimeに加えてx64のASP.NET Core Runtime 10とMicrosoft Edgeが必要です。
 
 `artifacts/public-win-x64` に .NET ランタイムと FFmpeg を含まない複数ファイル構成のアプリができます。.NET 10 Desktop Runtime と FFmpeg を別途用意して `DiscChannelLab.exe` を実行してください。
 

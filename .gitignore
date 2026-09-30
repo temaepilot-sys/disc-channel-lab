@@ -23,3 +23,11 @@ verification-output/
 *.log
 tools/
 Trash/
+
+# Visualizer runtime state, profiles, tokens and personal preferences.
+**/cache/
+**/checks/
+**/ViewerSettings.json
+**/ViewerSettings.json.*.tmp
+**/self-test-results.txt
+*.packet

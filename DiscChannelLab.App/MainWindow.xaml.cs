@@ -57,6 +57,33 @@ public partial class MainWindow : Window
         _mixerWindow.Show();
     }
 
+    private void OpenVisualizer_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            string? executable = null;
+            for (var directory = new System.IO.DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
+            {
+                foreach (var relative in new[] { "SpaceSketch/DiscChannelLab.Visualizer.exe", "DiscChannelLab.Visualizer.exe",
+                    "artifacts/public-win-x64/SpaceSketch/DiscChannelLab.Visualizer.exe",
+                    "DiscChannelLab-visualizer-lab/artifacts/SpaceSketch-linked/DiscChannelLab.Visualizer.exe" })
+                {
+                    var candidate = System.IO.Path.Combine(directory.FullName, relative);
+                    if (System.IO.File.Exists(candidate)) { executable = candidate; break; }
+                }
+                if (executable is not null) break;
+            }
+            if (executable is null)
+            {
+                var dialog = new OpenFileDialog { Title = LanguageService.T("3Dビューアーを選択"), Filter = "DiscChannelLab.Visualizer.exe|DiscChannelLab.Visualizer.exe" };
+                if (dialog.ShowDialog(this) != true) return;
+                executable = dialog.FileName;
+            }
+            _model.Visualization.Open(executable);
+        }
+        catch (Exception ex) { MessageBox.Show(this, ex.Message, "3D Viewer", MessageBoxButton.OK, MessageBoxImage.Error); }
+    }
+
     private void UpdatePlaylistDropDownWidth()
     {
         var width = Math.Min(Math.Max(PlaylistCombo.ActualWidth, ActualWidth - 72),
@@ -92,6 +119,7 @@ public partial class MainWindow : Window
         _driveTimer.Stop();
         _playTimer.Stop();
         _model.Cancel();
+        _model.Visualization.Dispose();
         _model.DetachLanguage();
     }
 

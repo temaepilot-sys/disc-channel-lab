@@ -23,7 +23,8 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
         Func<double>? volume = null, StereoMixSettings? mix = null, string? soloChannel = null,
         Action<long, double, double[], double[]>? channelLevels = null,
         Action<long, double>? playbackPosition = null,
-        Func<PreviewMixState>? liveMix = null, Action<long, MixerMeterFrame>? mixedLevels = null)
+        Func<PreviewMixState>? liveMix = null, Action<long, MixerMeterFrame>? mixedLevels = null,
+        PreviewPcmTap? visualization = null)
     {
         var ffplay = paths.Ffplay ?? throw new FileNotFoundException("再生用の ffplay.exe が見つかりません。");
         mix ??= StereoMixSettings.Default;
@@ -35,7 +36,7 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
         if (playlist.Format != DiscFormat.BluRay)
         {
             await PlayDvdAsync(ffplay, disc, playlist, stream, startTicks, endTicks,
-                token, segmentStarted, volume ?? (() => 1), mix, soloChannel, channelLevels, playbackPosition, liveMix, mixedLevels);
+                token, segmentStarted, volume ?? (() => 1), mix, soloChannel, channelLevels, playbackPosition, liveMix, mixedLevels, visualization);
             return;
         }
         foreach (var segment in PlaylistSegments.ForRange(playlist, startTicks, endTicks))
@@ -46,7 +47,7 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
                 ? (stream.SilenceInput, 0L, stream) : await GetSourceAsync(disc, stream, segment, token);
             await PlaySegmentAsync(ffplay, sourcePath, source, seekTicks, segment.EndTicks - segment.StartTicks,
                 token, () => segmentStarted?.Invoke(segment.StartTicks), volume ?? (() => 1), mix, soloChannel,
-                segment.StartTicks, channelLevels, playbackPosition, liveMix, mixedLevels, silent);
+                segment.StartTicks, channelLevels, playbackPosition, liveMix, mixedLevels, silent, visualization);
         }
     }
 
@@ -73,7 +74,7 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
         AudioStreamInfo stream, long startTicks, long endTicks, CancellationToken token,
         Action<long>? segmentStarted, Func<double> volume, StereoMixSettings mix, string? soloChannel,
         Action<long, double, double[], double[]>? channelLevels, Action<long, double>? playbackPosition,
-        Func<PreviewMixState>? liveMix, Action<long, MixerMeterFrame>? mixedLevels)
+        Func<PreviewMixState>? liveMix, Action<long, MixerMeterFrame>? mixedLevels, PreviewPcmTap? visualization)
     {
         var inputArgs = new List<string>();
         Func<Stream, CancellationToken, Task>? writeInput = null;
@@ -152,9 +153,9 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
             {
                 submittedBytes = liveChannels
                     ? await StereoPreviewMixer.CopyAsync(decoder.StandardOutput.BaseStream, player.StandardInput.BaseStream,
-                        stream, liveMix!, volume, token, () => segmentStarted?.Invoke(startTicks), LogLiveMix, frame => mixedLevels?.Invoke(startTicks, frame))
+                        stream, liveMix!, volume, token, () => segmentStarted?.Invoke(startTicks), LogLiveMix, frame => mixedLevels?.Invoke(startTicks, frame), visualization?.AtOffset(startTicks / 45000d))
                     : await CopyPcmWithVolumeAsync(decoder.StandardOutput.BaseStream, player.StandardInput.BaseStream,
-                        volume, token, () => segmentStarted?.Invoke(startTicks));
+                        volume, token, () => segmentStarted?.Invoke(startTicks), visualization?.AtOffset(startTicks / 45000d));
             }
             finally { player.StandardInput.Close(); }
             await inputTask;
@@ -200,7 +201,7 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
         long durationTicks, CancellationToken token, Action onStarted, Func<double> volume,
         StereoMixSettings mix, string? soloChannel, long segmentStartTicks,
         Action<long, double, double[], double[]>? channelLevels, Action<long, double>? playbackPosition,
-        Func<PreviewMixState>? liveMix, Action<long, MixerMeterFrame>? mixedLevels, bool silent = false)
+        Func<PreviewMixState>? liveMix, Action<long, MixerMeterFrame>? mixedLevels, bool silent = false, PreviewPcmTap? visualization = null)
     {
         var samples = (long)Math.Round(durationTicks * 48000d / 45000d, MidpointRounding.AwayFromZero);
         var inputSeekTicks = Math.Max(0, seekTicks - 45000);
@@ -261,10 +262,10 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
             {
                 if (liveChannels)
                     await StereoPreviewMixer.CopyAsync(decoder.StandardOutput.BaseStream, player.StandardInput.BaseStream,
-                        stream, liveMix!, volume, token, onStarted, LogLiveMix, frame => mixedLevels?.Invoke(segmentStartTicks, frame));
+                        stream, liveMix!, volume, token, onStarted, LogLiveMix, frame => mixedLevels?.Invoke(segmentStartTicks, frame), visualization?.AtOffset(segmentStartTicks / 45000d));
                 else
                     await CopyPcmWithVolumeAsync(decoder.StandardOutput.BaseStream, player.StandardInput.BaseStream,
-                        volume, token, onStarted);
+                        volume, token, onStarted, visualization?.AtOffset(segmentStartTicks / 45000d));
             }
             finally { player.StandardInput.Close(); }
             await decoder.WaitForExitAsync(token);
@@ -321,7 +322,7 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
                   $"channels={string.Join(';', (state.Channels ?? []).Select(x => $"{x.Code}:gain={x.Gain:0.####},pan={x.Pan:0.####},mute={x.Muted},solo={x.Solo},invert={x.InvertPolarity}"))}");
 
     public static async Task<long> CopyPcmWithVolumeAsync(Stream source, Stream destination, Func<double> volume,
-        CancellationToken token, Action? firstWrite = null)
+        CancellationToken token, Action? firstWrite = null, PreviewPcmTap? visualization = null)
     {
         const int bytesPerSecond = 48000 * 2 * sizeof(short);
         const double maxQueuedSeconds = 0.06;
@@ -346,6 +347,7 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
             var due = (submittedBytes + complete) / (double)bytesPerSecond - maxQueuedSeconds;
             var wait = due - clock.Elapsed.TotalSeconds;
             if (wait > 0) await Task.Delay(TimeSpan.FromSeconds(wait), token).ConfigureAwait(false);
+            var original = visualization?.Enabled() == true ? buffer.AsSpan(0, complete).ToArray() : null;
             var requestedGain = SafeGain(volume());
             if (requestedGain != targetGain)
             {
@@ -371,6 +373,13 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
                 }
             }
             await destination.WriteAsync(buffer.AsMemory(0, complete), token).ConfigureAwait(false);
+            if (original is not null)
+            {
+                var output = buffer.AsSpan(0, complete).ToArray();
+                var post = new float[complete / 2];
+                for (int i = 0; i < post.Length; i++) post[i] = BinaryPrimitives.ReadInt16LittleEndian(output.AsSpan(i * 2, 2)) / 32768f;
+                visualization!.TryPublish(new(submittedBytes / (double)bytesPerSecond, ["FL", "FR"], original, post, output));
+            }
             if (!started) { started = true; firstWrite?.Invoke(); }
             submittedBytes += complete;
             carried = available - complete;

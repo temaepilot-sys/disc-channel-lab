@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>DiscChannelLab · Space sketch</title><link rel="stylesheet" href="/style.css"></head>
+<body>
+<header><div><div class="eyebrow">DISC CHANNEL LAB <span>PERSONAL PROTOTYPE · LINK PREVIEW</span></div><h1>Space sketch <small>A space filled with sound</small></h1></div><div class="actions"><button id="follow" hidden>Link to DiscChannelLab</button><button id="toggle-ui" title="H: hide / show UI. Ctrl+S: save settings." aria-pressed="false">Hide UI · H</button><button id="demo">5.1 demo</button></div></header>
+<main>
+  <canvas id="scene" tabindex="0" aria-label="3D particle view of audio frequency bands"></canvas><div id="labels"></div>
+  <section id="source" class="glass"><div class="section-title">SOURCE</div><strong id="filename">Explore sound in space</strong><p id="format">Link from DiscChannelLab or try the demo</p><p id="preview-note">Open this viewer from the player’s 3D Viewer button.</p><div id="source-mode" class="source-mode">Input channels <span>→</span> Stereo playback</div></section>
+  <section id="appearance" class="glass">
+    <div class="section-title">VIEW</div>
+    <label id="live-analysis" hidden>Signal<select id="analysis-mode"><option value="post">Post-mix channels</option><option value="input">Input channels</option><option value="output">Final stereo output</option></select></label>
+    <label>Camera<select id="view"><option value="orbit">Overview</option><option value="bird">Bird’s-eye</option><option value="top">Top</option><option value="listener">Listener</option><option value="front">Front</option><option value="back">Back</option></select></label>
+    <label title="Maximum angle on each side toward the listener. Treble may be narrower. LFE always radiates 360°.">Spread<output id="spread-value">±20°</output><input id="spread" type="range" min="0" max="90" step="1" value="20"></label>
+    <label>Particle size <output id="particle-size-value">1.0×</output><input id="particle-size" type="range" min="0.3" max="3" step="0.1" value="1"></label>
+    <label title="Adds transparency: 0% is the standard appearance; 100% hides particles.">Transparency <output id="transparency-value">0%</output><input id="transparency" type="range" min="0" max="100" step="1" value="0"></label>
+    <label>Density <output id="density-value">1.3×</output><input id="density" type="range" min="0.3" max="3" step="0.1" value="1.3"></label>
+    <label>Persistence <output id="tail-value">1.0×</output><input id="tail" type="range" min="0.5" max="1.8" step="0.1" value="1"></label>
+    <label class="check"><input id="grid" type="checkbox" checked>Floor / distance guides</label>
+    <label class="check"><input id="names" type="checkbox" checked>Channel labels</label>
+    <label class="check"><input id="lfe" type="checkbox" checked>LFE ripples</label>
+    <button id="reset-view">Reset camera</button>
+    <div class="settings-actions"><button id="save-settings" disabled>Save settings</button><button id="load-settings" disabled>Load saved</button></div>
+    <div id="settings-status" role="status" aria-live="polite">Loading settings…</div>
+  </section>
+  <div id="welcome"><div class="orb">◌</div><h2>Where does sound go?</h2><p>Bass spreads around your feet.<br>Treble flows in narrow streams.</p><button id="start-demo" class="primary">▶ Try the 5.1 demo</button><small>A 40-second demo. Playback starts at a low volume.</small></div>
+  <div id="busy" hidden><div class="spinner"></div><strong>Loading and analyzing audio</strong><span>Pre-analysis keeps playback lightweight.</span></div>
+  <div id="notice" role="alert" hidden></div>
+  <div id="legend" class="glass"><div>LOW <span>Frequency → Color</span> HIGH</div><div class="gradient"></div><div class="legend-ticks"><span>20 Hz</span><span>250</span><span>1k</span><span>4k</span><span>20k Hz</span></div><div class="height-note">Height: bass low / treble high</div></div>
+  <div id="scene-help">Click the scene, then ↑ ↓: tilt · ← →: rotate · Drag: look / orbit · Right-drag: pan · Wheel: zoom</div>
+  <div id="stats">0 particles</div>
+</main>
+<footer>
+  <div class="transport"><button id="play" class="primary" disabled>▶ Play</button><button id="stop" disabled>■</button><time id="time">0:00 / 0:00</time><input id="timeline" type="range" min="0" max="1" step="0.01" value="0" disabled aria-label="Playback position"><label class="volume">Volume <input id="volume" type="range" min="0" max="100" step="1" value="25"><output id="volume-value">25%</output></label></div>
+  <div class="footnote"><span>An artistic view of audio features, not a measurement of acoustics or reverberation.</span><span id="state">Ready</span></div>
+</footer>
+<script src="/app.js"></script></body></html>

@@ -18,6 +18,16 @@ The app reads supported, unprotected Blu-ray, DVD-Audio, and DVD-Video sources t
 
 Japanese screenshots: [Main window](docs/screenshots/japanese.png) · [Channel mixer](docs/screenshots/mixer-japanese.png)
 
+## 3D visualizer — Space sketch
+
+A separate viewer turns the playing channels into frequency-colored particles around a listener. Watch a space fill with sound, or compare Input, Post-mix and final stereo output. It includes camera controls, a distraction-free view and saved JSON settings, with an English UI.
+
+![Visualizer overview](docs/screenshots/visualizer.png)
+
+![Listener view](docs/screenshots/listener.png)
+
+[Usage, mixer behavior and requirements](docs/visualizer.md). Particle spread is an artistic representation, not a precise acoustic simulation.
+
 ## Features
 
 - Inspect titles, chapters, tracks, audio streams, and channel layouts.
@@ -99,7 +109,7 @@ The regression checks generate their own small clips and cover original boundari
 ## Requirements
 
 - Windows x64.
-- .NET 10 SDK to build; .NET 10 Desktop Runtime to run the public build.
+- .NET 10 SDK to build; .NET 10 Desktop Runtime to run the public player. The viewer also needs ASP.NET Core Runtime 10 (x64) and Microsoft Edge with WebGL.
 - An FFmpeg installation supplied by the user. `ffmpeg.exe` and `ffprobe.exe` are required; `ffplay.exe` is required for preview playback. Place them in a `tools` folder beside the app or make them available on `PATH`.
 
 For supported multichannel stereo playback, Input/Post/Output meters are measured together from PCM in the app. Other playback paths use FFmpeg's `astats` and `ametadata` filters; those meters remain unavailable if the filters are missing.
@@ -114,7 +124,7 @@ From PowerShell in this directory:
 ./build.ps1
 ```
 
-The output is in `artifacts/public-win-x64`. It is a framework-dependent, multi-file application. Run `DiscChannelLab.exe` after installing the .NET 10 Desktop Runtime and making the FFmpeg tools available. The public build does not embed FFmpeg or include a single-file executable.
+The output is in `artifacts/public-win-x64`, with the separate viewer in its `SpaceSketch` subfolder. Click **3D Viewer** in the player to open it. It is a framework-dependent, multi-file application. Run `DiscChannelLab.exe` after installing the .NET 10 Desktop Runtime and making the FFmpeg tools available. The public build does not embed FFmpeg or include a single-file executable.
 
 For personal use, `./build-personal.ps1` builds a self-contained single-file executable from **the same source files**. It embeds the FFmpeg executables installed on the builder's computer. Its output is local and is excluded from this repository; it is not the public distribution build. Before distributing such an executable, review the licenses and corresponding-source obligations of every embedded component.
 

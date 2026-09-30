@@ -1,0 +1,11 @@
+{
+  "SampleRate": 48000,
+  "FftSize": 2048,
+  "HopSize": 512,
+  "BandCount": 16,
+  "MinimumDb": -70,
+  "MaximumDb": 0,
+  "AttackSeconds": 0.045,
+  "ReleaseSeconds": 0.3,
+  "PreviewSeconds": 120
+}

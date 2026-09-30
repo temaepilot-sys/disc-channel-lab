@@ -853,7 +853,8 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
                 {
                     if (ReferenceEquals(_playback, session) && version == _transportVersion)
                         QueueMixedFrame((segmentStart - track.StartTicks) / 45000d + frame.Seconds, frame);
-                }, null));
+                }, null), new PreviewPcmTap(() => Visualization.IsConnected && !session.IsCancellationRequested,
+                    frame => Visualization.PublishPcm(version, frame with { Seconds = frame.Seconds - track.StartTicks / 45000d })));
             if (ReferenceEquals(_playback, session) && IsPlaying)
             {
                 completed = true;
@@ -892,6 +893,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
             PreviewSeconds = Math.Min(PreviewMax, _playClockBase + _playClock.Elapsed.TotalSeconds);
         ApplyMeterFrames();
         ApplyMixedFrames();
+        PublishVisualizationClock();
     }
 
     private void QueueMeterFrame(double position, double[] peaks, double[] rms)

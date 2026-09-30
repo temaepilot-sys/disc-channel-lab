@@ -9,9 +9,7 @@ namespace Disc2Flac;
 
 public sealed class LanguageService : INotifyPropertyChanged
 {
-    private static readonly string PreferencePath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "BDDVD2Flac", "language.txt");
+    private static readonly string PreferencePath = AppDataPaths.Current.PreferencePath("language.txt");
 
     public static LanguageService Instance { get; } = new();
     public bool IsJapanese { get; private set; }
@@ -20,7 +18,8 @@ public sealed class LanguageService : INotifyPropertyChanged
 
     public void Load()
     {
-        try { Apply(File.Exists(PreferencePath) && File.ReadAllText(PreferencePath).Trim() == "ja"); }
+        var readPath = AppDataPaths.Current.PreferenceReadPath("language.txt");
+        try { Apply(File.Exists(readPath) && File.ReadAllText(readPath).Trim() == "ja"); }
         catch (IOException) { Apply(false); }
         catch (UnauthorizedAccessException) { Apply(false); }
     }

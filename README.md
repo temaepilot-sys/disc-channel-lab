@@ -128,6 +128,20 @@ The output is in `artifacts/public-win-x64`, with the separate viewer in its `Sp
 
 For personal use, `./build-personal.ps1` builds a self-contained single-file executable from **the same source files**. It embeds the FFmpeg executables installed on the builder's computer. Its output is local and is excluded from this repository; it is not the public distribution build. Before distributing such an executable, review the licenses and corresponding-source obligations of every embedded component.
 
+## Settings and migration
+
+The player stores language (`language.txt`), theme (`theme-v2.txt`) and disc/track edits (`track-edits`) under `%LOCALAPPDATA%\DiscChannelLab`. New logs and the personal build’s extracted tool cache also use this folder; temporary fallbacks use `%TEMP%\DiscChannelLab`.
+
+On startup, existing language/theme files and per-disc JSON metadata are copied from `%LOCALAPPDATA%\BDDVD2Flac` only when the destination file is missing. This preserves disc/title/chapter names, artists, selections, edited split points, both boundary modes and reading options. Current DiscChannelLab files always take precedence. Old files remain unchanged so an earlier build can still read them. Logs and tool caches are not imported; embedded tools are extracted again as needed.
+
+If a copy fails, the app retains read access to legacy settings and retries missing files on a later launch. Older `Disc2Flac` Blu-ray metadata remains readable. Mixer preset files keep their chosen locations, and the separate viewer still stores `ViewerSettings.json` beside its EXE.
+
+A developer regression check uses isolated fixtures rather than the real user profile:
+
+```powershell
+dotnet run --project DiscChannelLab.Verify -c Release -- settings-migration-test verification-output/settings-migration
+```
+
 ## Development and publication status
 
-`DiscChannelLab.App` is the shared application project for both build modes. Feature changes belong there once, so the two builds stay in sync. Existing user settings and saved track edits still use the historical `BDDVD2Flac` data directory. The original application source is offered under [Apache License 2.0](LICENSE); external tools remain under their own licenses. This repository is a development preview of the source code, with no binary release. Source-provenance and dependency review remain open before a tagged release. See [PUBLICATION_CHECKLIST.md](PUBLICATION_CHECKLIST.md).
+`DiscChannelLab.App` is the shared application project for both build modes. Feature changes belong there once, so the two builds stay in sync. User settings and saved track edits use `%LOCALAPPDATA%\DiscChannelLab`; startup imports missing settings from the former `BDDVD2Flac` folder without overwriting current edits. See [Settings and migration](#settings-and-migration). The original application source is offered under [Apache License 2.0](LICENSE); external tools remain under their own licenses. This repository is a development preview of the source code, with no binary release. Source-provenance and dependency review remain open before a tagged release. See [PUBLICATION_CHECKLIST.md](PUBLICATION_CHECKLIST.md).

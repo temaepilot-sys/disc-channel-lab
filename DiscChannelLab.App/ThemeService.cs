@@ -5,15 +5,14 @@ namespace Disc2Flac;
 
 internal static class ThemeService
 {
-    private static readonly string PreferencePath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "BDDVD2Flac", "theme-v2.txt");
+    private static readonly string PreferencePath = AppDataPaths.Current.PreferencePath("theme-v2.txt");
 
     public static bool IsDark { get; private set; }
 
     public static void Load()
     {
-        try { Apply(!File.Exists(PreferencePath) || File.ReadAllText(PreferencePath).Trim() != "light"); }
+        var readPath = AppDataPaths.Current.PreferenceReadPath("theme-v2.txt");
+        try { Apply(!File.Exists(readPath) || File.ReadAllText(readPath).Trim() != "light"); }
         catch (IOException) { Apply(true); }
         catch (UnauthorizedAccessException) { Apply(true); }
     }

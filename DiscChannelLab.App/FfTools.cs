@@ -10,13 +10,13 @@ public sealed class AppLog
     private readonly object _gate = new();
     public string FilePath { get; private set; }
 
-    public AppLog()
+    public AppLog(string? directory = null)
     {
-        var directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BDDVD2Flac", "logs");
+        directory ??= Path.Combine(AppDataPaths.Current.Root, "logs");
         try { Directory.CreateDirectory(directory); }
         catch (UnauthorizedAccessException)
         {
-            directory = Path.Combine(Path.GetTempPath(), "BDDVD2Flac", "logs");
+            directory = Path.Combine(AppDataPaths.TemporaryRoot, "logs");
             Directory.CreateDirectory(directory);
         }
         FilePath = Path.Combine(directory, $"{DateTime.Now:yyyy-MM-dd}.log");
@@ -30,7 +30,7 @@ public sealed class AppLog
             try { Append(entry); }
             catch (UnauthorizedAccessException)
             {
-                var fallback = Path.Combine(Path.GetTempPath(), "BDDVD2Flac", "logs");
+                var fallback = Path.Combine(AppDataPaths.TemporaryRoot, "logs");
                 Directory.CreateDirectory(fallback);
                 FilePath = Path.Combine(fallback, $"{DateTime.Now:yyyy-MM-dd}.log");
                 Append(entry);

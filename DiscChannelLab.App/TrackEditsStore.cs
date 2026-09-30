@@ -8,14 +8,16 @@ public sealed class TrackEditsStore
     private readonly AppLog _log;
     private readonly string _directory;
     private readonly string? _legacyDirectory;
+    private readonly string? _earlierDirectory;
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
-    public TrackEditsStore(AppLog log, string? directory = null)
+    public TrackEditsStore(AppLog log, string? directory = null, AppDataPaths? paths = null)
     {
         _log = log;
-        var localData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        _directory = directory ?? Path.Combine(localData, "BDDVD2Flac", "track-edits");
-        _legacyDirectory = directory is null ? Path.Combine(localData, "Disc2Flac", "track-edits") : null;
+        paths ??= AppDataPaths.Current;
+        _directory = directory ?? paths.TrackEdits;
+        _legacyDirectory = directory is null ? paths.LegacyTrackEdits : null;
+        _earlierDirectory = directory is null ? paths.EarlierTrackEdits : null;
     }
 
     public string? LoadAlbumTitle(DiscAnalysis disc)
@@ -190,10 +192,18 @@ public sealed class TrackEditsStore
 
     public bool LoadMergeShortTail(DiscAnalysis disc, PlaylistInfo playlist)
     {
-        var path = Path.Combine(DiscDirectory(disc), $"{playlist.Id:00000}.reading.json");
-        try { return !File.Exists(path) || JsonSerializer.Deserialize<ReadingOptions>(File.ReadAllText(path))?.MergeShortTail != false; }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
-        { _log.Write($"READING OPTIONS: {ex.Message}"); return true; }
+        foreach (var path in ReadPaths(disc, $"{playlist.Id:00000}.reading.json"))
+        {
+            if (!File.Exists(path)) continue;
+            try
+            {
+                var options = JsonSerializer.Deserialize<ReadingOptions>(File.ReadAllText(path));
+                if (options is not null) return options.MergeShortTail;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+            { _log.Write($"READING OPTIONS: {ex.Message}"); }
+        }
+        return true;
     }
 
     public void SaveMergeShortTail(DiscAnalysis disc, PlaylistInfo playlist)
@@ -214,8 +224,10 @@ public sealed class TrackEditsStore
     private IEnumerable<string> ReadPaths(DiscAnalysis disc, string fileName)
     {
         yield return Path.Combine(DiscDirectory(disc), fileName);
-        if (disc.Format == DiscFormat.BluRay && _legacyDirectory is not null)
+        if (_legacyDirectory is not null)
             yield return Path.Combine(_legacyDirectory, disc.DiscKey, fileName);
+        if (disc.Format == DiscFormat.BluRay && _earlierDirectory is not null)
+            yield return Path.Combine(_earlierDirectory, disc.DiscKey, fileName);
     }
 
     private string DiscDirectory(DiscAnalysis disc)

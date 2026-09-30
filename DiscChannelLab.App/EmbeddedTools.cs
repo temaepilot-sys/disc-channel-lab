@@ -20,15 +20,14 @@ internal static class EmbeddedTools
         var id = resource["Disc2Flac.tools.".Length..^".zip".Length];
         if (id.Length != 16 || !id.All(Uri.IsHexDigit))
             throw new InvalidDataException("内蔵 FFmpeg の識別子が不正です。");
-        var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "BDDVD2Flac", "tools", id);
+        var root = Path.Combine(AppDataPaths.Current.Root, "tools", id);
         try { Directory.CreateDirectory(root); }
         catch (UnauthorizedAccessException)
         {
-            root = Path.Combine(Path.GetTempPath(), "BDDVD2Flac", "tools", id);
+            root = Path.Combine(AppDataPaths.TemporaryRoot, "tools", id);
             Directory.CreateDirectory(root);
         }
-        using var mutex = new Mutex(false, $@"Local\BDDVD2Flac.Tools.{id}");
+        using var mutex = new Mutex(false, $@"Local\DiscChannelLab.Tools.{id}");
         try { mutex.WaitOne(); }
         catch (AbandonedMutexException) { /* Previous extraction ended; verify files below. */ }
         try

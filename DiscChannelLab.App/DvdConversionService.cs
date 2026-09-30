@@ -22,7 +22,7 @@ public sealed class DvdConversionService(ToolPaths paths, ProcessRunner runner, 
         var albumFolder = Path.Combine(outputRoot, ConversionService.SafeName(disc.AlbumTitle));
         var titleFolder = Path.Combine(albumFolder, ConversionService.SafeName(playlist.TitleName));
         Directory.CreateDirectory(albumFolder);
-        var stage = Path.Combine(albumFolder, $".BDDVD2Flac-{Guid.NewGuid():N}");
+        var stage = Path.Combine(albumFolder, $".DiscChannelLab-{Guid.NewGuid():N}");
         Directory.CreateDirectory(stage);
         var produced = new List<(string Staged, string Final)>();
         var sampleRate = quality == OutputQuality.Cd ? 44100 : stream.SampleRate;

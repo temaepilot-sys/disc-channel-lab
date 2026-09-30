@@ -10,6 +10,12 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Threading;
 
+if (args is ["settings-migration-test", var settingsOutput])
+{
+    SettingsMigrationTests.Run(settingsOutput);
+    return 0;
+}
+
 if (args is ["silent-tail-test", var tailOutput])
 {
     await SilentTailTests.SyntheticAsync(tailOutput);

@@ -9,3 +9,4 @@ body.ui-hidden header{display:contents}
 body.ui-hidden header>div:not(.actions),body.ui-hidden .actions>button:not(#toggle-ui),body.ui-hidden footer,body.ui-hidden #source,body.ui-hidden #appearance,body.ui-hidden #legend,body.ui-hidden #scene-help,body.ui-hidden #stats,body.ui-hidden #labels,body.ui-hidden #welcome{display:none}
 body.ui-hidden .actions{position:fixed;right:24px;top:14px;z-index:6}
 body.ui-hidden #toggle-ui{background:#0b1421b5}
+#appearance{max-height:calc(100% - 48px);overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin}

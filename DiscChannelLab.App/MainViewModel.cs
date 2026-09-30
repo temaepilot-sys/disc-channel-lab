@@ -854,7 +854,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
                     if (ReferenceEquals(_playback, session) && version == _transportVersion)
                         QueueMixedFrame((segmentStart - track.StartTicks) / 45000d + frame.Seconds, frame);
                 }, null), new PreviewPcmTap(() => Visualization.IsConnected && !session.IsCancellationRequested,
-                    frame => Visualization.PublishPcm(version, frame with { Seconds = frame.Seconds - track.StartTicks / 45000d })));
+                    frame => Visualization.PublishPcm(version, frame with { Seconds = frame.Seconds - track.StartTicks / 45000d }), Lookahead: true));
             if (ReferenceEquals(_playback, session) && IsPlaying)
             {
                 completed = true;

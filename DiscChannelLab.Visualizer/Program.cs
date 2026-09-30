@@ -70,7 +70,7 @@ try
             return Results.Stream(Assembly.GetExecutingAssembly().GetManifestResourceStream(resource)!, mime);
         });
     app.MapPost("/api/heartbeat", () => { heartbeat = Environment.TickCount64; connected = true; return Results.Ok(); });
-    app.MapPost("/api/live", () => Results.Json(live.Snapshot()));
+    app.MapPost("/api/live", (HttpContext context) => Results.Json(live.Snapshot(context.Request.Query["signal"].ToString())));
     app.MapPost("/api/settings/load", () => Results.Json(new { settings = preferences.Load() }));
     app.MapPost("/api/settings/save", async (HttpContext context) =>
     {

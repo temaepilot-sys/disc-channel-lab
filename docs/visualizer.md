@@ -61,9 +61,20 @@ Post-mix energy is calculated from `sample × sqrt(leftWeight² + rightWeight²)
 
 The managed multichannel path preserves the decoded channels. When the player has already converted a playback path to stereo, the viewer receives FL/FR; it cannot reconstruct original channels from that stereo signal. The viewer analyzes what is actually playing, so turn on the player’s mixer playback option to hear and visualize edited mixer settings. In the standard mix, LFE is muted by default; **Input channels** can still show its recorded content.
 
-Already-emitted particles persist after Mute or silence for their remaining lifetime. This is a visual trail, not additional audio. The synthetic demo is independent of the main player’s mixer.
+Both synchronization modes use moving particles emitted from the speakers. Past particles remain as a visual trail, not additional audio. Changing the mixer refreshes the look-ahead and clears incompatible listener-mode trails. The synthetic demo is independent of the player mixer.
 
 ## Appearance and saved settings
+
+**Sync at** selects the reference point:
+
+- **Listener (sound)** — default. Particles start at the speakers just as in Speakers mode, but emit early using actual decoded audio look-ahead. Each particle samples the spectrum at `playback time + travel time`, accounting for frequency, speed and horizontal spread. Its closest horizontal approach to the listener then coincides approximately with that sound. There are no particles held at the listener. LFE already starts at the listener’s feet and needs no travel offset.
+- **Speakers (emission)** — the original behavior. Speakers emit on the beat; particles reach the listener later. Their arrival depends on frequency and visual speed.
+
+**Particle speed** ranges from **0.5× to 4×**, with **2×** as the default relative to the original viewer. It changes visual motion only. Listener synchronization recalculates the emission lead at every speed. Both options are saved with the other viewer settings; older settings files use the new defaults. Changing synchronization, speed or spread clears incompatible listener-mode trails; playback continues normally.
+
+Live look-ahead is bounded to about 8.2 seconds. It reads ahead from the existing decoder; the original PCM still goes through the live mixer at playback time. Playback never waits for a visualization buffer. Update **both the player and viewer**, then restart them. Immediately after playback starts, a seek, a track/segment change, or a mixer change, particles need time to travel inward. Missing look-ahead is not guessed or replaced by particles at the listener. Live mixer forecasts use the current controls; future user actions cannot be predicted, and the actual mixer’s short gain ramps can differ from the forecast. Hardware output latency is still not measured.
+
+Both modes add smooth XYZ drift of at most about **2% of the speaker radius** per axis (about 7 cm at the current 3.5 m radius). Drift is stable while paused and fades to zero at emission and at the synchronization point. The base height still represents frequency; LFE remains close to the floor. Lower bands have longer lifetimes, and higher bands receive stronger gentle distance attenuation **after passing the listener**. These are visual effects, not measured reverberation or air absorption.
 
 Adjust Spread, Particle size (0.3–3×), Transparency (0–100%), Density and Persistence. Size, transparency and spread update existing particles immediately, including while paused. Transparency 100% hides particles; 0% uses the normal soft appearance. Floor guides, labels and LFE ripples have separate switches.
 

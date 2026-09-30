@@ -8,6 +8,8 @@
   <section id="source" class="glass"><div class="section-title">SOURCE</div><strong id="filename">Explore sound in space</strong><p id="format">Link from DiscChannelLab or try the demo</p><p id="preview-note">Open this viewer from the player’s 3D Viewer button.</p><div id="source-mode" class="source-mode">Input channels <span>→</span> Stereo playback</div></section>
   <section id="appearance" class="glass">
     <div class="section-title">VIEW</div>
+    <label title="Same particle flow in both modes. Listener: emit early using look-ahead so particles arrive on the beat. Speakers: emit on the beat.">Sync at<select id="sync-reference"><option value="listener">Listener (sound)</option><option value="speaker">Speakers (emission)</option></select></label>
+    <label title="Visual flow speed relative to the original viewer. Does not change audio playback speed.">Particle speed <output id="particle-speed-value">2.0×</output><input id="particle-speed" type="range" min="0.5" max="4" step="0.1" value="2"></label>
     <label id="live-analysis" hidden>Signal<select id="analysis-mode"><option value="post">Post-mix channels</option><option value="input">Input channels</option><option value="output">Final stereo output</option></select></label>
     <label>Camera<select id="view"><option value="orbit">Overview</option><option value="bird">Bird’s-eye</option><option value="top">Top</option><option value="listener">Listener</option><option value="front">Front</option><option value="back">Back</option></select></label>
     <label title="Maximum angle on each side toward the listener. Treble may be narrower. LFE always radiates 360°.">Spread<output id="spread-value">±20°</output><input id="spread" type="range" min="0" max="90" step="1" value="20"></label>

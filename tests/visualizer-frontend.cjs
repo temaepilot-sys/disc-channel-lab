@@ -60,7 +60,7 @@ class AudioContext {
 }
 const sandbox = {
   console, Float32Array, Uint8Array, DataView, TextDecoder, Math, Array, Number, JSON, Promise, Error,
-  performance: { now: () => now * 1000 }, AudioContext, devicePixelRatio: 1,
+  encodeURIComponent, performance: { now: () => now * 1000 }, AudioContext, devicePixelRatio: 1,
   document: { getElementById: element, createElement: () => new Element(), addEventListener(name, handler) { documentEvents.set(name, handler); }, activeElement: new Element(),
     body: { classList: { values: new Set(), toggle(name, enabled) { if (enabled) this.values.add(name); else this.values.delete(name); } } } },
   addEventListener(name, handler) { windowEvents.set(name, handler); },
@@ -76,7 +76,7 @@ const sandbox = {
       }
       return {ok: true, json: async () => ({settings: JSON.parse(JSON.stringify(storedSettings))})};
     }
-    return { ok: true, status: 200, json: async () => livePayload, arrayBuffer: async () => packet.buffer.slice(packet.byteOffset, packet.byteOffset + packet.byteLength) };
+    return { ok: true, status: 200, json: async () => JSON.parse(JSON.stringify(livePayload)), arrayBuffer: async () => packet.buffer.slice(packet.byteOffset, packet.byteOffset + packet.byteLength) };
   }
 };
 sandbox.window = sandbox;
@@ -87,6 +87,9 @@ function tick(seconds) { for (let i = 0; i < Math.ceil(seconds * 60); i++) { now
 (async () => {
   await sandbox.lab.settingsReady;
   assert.equal(element('view').value, 'bird');
+  assert.equal(element('sync-reference').value, 'listener', 'Old settings default to listener synchronization');
+  assert.equal(vm.runInContext('renderer.particleSpeed', sandbox), simulateFailure ? undefined : 2);
+  element('sync-reference').value = 'speaker'; element('sync-reference').onchange();
   assert(!sandbox.lab.state.playing, 'Restoring settings never starts audio');
   if (simulateFailure) {
     assert.equal(typeof element('demo').onclick, 'function');
@@ -174,14 +177,14 @@ function tick(seconds) { for (let i = 0; i < Math.ceil(seconds * 60); i++) { now
     const i = p * stride, a = renderer.data, s = renderer.speakers[a[i + 14]].position;
     if (renderer.speakers[a[i + 14]].code === 'LFE') {
       assert.equal(a[i + 3], beforeSpread[i + 3]); assert.equal(a[i + 5], beforeSpread[i + 5]);
-      assert(Math.abs(a[i + 1] - .12) < 1e-6, 'LFE stays at floor height');
+      assert(Math.abs(a[i + 1] - .12) <= .07001, 'LFE stays close to the floor');
       assert(a[i] * a[i + 3] + a[i + 2] * a[i + 5] > 0, 'LFE moves outward from center');
       continue;
     }
     const cosine = -(s[0] * a[i + 3] + s[2] * a[i + 5]) / (Math.hypot(s[0], s[2]) * Math.hypot(a[i + 3], a[i + 5]));
     const angle = Math.acos(Math.max(-1, Math.min(1, cosine))) * 180 / Math.PI;
     assert(angle <= Math.min(45, renderer.info.dispersion[a[i + 15]]) + .001, 'Horizontal spread obeys slider and frequency limits');
-    assert.equal(a[i + 1], heights[p], 'Height stays fixed after movement and spread change');
+    assert(Math.abs(a[i + 1] - heights[p]) <= .07001, 'Frequency height has only bounded 2% drift');
     assert.equal(a[i + 6], beforeSpread[i + 6], 'Spread preserves age while paused');
     changedPosition ||= a[i] !== beforeSpread[i] || a[i + 2] !== beforeSpread[i + 2];
   }
@@ -285,12 +288,93 @@ function tick(seconds) { for (let i = 0; i < Math.ceil(seconds * 60); i++) { now
   assert(key('keydown', 'KeyH'));
   assert(!sandbox.document.body.classList.values.has('ui-hidden'));
   assert.equal(sandbox.lab.state.time, timeAtSave, 'Hiding/showing UI leaves playback position unchanged');
+  // Listener uses the SAME emission geometry; only sample time is shifted forward.
+  element('sync-reference').value = 'listener'; element('sync-reference').onchange();
+  element('analysis-mode').value = 'post'; adjust('spread', 0); adjust('particle-speed', 2);
+  adjust('transparency', 0); adjust('density', 1.3);
+  const times = Array.from({length: 220}, (_, i) => 99 + i * .04);
+  const values = times.flatMap(t => Array.from({length: 96}, () => t >= 102 && t < 102.2 ? 1 : 0));
+  livePayload = { ...livePayload, connected: true, playing: true, hasData: true, epoch: 20, revision: 20,
+    position: 100, duration: 200, post: new Array(96).fill(0),
+    lookahead: {revision: 1, signal: 'post', channels: ['FL','FR','FC','LFE','SL','SR'], times, values} };
+  await element('follow').onclick(); await pollLive();
+  // Choose a time that lets the bass burst start at its speaker now and reach the listener at 102 s.
+  const bassTravel = renderer.travelTime(0, 0, 0);
+  livePayload.position = 102.05 - bassTravel; await pollLive();
+  tick(.04);
+  const bass = Array.from({length: renderer.count}, (_, p) => p).filter(p => renderer.data[p * stride + 14] === 0 && renderer.data[p * stride + 15] === 0);
+  assert(bass.length > 0, 'Future bass emits before it becomes audible');
+  for (const p of bass) assert(Math.hypot(renderer.data[p * stride], renderer.data[p * stride + 2]) > 3, 'No particle is injected at the listener');
+  const p = bass[0], i = p * stride, snapshot = renderer.data.slice(i, i + stride);
+  renderer.data[i + 6] = bassTravel; renderer.aimParticle(p);
+  assert(Math.hypot(renderer.data[i], renderer.data[i + 2]) < 1e-5, 'Burst reaches listener at its source timestamp');
+  renderer.data.set(snapshot, i);
+  for (const speed of [.5, 1, 2, 4]) {
+    adjust('particle-speed', speed);
+    assert.equal(renderer.count, 0, 'Retiming clears incompatible trails');
+    for (const band of [0, 8, 15]) {
+      const travel = renderer.travelTime(0, band, 0), emissionTime = 102.05 - travel;
+      assert.equal(renderer.futureBand(emissionTime + travel, 0, band), 1, 'All frequencies schedule the same burst at arrival');
+      renderer.emit(0, band, 1, 0);
+      const index = (renderer.count - 1) * stride;
+      assert(Math.hypot(renderer.data[index], renderer.data[index + 2]) > 3.4, 'Every new particle starts at a speaker');
+      renderer.data[index + 6] = travel; renderer.aimParticle(renderer.count - 1);
+      assert(Math.hypot(renderer.data[index], renderer.data[index + 2]) < 1e-5, 'Speed and frequency do not change arrival timestamp');
+    }
+  }
+  adjust('particle-speed', 2);
+  assert.equal(renderer.futureBand(150, 0, 0), 0, 'Missing look-ahead is never extrapolated');
+  livePayload.lookahead = {...livePayload.lookahead, revision: 2, values: values.map(() => 0)};
+  await pollLive(); assert.equal(renderer.count, 0, 'A changed forecast clears old mixer trails'); tick(.05);
+  assert.equal(renderer.count, 0, 'Future silence emits no listener particles');
+  // Speaker mode still emits NOW, using identical geometry, drift and fading.
+  element('sync-reference').value = 'speaker'; element('sync-reference').onchange();
+  livePayload.post.fill(.8); livePayload.position += .1; await pollLive(); tick(.05);
+  assert(renderer.count > 0);
+  renderer.clear(); renderer.emit(0, 0, .8, 0);
+  const travel = renderer.travelTime(0, 0, 0), a = renderer.data, seed = a[17];
+  let movedX = false, movedY = false, movedZ = false;
+  for (let n = 0; n <= 100; n++) {
+    a[6] = n * .03; renderer.aimParticle(0);
+    const origin = renderer.speakers[0].position, height = .18 + a[13] * 2.42;
+    const delta = [a[0] - origin[0] - a[3] * a[6], a[1] - height, a[2] - origin[2] - a[5] * a[6]];
+    delta.forEach(v => assert(Math.abs(v) <= .07001, 'XYZ displacement is at most 2% of speaker radius'));
+    movedX ||= Math.abs(delta[0]) > .01; movedY ||= Math.abs(delta[1]) > .01; movedZ ||= Math.abs(delta[2]) > .01;
+    const same = Array.from(a.slice(0,stride)); renderer.aimParticle(0);
+    assert.deepEqual(Array.from(a.slice(0,stride)), same, 'Paused drift is deterministic');
+  }
+  assert(movedX && movedY && movedZ); assert.equal(a[17], seed);
+  a[6] = travel; renderer.aimParticle(0);
+  assert(Math.hypot(a[0],a[2]) < 1e-5, 'Drift vanishes at the synchronization point');
+  // Normalized decay at a common distance: high frequencies lose more energy.
+  const attenuation = frequency => Math.exp(-5 * (.015 + .12 * frequency ** 1.4));
+  renderer.clear(); renderer.emit(0, 0, .8, 0); renderer.emit(0, 15, .8, 0);
+  const ratios = [];
+  for (let p = 0; p < 2; p++) {
+    const i = p * stride, speed = Math.hypot(a[i+3], a[i+5]);
+    a[i+6] = renderer.travelTime(0, a[i+15], 0) + 5 / speed;
+    a[i+7] = 20; renderer.aimParticle(p);
+  }
+  renderer.draw(sandbox.lab.state.time);
+  for (let p = 0; p < 2; p++) {
+    const i = p * stride, unfaded = a[i+12] * (1 - (a[i+6] / a[i+7]) ** 2) * renderer.particleOpacity;
+    ratios.push(renderer.vertices[p*8+6] / unfaded);
+    assert(Math.abs(ratios[p] - attenuation(a[i+13])) < 1e-5);
+  }
+  assert(ratios[0] > ratios[1], 'Treble fades faster beyond the listener');
+  element('sync-reference').value = 'listener'; element('sync-reference').onchange();
+  adjust('particle-speed', 3.2); await element('save-settings').onclick();
+  element('sync-reference').value = 'speaker'; element('sync-reference').onchange(); adjust('particle-speed', 1);
+  await element('load-settings').onclick();
+  assert.equal(renderer.syncReference, 'listener'); assert.equal(renderer.particleSpeed, 3.2);
   const result = { mode: 'Simulated APIs; GPU/audio-device validation still required', passed: ['Demo packet parsing', 'Explicit channels', 'Audio output clock compensation', 'Particles generated', 'Pause freezes time and particles', 'Seek clears old particles', 'Resume', 'All six camera matrices finite', 'Particle cap', 'Stop reset', 'Natural end'], particlesAt8Seconds: running.particles, drawCalls };
   result.passed.push('Shared shader uniform precision matches', 'Live mode produces no duplicate audio', 'Output mode has two channels', 'Muted Post / visible Input', 'Live pause and seek', 'Disconnected player stops', 'Return to demo mode');
   result.passed.push('Keyboard tilt reaches both poles without collapsed projection', 'Listener camera stays at eye position', 'Continuous keyboard rotation beyond 360 degrees', 'Keyboard release and focus respect controls', 'Camera movement works with paused audio');
   result.passed.push('Settings restored on startup without autoplay', 'Save/load all controls and exact camera', 'Settings requests retain authentication', 'Settings I/O errors preserve current state');
   result.passed.push('Hide/show UI and saved visibility leave playback unchanged');
-  result.passed.push('Non-LFE channels aim toward listener at zero spread', 'Frequency heights are shared and increasing', 'No vertical particle drift', 'Adjustable horizontal angle limits', 'Paused spread updates existing particles', 'Live size and transparency scaling', 'Full transparency hides particles', 'Appearance preserves audio time and particle state', 'LFE radiates outward from listener feet', 'LFE covers all azimuths independently of spread');
+  result.passed.push('Legacy settings default to listener sync and 2x speed', 'Particles begin at speakers using future spectra', 'Bass and treble arrive at the source timestamp', 'Speed 0.5x through 4x preserves arrival timing', 'Missing/stale forecast rejected', 'Mixer forecast revisions clear old trails', 'Sync reference and speed settings round-trip', 'Speaker sync keeps source-timed emission');
+  result.passed.push('Bounded smooth XYZ drift', 'Drift freezes while paused and vanishes at arrival', 'Frequency-dependent post-listener attenuation');
+  result.passed.push('Non-LFE channels aim toward listener at zero spread', 'Base frequency heights are shared and increasing', 'Small vertical drift around frequency height', 'Adjustable horizontal angle limits', 'Paused spread updates existing particles', 'Live size and transparency scaling', 'Full transparency hides particles', 'Appearance preserves audio time and particle state', 'LFE radiates outward from listener feet', 'LFE covers all azimuths independently of spread');
   fs.writeFileSync(path.join(output, 'visualizer-frontend-results.json'), JSON.stringify(result, null, 2));
   console.log(JSON.stringify(result, null, 2));
 })().catch(error => { console.error(error); process.exitCode = 1; });

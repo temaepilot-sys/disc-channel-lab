@@ -108,7 +108,7 @@ const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a
 const norm = a => scale(a, 1 / (Math.hypot(...a) || 1));
 // CPU particle record: position, velocity, age/life, RGB, size/alpha,
 // log-frequency, source channel, band index, fixed horizontal fan sample.
-const PARTICLE_STRIDE = 17;
+const PARTICLE_STRIDE = 18; // Last value: stable phase for small, smooth XYZ drift.
 const frequencyHeight = logFrequency => .18 + clamp(logFrequency, 0, 1) * 2.42;
 const LFE_HEIGHT = .12; // An illustrative floor source, not a physical subwoofer position.
 function multiply(a, b) {
@@ -153,6 +153,8 @@ class SpaceRenderer {
     gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     this.max = 24000; this.data = new Float32Array(this.max * PARTICLE_STRIDE); this.vertices = new Float32Array(this.max * 8); this.count = 0;
     this.spreadDegrees = 20;
+    this.syncReference = 'listener';
+    this.particleSpeed = 2;
     this.particleSize = 1; this.particleOpacity = 1;
     this.lines = []; this.speakers = []; this.bands = new Float32Array(0); this.budgets = [];
     this.camera = { yaw: .48, pitch: .56, distance: 12.8, target: [0, .8, 0] }; this.listenerView = false;
@@ -160,9 +162,16 @@ class SpaceRenderer {
     this.wireInput();
     canvas.addEventListener('webglcontextlost', e => { e.preventDefault(); pause(); error('3D rendering stopped. Close and reopen the viewer.'); });
   }
-  clear() { this.count = 0; this.budgets.fill(0); }
+  clear() {
+    this.count = 0; this.visibleCount = 0; this.budgets.fill(0); this.bands.fill(0);
+  }
+  setSyncReference(value) {
+    const next = value === 'speaker' ? 'speaker' : 'listener';
+    if (next !== this.syncReference) { this.syncReference = next; this.clear(); }
+  }
   setClip(info) {
     this.info = info; this.clear(); this.budgets = new Array(info.channels.length * info.bandCount).fill(0); this.bands = new Float32Array(this.budgets.length);
+    this.frequencies = info.centers.map(hz => clamp(Math.log(hz / 20) / Math.log(1000), 0, 1));
     const angles = { FL: -30, FR: 30, FC: 0, SL: -110, SR: 110, BL: -150, BR: 150, BC: 180, FLC: -15, FRC: 15, TFL: -30, TFR: 30 };
     $('labels').replaceChildren();
     this.speakers = info.channels.map(code => {
@@ -170,7 +179,7 @@ class SpaceRenderer {
       const position = code === 'LFE' ? [0, LFE_HEIGHT, 0] : [Math.sin(angle) * 3.5, code.startsWith('T') ? 3 : 1.2, -Math.cos(angle) * 3.5];
       const label = document.createElement('div'); label.className = 'channel-label' + (code === 'LFE' ? ' lfe' : ''); label.textContent = code; $('labels').append(label);
       const direction = norm(sub([0, 1.05, 0], position)), side = norm(cross(direction, [0, 1, 0])), up = norm(cross(side, direction));
-      return { code, position, direction, side, up, label };
+      return { code, position, direction, side, up, label, azimuth: Math.atan2(-position[2], -position[0]), radius: Math.hypot(position[0], position[2]) };
     });
     this.buildScene();
   }
@@ -246,7 +255,7 @@ class SpaceRenderer {
     const eye = this.listenerView ? [0, 1.22, .04] : add(c.target, scale(z, c.distance));
     return { eye, target: this.listenerView ? sub(eye, z) : c.target, right: [Math.cos(c.yaw), 0, -Math.sin(c.yaw)] };
   }
-  emit(channel, band, intensity) {
+  emit(channel, band, intensity, fan = Math.random() * 2 - 1) {
     if (this.count >= this.max) return;
     const s = this.speakers[channel], hz = this.info.centers[band], f = clamp(Math.log(hz / 20) / Math.log(1000), 0, 1), col = color(hz);
     // Height, speed and lifetime illustrate frequency; they are not acoustic propagation physics.
@@ -254,7 +263,8 @@ class SpaceRenderer {
     const particle = this.count++, i = particle * PARTICLE_STRIDE, a = this.data;
     a[i + 6] = 0; a[i + 7] = life; a[i + 8] = col[0]; a[i + 9] = col[1]; a[i + 10] = col[2];
     a[i + 11] = (.15 - f * .105) * (s.code === 'LFE' ? 1.5 : 1); a[i + 12] = .28 + intensity * .38; a[i + 13] = f;
-    a[i + 14] = channel; a[i + 15] = band; a[i + 16] = Math.random() * 2 - 1;
+    a[i + 14] = channel; a[i + 15] = band; a[i + 16] = fan; a[i + 17] = Math.random() * Math.PI * 2;
+    a[i + 7] = Math.max(life, this.travelTime(channel, band, fan) + .5);
     this.aimParticle(particle);
   }
   aimParticle(particle) {
@@ -262,17 +272,54 @@ class SpaceRenderer {
     const isLfe = speaker.code === 'LFE';
     const halfAngle = Math.min(this.spreadDegrees, this.info.dispersion[a[i + 15]] ?? 180) * Math.PI / 180;
     // LFE radiates uniformly around the listener's feet, independent of the spread control.
-    const angle = isLfe ? a[i + 16] * Math.PI : Math.atan2(-speaker.position[2], -speaker.position[0]) + a[i + 16] * halfAngle;
-    const speed = .95 + a[i + 13] * 2.3;
+    const angle = isLfe ? a[i + 16] * Math.PI : speaker.azimuth + a[i + 16] * halfAngle;
+    const speed = (.95 + a[i + 13] * 2.3) * this.particleSpeed;
     a[i + 3] = Math.cos(angle) * speed; a[i + 4] = 0; a[i + 5] = Math.sin(angle) * speed;
     a[i] = speaker.position[0] + a[i + 3] * a[i + 6];
     a[i + 1] = isLfe ? LFE_HEIGHT : frequencyHeight(a[i + 13]);
     a[i + 2] = speaker.position[2] + a[i + 5] * a[i + 6];
+    const age = a[i + 6], arrival = -(speaker.position[0] * a[i + 3] + speaker.position[2] * a[i + 5]) / (speed * speed);
+    const envelope = Math.min(1, age * 2) * (arrival > .01 ? Math.min(1, Math.abs(age - arrival) * 3) : 1);
+    const amplitude = .07 * envelope, seed = a[i + 17]; // 2% of the 3.5 m speaker radius, each axis.
+    a[i] += amplitude * Math.sin(age * 1.17 + seed);
+    a[i + 1] += amplitude * Math.sin(age * .91 + seed * 1.37);
+    a[i + 2] += amplitude * Math.sin(age * 1.31 + seed * 1.73);
+
+  }
+  travelTime(channel, band, fan) {
+    const speaker = this.speakers[channel];
+    if (speaker.code === 'LFE') return 0;
+    const frequency = this.frequencies[band];
+    const angle = fan * Math.min(this.spreadDegrees, this.info.dispersion[band] ?? 180) * Math.PI / 180;
+    // The fan need not hit the exact center: synchronize its nearest horizontal approach.
+    return speaker.radius * Math.max(0, Math.cos(angle)) / ((.95 + frequency * 2.3) * this.particleSpeed);
   }
   setSpread(degrees) {
-    this.spreadDegrees = clamp(Number.isFinite(degrees) ? degrees : 20, 0, 90);
-    // Reproject existing trails with their original age and fan sample, including while paused.
+    const next = clamp(Number.isFinite(degrees) ? degrees : 20, 0, 90);
+    if (next !== this.spreadDegrees && this.syncReference === 'listener') this.clear();
+    this.spreadDegrees = next;
     for (let p = 0; p < this.count; p++) this.aimParticle(p);
+  }
+  setParticleSpeed(value) {
+    const next = clamp(Number.isFinite(value) ? value : 2, .5, 4);
+    if (next !== this.particleSpeed && this.syncReference === 'listener') this.clear();
+    this.particleSpeed = next;
+    for (let p = 0; p < this.count; p++) this.aimParticle(p);
+  }
+  futureBand(time, channel, band) {
+    if (!clip || time > clip.duration) return 0;
+    const width = this.speakers.length * this.info.bandCount, k = channel * this.info.bandCount + band;
+    if (!liveMode) {
+      const index = Math.floor((time - clip.firstAnalysisTime) / clip.analysisStep);
+      return index < 0 || index >= clip.analysisFrames ? 0 : spectrum[index * width + k];
+    }
+    const ahead = liveState?.lookahead;
+    if (!ahead || ahead.signal !== $('analysis-mode').value || ahead.channels.join(',') !== this.info.channels.join(',')) return 0;
+    const times = ahead.times;
+    if (!times.length || time < times[0] || time > times[times.length - 1] + .045 || ahead.values.length !== times.length * width) return 0;
+    let lo = 0, hi = times.length - 1;
+    while (lo < hi) { const mid = Math.ceil((lo + hi) / 2); if (times[mid] <= time) lo = mid; else hi = mid - 1; }
+    return ahead.values[lo * width + k];
   }
   advance(dt, time) {
     if (dt <= 0) return;
@@ -280,8 +327,7 @@ class SpaceRenderer {
     for (let p = this.count - 1; p >= 0; p--) {
       const i = p * PARTICLE_STRIDE; a[i + 6] += dt;
       if (a[i + 6] >= a[i + 7]) { this.count--; if (p !== this.count) a.copyWithin(i, this.count * PARTICLE_STRIDE, (this.count + 1) * PARTICLE_STRIDE); continue; }
-      // Keep frequency height fixed, and continue through/past the listener without random drift or wall bounces.
-      a[i] += a[i + 3] * dt; a[i + 2] += a[i + 5] * dt;
+      this.aimParticle(p); // Age-based drift is bounded and never accumulates.
     }
     if (!clip || !playing) return;
     this.bands.fill(0);
@@ -298,6 +344,18 @@ class SpaceRenderer {
     const density = Number($('density').value), step = Math.min(dt, .08);
     for (let c = 0; c < this.speakers.length; c++) for (let b = 0; b < clip.bandCount; b++) {
       const k = c * clip.bandCount + b, intensity = this.bands[k];
+      if (this.syncReference === 'listener' && this.speakers[c].code !== 'LFE') {
+        // Same emitter, geometry and decay as Speaker mode. Only the sampled audio time differs.
+        // Candidate thinning gives the same expected emission rate with a per-particle travel offset.
+        this.budgets[k] = Math.min(60, this.budgets[k] + step * density * 103);
+        while (this.budgets[k] >= 1) {
+          const fan = Math.random() * 2 - 1;
+          const future = this.futureBand(time + this.travelTime(c, b, fan), c, b);
+          if (future > .005 && Math.random() < (3 + 100 * future ** 1.5) / 103) this.emit(c, b, future, fan);
+          this.budgets[k]--;
+        }
+        continue;
+      }
       if (intensity <= .005) { this.budgets[k] = 0; continue; }
       this.budgets[k] = Math.min(60, this.budgets[k] + step * density * (3 + 100 * intensity ** 1.5));
       while (this.budgets[k] >= 1) { this.emit(c, b, intensity); this.budgets[k]--; }
@@ -319,12 +377,20 @@ class SpaceRenderer {
       for (let r = 0; r < 4; r++) { const radius = ((time * .8 + r * 1.5) % 6); this.circle([0, .025, 0], radius, [.85, .23, .08], level * .2 * (1 - radius / 7), 'floor', 90); }
       if (this.lines.length) { const rings = new Float32Array(this.lines); gl.bufferData(gl.ARRAY_BUFFER, rings, gl.DYNAMIC_DRAW); gl.drawArrays(gl.LINES, 0, rings.length / 8); }
     }
+    this.visibleCount = 0;
     for (let p = 0; p < this.count; p++) {
       const i = p * PARTICLE_STRIDE, v = p * 8, a = this.data, age = a[i + 6] / a[i + 7];
       this.vertices[v] = a[i]; this.vertices[v + 1] = a[i + 1]; this.vertices[v + 2] = a[i + 2];
       this.vertices[v + 3] = a[i + 8]; this.vertices[v + 4] = a[i + 9]; this.vertices[v + 5] = a[i + 10];
       this.vertices[v + 6] = a[i + 12] * Math.min(1, a[i + 6] * 12 + .2) * (1 - age ** 2) * this.particleOpacity;
+      // Illustrative frequency-dependent decay beyond the listener, identical in both sync modes.
+      // This is not measured air absorption or room reverberation. Bass keeps its long soft tail.
+      const speaker = this.speakers[a[i + 14]], speed = (.95 + a[i + 13] * 2.3) * this.particleSpeed;
+      const travel = -(speaker.position[0] * a[i + 3] + speaker.position[2] * a[i + 5]) / (speed * speed);
+      const pastDistance = Math.max(0, a[i + 6] - travel) * speed;
+      this.vertices[v + 6] *= Math.exp(-pastDistance * (.015 + .12 * a[i + 13] ** 1.4));
       this.vertices[v + 7] = a[i + 11] * (1 + age * .4) * this.particleSize;
+      if (this.vertices[v + 6] > .001) this.visibleCount++;
     }
     gl.uniform1f(this.pointLocation, 1); gl.bufferData(gl.ARRAY_BUFFER, this.vertices.subarray(0, this.count * 8), gl.DYNAMIC_DRAW); gl.drawArrays(gl.POINTS, 0, this.count);
     for (const s of this.speakers) {
@@ -341,7 +407,7 @@ try { renderer = new SpaceRenderer($('scene')); }
 catch (e) {
   // A graphics failure must not prevent demo audio playback.
   error('Could not start 3D rendering. Demo playback is still available.\n' + e.message);
-  renderer = { count: 0, bands: new Float32Array(0), clear() {}, setClip() {}, advance() {}, draw() {}, view() {}, rotate() {}, buildScene() {}, setSpread() {} };
+  renderer = { count: 0, bands: new Float32Array(0), clear() {}, setClip() {}, advance() {}, draw() {}, view() {}, rotate() {}, buildScene() {}, setSpread() {}, setSyncReference() {}, setParticleSpeed() {} };
 }
 
 function enterLive() {
@@ -363,6 +429,7 @@ function applyLive(state) {
   const channels = mode === 'output' ? ['FL', 'FR'] : state.channels;
   const key = `${mode}:${channels.join(',')}:${state.bandCount}`;
   const previousPosition = position();
+  const forecastReset = renderer.syncReference === 'listener' && liveState?.lookahead?.revision !== state.lookahead?.revision;
   const reset = liveState && (state.epoch !== liveState.epoch || state.revision !== liveState.revision);
   liveState = state; liveAt = performance.now();
   if (!liveMode) return;
@@ -371,13 +438,15 @@ function applyLive(state) {
     renderer.setClip(clip); liveKey = key; lastVisualTime = state.position;
   } else {
     clip.duration = state.duration;
-    if (reset && (state.playing || Math.abs(state.position - previousPosition) > .2)) renderer.clear();
+    if (forecastReset || (reset && (state.playing || Math.abs(state.position - previousPosition) > .2)) || Math.abs(state.position - previousPosition) > .5) renderer.clear();
     if (reset || Math.abs(state.position - previousPosition) > .5) lastVisualTime = state.position;
   }
   playing = state.connected && state.playing;
   $('filename').textContent = state.name;
   $('format').textContent = `${state.codec || 'DiscChannelLab'} · ${(state.sourceSampleRate / 1000).toFixed(1)} kHz · ${state.channels.length ? state.channels.join(' / ') : 'Waiting for audio'}`;
-  $('preview-note').textContent = 'Use DiscChannelLab for playback, seeking and volume.';
+  $('preview-note').textContent = renderer.syncReference === 'listener' && !state.lookahead?.times?.length
+    ? 'Preparing look-ahead. If this persists, restart the updated player and playback.'
+    : 'Use DiscChannelLab for playback, seeking and volume.';
   $('source-mode').textContent = mode === 'input' ? 'Input · Unaffected by Mute / Solo / Volume' : mode === 'post' ? 'Combined L/R contribution per channel · Includes Mute / Solo / Master' : 'Final stereo PCM · Includes mix, volume and clipping';
   $('timeline').max = Math.max(1, state.duration);
   $('state').textContent = !state.connected ? 'Waiting for player connection' : playing ? (state.hasData ? 'Following DiscChannelLab' : 'Waiting for player audio') : 'Player stopped / paused';
@@ -386,7 +455,7 @@ async function pollLive() {
   if (livePollBusy || busy) return;
   livePollBusy = true;
   try {
-    const response = await api('/api/live');
+    const response = await api('/api/live?signal=' + encodeURIComponent($('analysis-mode').value || 'post'));
     if (!response.ok || typeof response.json !== 'function') return;
     const state = await response.json();
     if (!state.configured) return;
@@ -408,6 +477,12 @@ $('timeline').oninput = () => { draggingTimeline = true; $('time').textContent =
 $('timeline').onchange = () => { draggingTimeline = false; seek(Number($('timeline').value)).catch(e => error(e.message)); };
 $('view').onchange = () => renderer.view($('view').value);
 $('reset-view').onclick = () => { $('view').value = 'orbit'; renderer.view('orbit'); };
+$('sync-reference').onchange = () => renderer.setSyncReference($('sync-reference').value);
+$('particle-speed').oninput = () => {
+  const speed = clamp(Number($('particle-speed').value), .5, 4);
+  $('particle-speed-value').textContent = `${speed.toFixed(1)}×`;
+  renderer.setParticleSpeed(speed, position());
+};
 $('grid').onchange = () => renderer.buildScene();
 $('density').oninput = () => { $('density-value').textContent = `${Number($('density').value).toFixed(1)}×`; };
 $('tail').oninput = () => { $('tail-value').textContent = `${Number($('tail').value).toFixed(1)}×`; };
@@ -452,8 +527,8 @@ document.addEventListener('focusin', () => { if (editingControl()) cameraKeys.cl
 
 function captureSettings() {
   return {
-    version: 1, signal: $('analysis-mode').value, view: $('view').value,
-    spread: Number($('spread').value), particleSize: Number($('particle-size').value),
+    version: 1, signal: $('analysis-mode').value, view: $('view').value, syncReference: $('sync-reference').value,
+    spread: Number($('spread').value), particleSize: Number($('particle-size').value), particleSpeed: Number($('particle-speed').value),
     transparency: Number($('transparency').value), density: Number($('density').value),
     persistence: Number($('tail').value), demoVolume: Number($('volume').value),
     grid: $('grid').checked, labels: $('names').checked, lfeRipples: $('lfe').checked, hideUi: uiHidden,
@@ -462,6 +537,9 @@ function captureSettings() {
 }
 function applySettings(value) {
   cameraKeys.clear();
+  $('sync-reference').value = value.syncReference === 'speaker' ? 'speaker' : 'listener';
+  $('sync-reference').onchange();
+  $('particle-speed').value = value.particleSpeed ?? 2; $('particle-speed').oninput();
   for (const [id, key] of [['spread', 'spread'], ['particle-size', 'particleSize'], ['transparency', 'transparency'],
     ['density', 'density'], ['tail', 'persistence'], ['volume', 'demoVolume']]) {
     $(id).value = value[key]; $(id).oninput();
@@ -520,7 +598,7 @@ function render(now) {
     if (!liveMode && sourceEnded && t >= clip.duration - .002) { offset = clip.duration; playing = false; detachSource(); $('play').textContent = '↻ Replay'; $('state').textContent = 'Playback ended'; }
   }
   renderer.draw(t); updateTransport(); frameCount++;
-  if (now - lastStats > 750) { fps = Math.round(frameCount * 1000 / (now - lastStats)); $('stats').textContent = `${renderer.count.toLocaleString()} particles · ${fps} fps`; lastStats = now; frameCount = 0; }
+  if (now - lastStats > 750) { fps = Math.round(frameCount * 1000 / (now - lastStats)); $('stats').textContent = `${(renderer.visibleCount ?? renderer.count).toLocaleString()} particles · ${fps} fps`; lastStats = now; frameCount = 0; }
   requestAnimationFrame(render);
 }
 requestAnimationFrame(render);

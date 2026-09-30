@@ -7,12 +7,12 @@ using System.Threading.Channels;
 
 namespace Disc2Flac;
 
-public sealed record PreviewPcmChunk(double Seconds, string[] Channels, byte[] Input, float[] Post, byte[] Output);
+public sealed record PreviewPcmChunk(double Seconds, string[] Channels, byte[] Input, float[] Post, byte[] Output, int ForecastRevision = 0);
 
 /// <summary>An optional observer. It never owns the playback stream or waits for a viewer.</summary>
-public sealed record PreviewPcmTap(Func<bool> Enabled, Action<PreviewPcmChunk> Publish)
+public sealed record PreviewPcmTap(Func<bool> Enabled, Action<PreviewPcmChunk> Publish, bool Lookahead = false)
 {
-    public PreviewPcmTap AtOffset(double seconds) => new(Enabled, frame => Publish(frame with { Seconds = frame.Seconds + seconds }));
+    public PreviewPcmTap AtOffset(double seconds) => new(Enabled, frame => Publish(frame with { Seconds = frame.Seconds + seconds }), Lookahead);
     public void TryPublish(PreviewPcmChunk frame)
     {
         // A failed visualizer must never abort audio playback.
@@ -29,6 +29,10 @@ public sealed class VisualizerBridge : IDisposable
     private readonly Channel<object> _messages = Channel.CreateBounded<object>(new BoundedChannelOptions(12)
         { SingleReader = true, FullMode = BoundedChannelFullMode.DropOldest });
     private Task? _worker;
+    private readonly Channel<object> _forecasts = Channel.CreateBounded<object>(new BoundedChannelOptions(512)
+        { FullMode = BoundedChannelFullMode.DropOldest });
+    private int _forecastRevision;
+    private readonly object _forecastGate = new();
     private volatile bool _connected;
     private Process? _viewer;
     public string PipeName { get; } = $"DiscChannelLab.SpaceSketch.v1.{Environment.ProcessId}.{Guid.NewGuid():N}";
@@ -53,7 +57,18 @@ public sealed class VisualizerBridge : IDisposable
     }
     public void PublishPcm(int epoch, PreviewPcmChunk frame)
     {
-        if (_connected) _messages.Writer.TryWrite((epoch, frame));
+        if (!_connected) return;
+        if (frame.ForecastRevision == 0) { _messages.Writer.TryWrite((epoch, frame)); return; }
+        lock (_forecastGate)
+        {
+            if (frame.ForecastRevision < _forecastRevision) return;
+            if (frame.ForecastRevision != _forecastRevision)
+            {
+                _forecastRevision = frame.ForecastRevision;
+                while (_forecasts.Reader.TryRead(out _)) { }
+            }
+            _forecasts.Writer.TryWrite((epoch, frame));
+        }
     }
 
     private async Task RunAsync()
@@ -66,10 +81,15 @@ public sealed class VisualizerBridge : IDisposable
                     PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly, 65536, 65536);
                 await pipe.WaitForConnectionAsync(_stop.Token).ConfigureAwait(false);
                 while (_messages.Reader.TryRead(out _)) { }
+                while (_forecasts.Reader.TryRead(out _)) { }
                 _connected = true; LastError = null;
                 while (!_stop.IsCancellationRequested)
                 {
-                    var message = await _messages.Reader.ReadAsync(_stop.Token).ConfigureAwait(false);
+                    if (!_messages.Reader.TryRead(out var message) && !_forecasts.Reader.TryRead(out message))
+                    {
+                        await Task.Delay(5, _stop.Token).ConfigureAwait(false);
+                        continue;
+                    }
                     var payload = Encode(message);
                     byte[] length = new byte[4]; BinaryPrimitives.WriteInt32LittleEndian(length, payload.Length);
                     await pipe.WriteAsync(length, _stop.Token).ConfigureAwait(false);
@@ -98,7 +118,9 @@ public sealed class VisualizerBridge : IDisposable
         else if (message is ValueTuple<int, PreviewPcmChunk> data)
         {
             var (epoch, frame) = data;
-            writer.Write((byte)2); writer.Write(epoch); writer.Write(frame.Seconds);
+            writer.Write((byte)(frame.ForecastRevision == 0 ? 2 : 3)); writer.Write(epoch);
+            if (frame.ForecastRevision != 0) writer.Write(frame.ForecastRevision);
+            writer.Write(frame.Seconds);
             writer.Write(string.Join(',', frame.Channels)); writer.Write(frame.Output.Length / 4);
             writer.Write(frame.Input);
             writer.Write(System.Runtime.InteropServices.MemoryMarshal.AsBytes(frame.Post.AsSpan()));
@@ -110,7 +132,7 @@ public sealed class VisualizerBridge : IDisposable
 
     public void Dispose()
     {
-        _connected = false; _stop.Cancel(); _messages.Writer.TryComplete(); _viewer?.Dispose();
+        _connected = false; _stop.Cancel(); _messages.Writer.TryComplete(); _forecasts.Writer.TryComplete(); _viewer?.Dispose();
         // The viewer is independent; it remains open and reports the disconnected player.
     }
 }

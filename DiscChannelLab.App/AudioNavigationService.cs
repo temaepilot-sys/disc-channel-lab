@@ -325,6 +325,9 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
         CancellationToken token, Action? firstWrite = null, PreviewPcmTap? visualization = null)
     {
         const int bytesPerSecond = 48000 * 2 * sizeof(short);
+        await using var ahead = visualization is { Lookahead: true }
+            ? new VisualizerLookaheadStream(source, ["FL", "FR"], null, volume, visualization, token) : null;
+        if (ahead is not null) source = ahead;
         const double maxQueuedSeconds = 0.06;
         var clock = new Stopwatch();
         var submittedBytes = 0L;

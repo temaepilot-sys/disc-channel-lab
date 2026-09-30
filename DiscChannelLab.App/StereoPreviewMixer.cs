@@ -32,6 +32,10 @@ public static class StereoPreviewMixer
         if (channels.Count != stream.Channels)
             throw new InvalidOperationException("このチャンネル配置は試聴できません。");
 
+        await using var ahead = visualization is { Lookahead: true }
+            ? new VisualizerLookaheadStream(source, channels.ToArray(), settings, volume, visualization, token) : null;
+        if (ahead is not null) source = ahead;
+
         const int sampleRate = 48000;
         const int framesPerBuffer = 1024;
         const double maxQueuedSeconds = 0.06;

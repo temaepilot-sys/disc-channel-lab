@@ -40,7 +40,25 @@ Type 2: PCM block
   Known codes: FL FR FC LFE SL SR BL BR BC FLC FRC TFL TFR.
   The receiver checks sizes and codes and does not guess multichannel ordering.
 
-Signal definitions
+Type 3: look-ahead PCM (requires updated player and viewer)
+  Byte 3, int32 Epoch, int32 ForecastRevision (>0), then the same fields as type 2
+  starting with float64 Seconds. Rate and channel ordering remain identical.
+  These are decoded future samples, NOT samples already submitted to ffplay.
+  Post/Output use the current mixer controls without the actual 10 ms gain ramp.
+  ForecastRevision increases on mixer/master changes or observer reconnect.
+  Old revisions and epochs are rejected. Forecasts never replace current meters.
+  The raw read-ahead queue holds at most 384 x 1024 frames (8.192 seconds).
+  Playback reads it immediately; it never waits for a full buffer or for FFT.
+  With no connected viewer, read-ahead falls back to about three blocks.
+  Future packets use a separate queue of at most 512 messages. Clock/type 2
+  messages take priority. Gaps reset future analysis rather than inventing samples.
+  The viewer keeps at most 256 future spectra at about 23 Hz and returns only
+  the requested signal through /api/live?signal=input|post|output.
+  Listener emission samples future spectrum at audio time plus particle travel.
+  Speaker emission continues to use current type 2 data. LFE needs no travel lead.
+  Startup/seek/control changes have a visual warm-up; playback is never delayed.
+
+Signal definitions (type 2)
   Input: decoder PCM before the managed mixer, for supported multichannel layouts.
   Post: sample * sqrt(left_weight^2 + right_weight^2) * master_gain.
         This is the channel's combined stereo contribution level, not one physical speaker output.
@@ -53,7 +71,7 @@ Signal definitions
   its Input/Post are reported as FL/FR, not reconstructed original speakers.
 
 Timing and failure behavior
-  PCM is observed only after successful submission to the playback stream.
+  Type 2 PCM is observed only after successful submission to the playback stream.
   The publisher never waits for visualization. A bounded queue keeps at most 12 messages.
   If the receiver stalls, oldest messages are dropped; audio continues unchanged.
   A missing block, new epoch, or channel-layout change resets FFT and smoothing history.

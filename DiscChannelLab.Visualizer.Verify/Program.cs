@@ -30,17 +30,19 @@ var state = new PreviewMixState(StereoMixSettings.Default, null, channels);
 var pcm = new byte[48000 / 2 * 6 * 2];
 for (int i = 0; i < pcm.Length / 12; i++) for (int c = 0; c < 6; c++)
     BinaryPrimitives.WriteInt16LittleEndian(pcm.AsSpan((i * 6 + c) * 2, 2), (short)(6000 * Math.Sin(2 * Math.PI * (c == 3 ? 60 : 220 * (c + 1)) * i / 48000)));
-async Task<(byte[] Output, List<PreviewPcmChunk> Frames)> Mix(bool observe)
+async Task<(byte[] Output, List<PreviewPcmChunk> Frames)> Mix(bool observe, bool ahead = false)
 {
     using var input = new MemoryStream(pcm); using var output = new MemoryStream();
     var frames = new List<PreviewPcmChunk>();
     await StereoPreviewMixer.CopyAsync(input, output, stream, () => state, () => .8, CancellationToken.None,
-        visualization: observe ? new PreviewPcmTap(() => true, frames.Add) : null);
+        visualization: observe ? new PreviewPcmTap(() => true, f => { if (f.ForecastRevision == 0) frames.Add(f); }, ahead) : null);
     return (output.ToArray(), frames);
 }
 var baseline = await Mix(false);
 var tapped = await Mix(true);
 Check(baseline.Output.SequenceEqual(tapped.Output), "Observer leaves playback PCM byte-identical");
+var prefetched = await Mix(true, true);
+Check(baseline.Output.SequenceEqual(prefetched.Output), "Read-ahead and future mixing leave actual mixed PCM byte-identical");
 Check(tapped.Frames.Sum(f => f.Output.Length) == baseline.Output.Length, "Every submitted sample is accounted for");
 Check(tapped.Frames.All(f => f.Channels.SequenceEqual(codes)), "Actual channel order is carried by the protocol");
 Check(tapped.Frames.All(f => Enumerable.Range(0, f.Post.Length / 6).All(i => f.Post[i * 6 + 2] == 0)), "Muted Center is zero in Post");
@@ -102,6 +104,72 @@ using (var bridge = new VisualizerBridge())
     Check(bridge.IsConnected, "A new viewer reconnects");
 }
 Console.WriteLine($"{passed} link checks passed.");
+
+// A viewer may join during playback. Decode ahead without changing the actual PCM or mixer latency.
+var futurePackets = new System.Collections.Concurrent.ConcurrentQueue<PreviewPcmChunk>();
+bool forecastEnabled = false;
+var futureState = new PreviewMixState(StereoMixSettings.Default, null, codes.Select(c => new ExperimentalChannel(c, .6, 0, false)).ToArray());
+var longPcm = new byte[48000 * 10 * 12];
+for (int n = 0; n < longPcm.Length; n += pcm.Length) pcm.CopyTo(longPcm, n);
+using (var decoded = new MemoryStream(longPcm))
+await using (var ahead = new VisualizerLookaheadStream(decoded, codes, () => Volatile.Read(ref futureState), () => .8,
+    new PreviewPcmTap(() => Volatile.Read(ref forecastEnabled), futurePackets.Enqueue, true), CancellationToken.None))
+{
+    var first = new byte[1024 * 12];
+    int read = await ahead.ReadAsync(first).AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+    Check(read == first.Length && first.SequenceEqual(longPcm.Take(read)), "First PCM is available without waiting for look-ahead");
+    await Task.Delay(70);
+    Check(decoded.Position < 48000 * 12 / 5, "No viewer: prefetch stays below 0.2 seconds");
+    Volatile.Write(ref forecastEnabled, true);
+    for (int n = 0; n < 300 && !futurePackets.Any(f => f.Seconds > 6); n++) await Task.Delay(20);
+    var originalFuture = futurePackets.ToArray();
+    Check(originalFuture.Any(f => f.Seconds > 6) && originalFuture.Max(f => f.Seconds) < 8.25,
+        "Late viewer receives bounded multi-second look-ahead");
+    var mutedState = futureState with { Channels = futureState.Channels!.Select(c => c.Code == "FC" ? c with { Muted = true } : c).ToArray() };
+    Volatile.Write(ref futureState, mutedState);
+    int oldRevision = originalFuture[0].ForecastRevision;
+    for (int n = 0; n < 300 && !futurePackets.Any(f => f.ForecastRevision > oldRevision && f.Seconds > 6); n++) await Task.Delay(20);
+    var changedFuture = futurePackets.Where(f => f.ForecastRevision > oldRevision).ToArray();
+    Check(changedFuture.Length > 100 && changedFuture.All(f => Enumerable.Range(0, f.Post.Length / 6).All(n => f.Post[n * 6 + 2] == 0)),
+        "Mixer changes regenerate future Post without touching playback PCM");
+    using var forecastReceiver = new LiveReceiver(null, settings, Console.WriteLine);
+    forecastReceiver.Consume(VisualizerBridge.Encode(new VisualizerClock(1, 25, "Future", "PCM", 48000, 0, 10, false, Environment.TickCount64)));
+    foreach (var packet in changedFuture) forecastReceiver.Consume(VisualizerBridge.Encode((25, packet)));
+    using var forecastSnapshot = JsonDocument.Parse(JsonSerializer.Serialize(forecastReceiver.Snapshot()));
+    var forecastData = forecastSnapshot.RootElement.GetProperty("lookahead");
+    Check(forecastData.GetProperty("times").EnumerateArray().Last().GetDouble() > 6, "Protocol type 3 preserves future timestamps");
+    Check(!forecastSnapshot.RootElement.GetProperty("hasData").GetBoolean(), "Future PCM never replaces the currently audible spectrum");
+    var futureValues = forecastData.GetProperty("values").EnumerateArray().Select(x => x.GetSingle()).ToArray();
+    Check(Enumerable.Range(0, futureValues.Length / 96).All(n => futureValues.Skip(n * 96 + 32).Take(16).All(x => x == 0)), "Future spectrum honors Center mute");
+    forecastReceiver.Consume(VisualizerBridge.Encode(new VisualizerClock(1, 26, "Seek", "PCM", 48000, 4, 10, false, Environment.TickCount64)));
+    forecastReceiver.Consume(VisualizerBridge.Encode((25, changedFuture[^1])));
+    using var cleared = JsonDocument.Parse(JsonSerializer.Serialize(forecastReceiver.Snapshot()));
+    Check(cleared.RootElement.GetProperty("lookahead").GetProperty("times").GetArrayLength() == 0, "Seek rejects old future packets");
+    using (var forecastBridge = new VisualizerBridge())
+    using (var pipeReceiver = new LiveReceiver(forecastBridge.PipeName, settings, Console.WriteLine))
+    {
+        forecastBridge.Start(); pipeReceiver.Start();
+        for (int n = 0; n < 100 && !forecastBridge.IsConnected; n++) await Task.Delay(20);
+        Check(forecastBridge.IsConnected, "Forecast pipe connects");
+        forecastBridge.PublishClock(27, "Ahead over pipe", "PCM", 48000, 0, 10, false);
+        foreach (var packet in changedFuture) forecastBridge.PublishPcm(27, packet);
+        bool receivedFuture = false;
+        for (int n = 0; n < 300 && !receivedFuture; n++)
+        {
+            forecastBridge.PublishClock(27, "Ahead over pipe", "PCM", 48000, 0, 10, false);
+            await Task.Delay(20);
+            using var snapshot = JsonDocument.Parse(JsonSerializer.Serialize(pipeReceiver.Snapshot()));
+            receivedFuture = snapshot.RootElement.GetProperty("lookahead").GetProperty("times").EnumerateArray().Any(t => t.GetDouble() > 6);
+        }
+        Check(receivedFuture, "A burst of multi-second forecasts survives the real named pipe");
+    }
+    using var preserved = new MemoryStream(); preserved.Write(first);
+    var buffer = new byte[17003];
+    while ((read = await ahead.ReadAsync(buffer)) > 0) preserved.Write(buffer, 0, read);
+    Check(preserved.ToArray().SequenceEqual(longPcm), "Read-ahead preserves every PCM byte across arbitrary read boundaries");
+    Check(await ahead.ReadAsync(buffer) == 0, "Repeated end-of-stream reads complete immediately");
+}
+Console.WriteLine($"{passed} link and look-ahead checks passed.");
 
 if (args.Length == 2 && args[0] == "--host")
 {

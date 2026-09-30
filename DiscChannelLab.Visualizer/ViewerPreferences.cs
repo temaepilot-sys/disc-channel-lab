@@ -6,6 +6,8 @@ public sealed record ViewerPreferences
 {
     public int Version { get; init; } = 1;
     public string Signal { get; init; } = "post";
+    public string SyncReference { get; init; } = "listener";
+    public double ParticleSpeed { get; init; } = 2;
     public string View { get; init; } = "orbit";
     public double Spread { get; init; } = 20;
     public double ParticleSize { get; init; } = 1;
@@ -21,10 +23,11 @@ public sealed record ViewerPreferences
 
     public void Validate()
     {
-        if (Version != 1 || Signal is not ("post" or "input" or "output") ||
+        if (Version != 1 || Signal is not ("post" or "input" or "output") || SyncReference is not ("listener" or "speaker") ||
             View is not ("orbit" or "bird" or "top" or "listener" or "front" or "back"))
             throw new InvalidDataException("Unsupported viewer settings version or view mode.");
         Check(Spread, 0, 90); Check(ParticleSize, .3, 3); Check(Transparency, 0, 100);
+        Check(ParticleSpeed, .5, 4);
         Check(Density, .3, 3); Check(Persistence, .5, 1.8); Check(DemoVolume, 0, 100);
         if (Camera is null || Camera.Target is null || Camera.Target.Length != 3)
             throw new InvalidDataException("Invalid saved camera.");

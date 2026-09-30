@@ -14,6 +14,12 @@ public sealed class LiveReceiver(string? pipeName, VisualizationSettings setting
     readonly object gate = new();
     readonly CancellationTokenSource stop = new();
     readonly Queue<(double Time, float[] Values)> frames = new();
+    readonly Queue<(double Time, float[] Values)> forecasts = new();
+    SpectrumAnalyzer? forecastAnalyzer;
+    string[] forecastChannels = [];
+    int forecastGeneration;
+    long forecastRevision;
+    double forecastExpected = -1, forecastBase, lastForecast = -1;
     PlayerClock? clock;
     string[] channels = [];
     SpectrumAnalyzer? analyzer;
@@ -35,7 +41,7 @@ public sealed class LiveReceiver(string? pipeName, VisualizationSettings setting
             {
                 using var pipe = new NamedPipeClientStream(".", pipeName!, PipeDirection.In, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
                 await pipe.ConnectAsync(1500, stop.Token).ConfigureAwait(false);
-                lock (gate) { connected = true; clock = null; lastError = null; Reset(); }
+                lock (gate) { connected = true; clock = null; lastError = null; Reset(); ResetForecast(); }
                 log("DiscChannelLab live pipe connected");
                 var size = new byte[4];
                 while (!stop.IsCancellationRequested)
@@ -69,42 +75,68 @@ public sealed class LiveReceiver(string? pipeName, VisualizationSettings setting
                 throw new InvalidDataException("Unsupported link protocol or invalid playback position.");
             lock (gate)
             {
-                if (clock?.Epoch != next.Epoch) Reset();
+                if (clock?.Epoch != next.Epoch) { Reset(); ResetForecast(); }
                 clock = next; connected = true;
             }
             return;
         }
-        if (payload[0] != 2) throw new InvalidDataException("Unknown live packet type.");
+        if (payload[0] is not (2 or 3)) throw new InvalidDataException("Unknown live packet type.");
+        bool forecast = payload[0] == 3;
         using var reader = new BinaryReader(new MemoryStream(payload), Encoding.UTF8);
-        reader.ReadByte(); int epoch = reader.ReadInt32(); double time = reader.ReadDouble();
+        reader.ReadByte(); int epoch = reader.ReadInt32();
+        int generation = forecast ? reader.ReadInt32() : 0;
+        double time = reader.ReadDouble();
         string[] codes = reader.ReadString().Split(','); int count = reader.ReadInt32();
         string[] allowed = ["FL", "FR", "FC", "LFE", "SL", "SR", "BL", "BR", "BC", "FLC", "FRC", "TFL", "TFR"];
         if (codes.Length is < 1 or > 8 || codes.Distinct().Count() != codes.Length || codes.Any(c => !allowed.Contains(c)) ||
             count is < 1 or > 4096 || !double.IsFinite(time) || time < -.001 ||
             reader.BaseStream.Length - reader.BaseStream.Position != count * (codes.Length * 6 + 4))
             throw new InvalidDataException("Invalid linked PCM data.");
+        SpectrumAnalyzer current;
         lock (gate)
         {
             if (clock is null || clock.Epoch != epoch) return; // Discard old seek/session data.
-            if (analyzer is null || analyzerEpoch != epoch || !channels.SequenceEqual(codes) || Math.Abs(time - expectedTime) > 2d / 48000)
+            if (forecast)
             {
-                Reset(); channels = codes; analyzerEpoch = epoch; baseTime = time;
-                analyzer = new SpectrumAnalyzer(codes.Length * 2 + 2, settings, (seconds, values) =>
+                if (generation <= 0 || generation < forecastGeneration) return;
+                if (forecastAnalyzer is null || generation != forecastGeneration || !forecastChannels.SequenceEqual(codes) || Math.Abs(time - forecastExpected) > 2d / 48000)
                 {
-                    lock (gate)
+                    ResetForecast(); forecastGeneration = generation; forecastChannels = codes; forecastBase = time;
+                    forecastAnalyzer = new SpectrumAnalyzer(codes.Length * 2 + 2, settings, (seconds, values) =>
                     {
-                        frames.Enqueue((baseTime + seconds, values));
-                        while (frames.Count > 192) frames.Dequeue();
-                    }
-                }, retainFrames: false);
+                        lock (gate)
+                        {
+                            double timestamp = forecastBase + seconds;
+                            if (timestamp - lastForecast < .04) return; // About 23 Hz; bounded HTTP payload.
+                            lastForecast = timestamp; forecasts.Enqueue((timestamp, values));
+                            while (forecasts.Count > 256) forecasts.Dequeue();
+                        }
+                    }, retainFrames: false);
+                }
+                forecastExpected = time + count / 48000d; current = forecastAnalyzer;
             }
-            expectedTime = time + count / 48000d;
+            else
+            {
+                if (analyzer is null || analyzerEpoch != epoch || !channels.SequenceEqual(codes) || Math.Abs(time - expectedTime) > 2d / 48000)
+                {
+                    Reset(); channels = codes; analyzerEpoch = epoch; baseTime = time;
+                    analyzer = new SpectrumAnalyzer(codes.Length * 2 + 2, settings, (seconds, values) =>
+                    {
+                        lock (gate)
+                        {
+                            frames.Enqueue((baseTime + seconds, values));
+                            while (frames.Count > 192) frames.Dequeue();
+                        }
+                    }, retainFrames: false);
+                }
+                expectedTime = time + count / 48000d;
+                current = analyzer!;
+            }
         }
         int inputStart = (int)reader.BaseStream.Position;
         int postStart = inputStart + count * codes.Length * 2;
         int outputStart = postStart + count * codes.Length * 4;
         var sample = new float[codes.Length * 2 + 2];
-        var current = analyzer!;
         for (int i = 0; i < count; i++)
         {
             for (int c = 0; c < codes.Length; c++)
@@ -123,7 +155,13 @@ public sealed class LiveReceiver(string? pipeName, VisualizationSettings setting
         frames.Clear(); selected = null; analyzer = null; expectedTime = -1; revision++;
     }
 
-    public object Snapshot()
+    void ResetForecast()
+    {
+        forecasts.Clear(); forecastAnalyzer = null; forecastExpected = lastForecast = -1; forecastRevision++;
+        forecastChannels = []; forecastGeneration = 0;
+    }
+
+    public object Snapshot(string signal = "post")
     {
         lock (gate)
         {
@@ -135,6 +173,12 @@ public sealed class LiveReceiver(string? pipeName, VisualizationSettings setting
             bool hasData = selected is { } value && Math.Abs(position - value.Time) < .25;
             var values = hasData ? selected!.Value.Values : new float[(channels.Length * 2 + 2) * settings.BandCount];
             int width = channels.Length * settings.BandCount;
+            while (forecasts.TryPeek(out var old) && old.Time < position - .1) forecasts.Dequeue();
+            signal = signal is "input" or "output" ? signal : "post";
+            int forecastWidth = forecastChannels.Length * settings.BandCount;
+            int start = signal == "input" ? 0 : signal == "post" ? forecastWidth : forecastWidth * 2;
+            int length = signal == "output" ? settings.BandCount * 2 : forecastWidth;
+            var ahead = forecasts.Where(f => f.Time <= position + 8.2).ToArray();
             return new
             {
                 configured = Configured, connected = fresh, playing, hasData, revision, epoch = clock?.Epoch ?? -1,
@@ -142,6 +186,8 @@ public sealed class LiveReceiver(string? pipeName, VisualizationSettings setting
                 sourceSampleRate = clock?.SourceSampleRate ?? 48000, sampleRate = 48000, channels,
                 bandCount = settings.BandCount, centers = settings.Centers, dispersion = settings.Centers.Select(DispersionAngleMapper.Map).ToArray(),
                 input = values.Take(width).ToArray(), post = values.Skip(width).Take(width).ToArray(), output = values.Skip(width * 2).Take(settings.BandCount * 2).ToArray(),
+                lookahead = new { revision = forecastRevision, signal, channels = signal == "output" ? new[] { "FL", "FR" } : forecastChannels,
+                    times = ahead.Select(f => f.Time).ToArray(), values = ahead.SelectMany(f => f.Values.Skip(start).Take(length)).ToArray() },
                 error = lastError
             };
         }

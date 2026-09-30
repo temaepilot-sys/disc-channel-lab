@@ -22,11 +22,15 @@ public static class SelfTests
             {
                 var store = new ViewerPreferencesStore(preferenceFile);
                 Check(store.Load() is null, "Missing viewer settings use UI defaults");
+                File.WriteAllText(preferenceFile, "{\"version\":1}");
+                Check(store.Load() is { SyncReference: "listener", ParticleSpeed: 2 }, "Legacy preferences default to listener sync and double speed");
                 var original = new ViewerPreferences { View = "listener", Spread = 12, Transparency = 65,
+                    SyncReference = "speaker", ParticleSpeed = 3.2,
                     Camera = new CameraPreferences { Yaw = 1.25, Pitch = -.7, Distance = 8, Target = [.4, 1.2, -2] } };
                 store.Save(original);
                 var restored = new ViewerPreferencesStore(preferenceFile).Load()!;
                 Check(restored.View == "listener" && restored.Spread == 12 && restored.Transparency == 65 &&
+                    restored.SyncReference == "speaker" && restored.ParticleSpeed == 3.2 &&
                     restored.Camera.Pitch == -.7 && restored.Camera.Target.SequenceEqual(original.Camera.Target), "Viewer settings survive store restart");
                 string previous = File.ReadAllText(preferenceFile);
                 bool invalidRejected = false;
@@ -35,6 +39,12 @@ public static class SelfTests
                 invalidRejected = false;
                 try { store.Save(original with { Version = 2 }); } catch (InvalidDataException) { invalidRejected = true; }
                 Check(invalidRejected, "Unsupported viewer settings version rejected");
+                foreach (var invalid in new[] { original with { SyncReference = "unknown" }, original with { ParticleSpeed = 0 }, original with { ParticleSpeed = double.NaN }, original with { ParticleSpeed = 4.1 } })
+                {
+                    invalidRejected = false;
+                    try { store.Save(invalid); } catch (InvalidDataException) { invalidRejected = true; }
+                    Check(invalidRejected && File.ReadAllText(preferenceFile) == previous, "Invalid synchronization/speed preserves saved preferences");
+                }
                 File.WriteAllText(preferenceFile, "{broken");
                 invalidRejected = false;
                 try { store.Load(); } catch (JsonException) { invalidRejected = true; }

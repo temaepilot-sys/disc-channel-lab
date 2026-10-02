@@ -16,7 +16,7 @@ LFE emits horizontally through **360° from the center at the listener’s feet*
 
 ![Space sketch: listener viewpoint](screenshots/listener.png)
 
-Choose **Camera → Listener** to look around from a fixed eye position. **Bird’s-eye** provides an elevated view; **Top** looks straight down. Overview, Front and Back are also available.
+Choose **Camera → Listener** to look toward the central particle region from a fixed position about 3 m behind the listener and slightly above it. This makes the gradual enlargement, brightness and vibration visible in front of the camera. Selecting the preset aims slightly downward at the center; drag or use arrow keys to look around. Previously saved viewing angles are preserved; select Listener again to use the new default direction. **Bird’s-eye** provides an elevated view; **Top** looks straight down. Overview, Front and Back are also available.
 
 | Control | Action |
 | --- | --- |

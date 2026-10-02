@@ -247,12 +247,14 @@ class SpaceRenderer {
   view(name) {
     this.listenerView = name === 'listener';
     this.camera = { yaw: name === 'front' ? Math.PI : ['back', 'listener', 'top'].includes(name) ? 0 : .48,
-      pitch: name === 'listener' ? 0 : name === 'top' ? Math.PI / 2 : name === 'bird' ? Math.PI / 3 : .56,
+      pitch: name === 'listener' ? -Math.atan2(.35, 3) : name === 'top' ? Math.PI / 2 : name === 'bird' ? Math.PI / 3 : .56,
       distance: ['top', 'bird'].includes(name) ? 13 : 12.8, target: [0, .8, 0] };
   }
   cameraPose() {
     const c = this.camera, z = [Math.sin(c.yaw) * Math.cos(c.pitch), Math.sin(c.pitch) * (this.listenerView ? -1 : 1), Math.cos(c.yaw) * Math.cos(c.pitch)];
-    const eye = this.listenerView ? [0, 1.22, .04] : add(c.target, scale(z, c.distance));
+    // Look toward the listener from just behind, so the enlarged particles pass in front
+    // of the camera instead of surrounding its near clipping plane.
+    const eye = this.listenerView ? [0, 1.65, 3] : add(c.target, scale(z, c.distance));
     return { eye, target: this.listenerView ? sub(eye, z) : c.target, right: [Math.cos(c.yaw), 0, -Math.sin(c.yaw)] };
   }
   emit(channel, band, intensity, fan = Math.random() * 2 - 1) {

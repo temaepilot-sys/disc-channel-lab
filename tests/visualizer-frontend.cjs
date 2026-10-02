@@ -116,6 +116,17 @@ function tick(seconds) { for (let i = 0; i < Math.ceil(seconds * 60); i++) { now
   assert.equal(renderer.camera.yaw, 1.2, 'Startup restores exact camera, not just preset');
   const stride = vm.runInContext('PARTICLE_STRIDE', sandbox);
   const adjust = (id, value) => { element(id).value = String(value); element(id).oninput(); };
+  renderer.view('listener');
+  const rearPose = renderer.cameraPose(), sight = rearPose.target.map((v, i) => v - rearPose.eye[i]);
+  assert.deepEqual(Array.from(rearPose.eye), [0, 1.65, 3], 'Listener camera sits behind the central particle region');
+  const toCenter = -rearPose.eye[2] / sight[2];
+  assert(Math.abs(rearPose.eye[1] + sight[1] * toCenter - 1.3) < 1e-8, 'Preset looks toward listener height at the center');
+  renderer.draw(paused.time);
+  for (const height of [.12, .18, 1.2, 2.6]) {
+    const point = [0,height,0,1], q = [0,0,0,0];
+    for (let row = 0; row < 4; row++) for (let col = 0; col < 4; col++) q[row] += renderer.matrix[col*4+row]*point[col];
+    assert(q[3] > 0 && Math.abs(q[0]/q[3]) < 1 && Math.abs(q[1]/q[3]) < 1, 'Central bass, treble and LFE are in the listener preset frame');
+  }
   const key = (type, code) => {
     let prevented = false;
     documentEvents.get(type)({ code, preventDefault() { prevented = true; } });
@@ -415,11 +426,12 @@ function tick(seconds) { for (let i = 0; i < Math.ceil(seconds * 60); i++) { now
   assert.equal(renderer.syncReference, 'listener'); assert.equal(renderer.particleSpeed, 3.2); assert.equal(renderer.listenerSize, 2.4, 'Listener size persists with saved settings');
   const result = { mode: 'Simulated APIs; GPU/audio-device validation still required', passed: ['Demo packet parsing', 'Explicit channels', 'Audio output clock compensation', 'Particles generated', 'Pause freezes time and particles', 'Seek clears old particles', 'Resume', 'All six camera matrices finite', 'Particle cap', 'Stop reset', 'Natural end'], particlesAt8Seconds: running.particles, drawCalls };
   result.passed.push('Shared shader uniform precision matches', 'Live mode produces no duplicate audio', 'Output mode has two channels', 'Muted Post / visible Input', 'Live pause and seek', 'Disconnected player stops', 'Return to demo mode');
-  result.passed.push('Keyboard tilt reaches both poles without collapsed projection', 'Listener camera stays at eye position', 'Continuous keyboard rotation beyond 360 degrees', 'Keyboard release and focus respect controls', 'Camera movement works with paused audio');
+  result.passed.push('Keyboard tilt reaches both poles without collapsed projection', 'Listener camera stays at its rear viewing position', 'Continuous keyboard rotation beyond 360 degrees', 'Keyboard release and focus respect controls', 'Camera movement works with paused audio');
   result.passed.push('Settings restored on startup without autoplay', 'Save/load all controls and exact camera', 'Settings requests retain authentication', 'Settings I/O errors preserve current state');
   result.passed.push('Hide/show UI and saved visibility leave playback unchanged');
   result.passed.push('Legacy settings default to listener sync and 2x speed', 'Particles begin at speakers using future spectra', 'Bass and treble arrive at the source timestamp', 'Speed 0.5x through 4x preserves arrival timing', 'Missing/stale forecast rejected', 'Mixer forecast revisions clear old trails', 'Sync reference and speed settings round-trip', 'Speaker sync keeps source-timed emission');
   result.passed.push('Listener-only brightness and adjustable size emphasis', 'Smooth local falloff without new stationary particles', 'Listener vibration remains bounded and freezes on pause', 'Emphasis preserves timing and transparency');
+  result.passed.push('Listener preset looks toward the center from behind', 'Central bass, treble and LFE fit the listener view');
   result.passed.push('Progressive enlargement begins 1.8 m out', 'Listener size adjusts live without retiming particles', 'Listener size defaults and persistence');
   result.passed.push('Bounded smooth XYZ drift', 'Drift freezes while paused and vanishes at arrival', 'Frequency-dependent post-listener attenuation');
   result.passed.push('Non-LFE channels aim toward listener at zero spread', 'Base frequency heights are shared and increasing', 'Small vertical drift around frequency height', 'Adjustable horizontal angle limits', 'Paused spread updates existing particles', 'Live size and transparency scaling', 'Full transparency hides particles', 'Appearance preserves audio time and particle state', 'LFE radiates outward from listener feet', 'LFE covers all azimuths independently of spread');

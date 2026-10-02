@@ -13,6 +13,8 @@ public sealed record ViewerPreferences
     public double ParticleSize { get; init; } = 1;
     public double ListenerSize { get; init; } = 1.5;
     public double ListenerBrightness { get; init; } = 1.4;
+    public bool SpeakerBeams { get; init; }
+    public double BeamStrength { get; init; } = .8;
     public double Transparency { get; init; }
     public double Density { get; init; } = 1.3;
     public double Persistence { get; init; } = 1;
@@ -32,6 +34,7 @@ public sealed record ViewerPreferences
         Check(ParticleSpeed, .5, 4);
         Check(ListenerSize, 1, 3);
         Check(ListenerBrightness, 1, 4);
+        Check(BeamStrength, 0, 2);
         Check(Density, .3, 3); Check(Persistence, .5, 1.8); Check(DemoVolume, 0, 100);
         if (Camera is null || Camera.Target is null || Camera.Target.Length != 3)
             throw new InvalidDataException("Invalid saved camera.");

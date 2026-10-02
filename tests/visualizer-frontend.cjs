@@ -89,6 +89,8 @@ function tick(seconds) { for (let i = 0; i < Math.ceil(seconds * 60); i++) { now
   assert.equal(element('view').value, 'bird');
   assert.equal(element('sync-reference').value, 'listener', 'Old settings default to listener synchronization');
   assert.equal(Number(element('listener-size').value), 1.5, 'Old settings default to stronger listener enlargement');
+  assert.equal(element('speaker-beams').checked, false, 'Existing settings retain the particle view');
+  assert.equal(Number(element('beam-strength').value), .8, 'Old settings default to modest beam strength');
   assert.equal(vm.runInContext('renderer.particleSpeed', sandbox), simulateFailure ? undefined : 2);
   element('sync-reference').value = 'speaker'; element('sync-reference').onchange();
   assert(!sandbox.lab.state.playing, 'Restoring settings never starts audio');
@@ -463,6 +465,55 @@ function tick(seconds) { for (let i = 0; i < Math.ceil(seconds * 60); i++) { now
   await element('load-settings').onclick();
   assert.equal(renderer.listenerBrightness, 4, 'Listener brightness persists with saved settings');
   assert.equal(renderer.syncReference, 'listener'); assert.equal(renderer.particleSpeed, 3.2); assert.equal(renderer.listenerSize, 2.4, 'Listener size persists with saved settings');
+  // Beams are an instantaneous spectrum display, independent of particle travel.
+  renderer.emit(0, 8, .7, 0); renderer.data[6] = renderer.travelTime(0,8,0); renderer.aimParticle(0);
+  const particleSnapshot = renderer.data.slice(0, renderer.count * stride), beforeBeamTime = sandbox.lab.state.time;
+  const beamToggle = on => { element('speaker-beams').checked = on; element('speaker-beams').onchange(); };
+  renderer.bands.fill(0); renderer.bands[8] = .8;
+  renderer.draw(beforeBeamTime); assert.equal(renderer.beamMesh.vertexCount, 0, 'Beams are opt-in');
+  beamToggle(true); renderer.draw(beforeBeamTime);
+  const mesh = renderer.beamMesh, verticesPerBand = 8 * 14 * 6;
+  assert.equal(mesh.vertexCount, verticesPerBand, 'A single active band produces a bounded beam mesh');
+  assert(mesh.items.every(item => item.speaker.code !== 'LFE'), 'LFE has no directional beam');
+  const beam = mesh.items.find(item => item.channel === 0 && item.band === 8);
+  const activeGeometry = () => mesh.vertices.slice(0, mesh.vertexCount * 8);
+  let sourceVisible = false, listenerVisible = false, peakAlpha = 0;
+  for (let i = 0; i < mesh.vertexCount * 8; i += 8) {
+    const v = mesh.vertices, along = (v[i] - beam.x) * beam.dx + (v[i+2] - beam.z) * beam.dz;
+    assert(along >= -1e-5 && along <= beam.speaker.radius + 1e-5, 'Beam stays between speaker and listener');
+    assert(Math.abs(v[i+1] - beam.height) <= .08001, 'Halo stays near its frequency height');
+    beam.color.forEach((c, k) => assert(Math.abs(v[i+3+k]-c) < 1e-6, 'Beam retains frequency color'));
+    assert(v[i+6] >= 0 && v[i+6] <= 1, 'Beam opacity is safe');
+    if (v[i+6] > .001) {
+      sourceVisible ||= Math.hypot(v[i]-beam.x, v[i+2]-beam.z) < .001;
+      listenerVisible ||= Math.hypot(v[i],v[i+2]) < .001;
+    }
+    peakAlpha = Math.max(peakAlpha, v[i+6]);
+  }
+  assert(sourceVisible && listenerVisible, 'Speaker and listener ends light up in the same draw with no waiting');
+  const pausedBeam = activeGeometry(); renderer.draw(beforeBeamTime);
+  assert.deepEqual(activeGeometry(), pausedBeam, 'Beam freezes while audio is paused');
+  const reusedBuffer = mesh.vertices;
+  adjust('beam-strength', 1.6); renderer.draw(beforeBeamTime);
+  assert(Math.max(...Array.from(activeGeometry()).filter((_, i) => i % 8 === 6)) > peakAlpha, 'Beam strength increases rendered opacity');
+  assert.equal(mesh.vertices, reusedBuffer, 'Beam buffer is reused instead of growing each frame');
+  adjust('beam-strength', 0); renderer.draw(beforeBeamTime); assert.equal(mesh.vertexCount, 0);
+  adjust('beam-strength', .8); adjust('transparency', 100); renderer.draw(beforeBeamTime); assert.equal(mesh.vertexCount, 0);
+  adjust('transparency', 0);
+  renderer.bands.fill(0); renderer.bands[3 * renderer.info.bandCount] = .8;
+  renderer.draw(beforeBeamTime); assert.equal(mesh.vertexCount, 0, 'LFE alone keeps its floor field without a spotlight');
+  renderer.bands.fill(0); renderer.draw(beforeBeamTime); assert.equal(mesh.vertexCount, 0, 'Silent channels produce no beam');
+  renderer.bands[8] = .8;
+  for (const view of ['orbit','bird','top','listener','front','back']) {
+    renderer.view(view); renderer.draw(beforeBeamTime);
+    assert.equal(mesh.vertexCount, verticesPerBand, 'Beam works from every camera preset');
+  }
+  beamToggle(false); renderer.draw(beforeBeamTime); assert.equal(mesh.vertexCount, 0);
+  assert.deepEqual(renderer.data.slice(0,renderer.count*stride), particleSnapshot, 'Beam controls preserve moving particles and their vibration');
+  assert.equal(sandbox.lab.state.time, beforeBeamTime, 'Beams do not move or delay audio');
+  beamToggle(true); adjust('beam-strength', 1.6); await element('save-settings').onclick();
+  beamToggle(false); adjust('beam-strength', .2); await element('load-settings').onclick();
+  assert(renderer.speakerBeams && renderer.beamStrength === 1.6, 'Beam options survive save and load');
   const result = { mode: 'Simulated APIs; GPU/audio-device validation still required', passed: ['Demo packet parsing', 'Explicit channels', 'Audio output clock compensation', 'Particles generated', 'Pause freezes time and particles', 'Seek clears old particles', 'Resume', 'All six camera matrices finite', 'Particle cap', 'Stop reset', 'Natural end'], particlesAt8Seconds: running.particles, drawCalls };
   result.passed.push('Shared shader uniform precision matches', 'Live mode produces no duplicate audio', 'Output mode has two channels', 'Muted Post / visible Input', 'Live pause and seek', 'Disconnected player stops', 'Return to demo mode');
   result.passed.push('Keyboard tilt reaches both poles without collapsed projection', 'Listener camera stays at its rear viewing position', 'Continuous keyboard rotation beyond 360 degrees', 'Keyboard release and focus respect controls', 'Camera movement works with paused audio');
@@ -472,6 +523,7 @@ function tick(seconds) { for (let i = 0; i < Math.ceil(seconds * 60); i++) { now
   result.passed.push('Listener-only brightness and adjustable size emphasis', 'Smooth local falloff without new stationary particles', 'Listener vibration remains bounded and freezes on pause', 'Emphasis preserves timing and transparency');
   result.passed.push('Listener preset looks toward the center from behind', 'Central bass, treble and LFE fit the listener view');
   result.passed.push('Parabolic brightness limited to central 60 cm', 'Brightness slider updates paused particles without size or timing changes', 'Brightness setting persists', 'Higher brightness dims distant particles', 'Strong emphasis preserves hue and valid alpha');
+  result.passed.push('Zero-lag beams illuminate both endpoints together', 'Soft beam meshes aim at listener with fixed frequency heights', 'Beam silence, LFE exclusion, transparency and toggles', 'Beam strength and settings persist', 'Beam views are finite and buffers reused', 'Beams preserve particle vibration and playback time');
   result.passed.push('Progressive enlargement begins 1.8 m out', 'Listener size adjusts live without retiming particles', 'Listener size defaults and persistence');
   result.passed.push('Bounded smooth XYZ drift', 'Drift freezes while paused and vanishes at arrival', 'Frequency-dependent post-listener attenuation');
   result.passed.push('Non-LFE channels aim toward listener at zero spread', 'Base frequency heights are shared and increasing', 'Small vertical drift around frequency height', 'Adjustable horizontal angle limits', 'Paused spread updates existing particles', 'Live size and transparency scaling', 'Full transparency hides particles', 'Appearance preserves audio time and particle state', 'LFE radiates outward from listener feet', 'LFE covers all azimuths independently of spread');

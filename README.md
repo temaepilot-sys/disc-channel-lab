@@ -30,7 +30,7 @@ Bass glows red and orange; treble shines blue and violet. Light gathers with the
 
 *Channel energy across frequency bands, expressed as overlapping light at the listener.*
 
-This companion window follows DiscChannelLab playback and lets you compare Input, Post-mix and final stereo output. It includes camera controls, a distraction-free view and saved JSON settings, with an English UI.
+This companion window follows DiscChannelLab playback and lets you compare Input, Post-mix and final stereo output. Optional **Speaker beams** add soft spotlights with strong colored cores: each whole beam follows the current sound at once, without visual travel delay. It includes camera controls, a distraction-free view and saved JSON settings, with an English UI.
 
 ![Visualizer overview](docs/screenshots/visualizer.png)
 

@@ -129,6 +129,76 @@ function color(hz) {
   return colors[Math.floor(h) % 6].map(v => .12 + v * .88);
 }
 
+class SpeakerBeamMesh {
+  constructor() { this.vertices = new Float32Array(0); this.vertexCount = 0; this.items = []; }
+  configure(speakers, info) {
+    // Three soft, intersecting sheets approximate a thin elliptical cone.
+    // A narrow camera-facing ribbon adds the colored core at every viewpoint.
+    this.items = [];
+    speakers.forEach((speaker, channel) => {
+      if (speaker.code === 'LFE' || speaker.radius < .001) return;
+      const dx = -speaker.position[0] / speaker.radius, dz = -speaker.position[2] / speaker.radius;
+      info.centers.forEach((hz, band) => this.items.push({ speaker, channel, band,
+        x: speaker.position[0], z: speaker.position[2], dx, dz, sx: -dz, sz: dx,
+        height: frequencyHeight(clamp(Math.log(hz / 20) / Math.log(1000), 0, 1)), color: color(hz) }));
+    });
+    // 8 longitudinal cells, 3*4 halo cells + 2 core cells, two triangles per cell.
+    this.vertices = new Float32Array(this.items.length * 8 * 14 * 6 * 8);
+    this.vertexCount = 0;
+  }
+  build(scene, eye) {
+    this.vertexCount = 0;
+    if (!scene.speakerBeams || scene.beamStrength <= 0 || scene.particleOpacity <= 0) return;
+    const vertices = this.vertices;
+    for (const item of this.items) {
+      const k = item.channel * scene.info.bandCount + item.band;
+      const intensity = clamp(scene.bands[k] || 0, 0, 1);
+      if (intensity <= .005) continue;
+      // The whole beam responds to the CURRENT playback spectrum simultaneously.
+      // No travel clock or lookahead: this is the intentional zero-lag representation.
+      const power = intensity ** 1.2 * scene.beamStrength * scene.particleOpacity;
+      const { speaker, x, z, dx, dz, sx, sz, height, color: rgb } = item;
+      const ex = eye[0] - x * .5, ey = eye[1] - height, ez = eye[2] - z * .5;
+      let rx = -dz * ey, ry = dz * ex - dx * ez, rz = dx * ey;
+      const length = Math.hypot(rx, ry, rz);
+      if (length < .00001) { rx = sx; ry = 0; rz = sz; }
+      else { rx /= length; ry /= length; rz /= length; }
+      const angle = Math.min(scene.spreadDegrees, scene.info.dispersion[item.band] ?? 180, 35) * Math.PI / 180;
+      const tangent = Math.tan(angle);
+      const coreRadius = .02 + .028 * intensity;
+      // Use a small grid, without adding particles or allocating per-vertex objects.
+      for (let sheet = 0; sheet < 4; sheet++) {
+        const core = sheet === 3, across = core ? 2 : 4, amplitude = power * (core ? .30 : .025);
+        const cos = Math.cos(sheet * Math.PI / 3), sin = Math.sin(sheet * Math.PI / 3);
+        const write = (t, offset) => {
+          const distance = speaker.radius * t;
+          const px = x + dx * distance, pz = z + dz * distance;
+          const haloWidth = Math.min(1.35, .025 + distance * tangent);
+          const haloHeight = .015 + .065 * t; // Preserve the frequency-height reading.
+          const vx = px + (core ? rx * coreRadius : sx * haloWidth * cos) * offset;
+          const vy = height + (core ? ry * coreRadius : haloHeight * sin) * offset;
+          const vz = pz + (core ? rz * coreRadius : sz * haloWidth * cos) * offset;
+          const crossFade = core ? 1 - Math.abs(offset) : Math.max(0, 1 - offset * offset) ** 2;
+          const endFade = Math.min(1, .2 + t * 12, .5 + (1 - t) * 8);
+          const alpha = clamp(amplitude * crossFade * endFade * scene.listenerBrightnessAt(vx, vz), 0, 1);
+          const i = this.vertexCount++ * 8;
+          vertices[i] = vx; vertices[i + 1] = vy; vertices[i + 2] = vz;
+          vertices[i + 3] = rgb[0]; vertices[i + 4] = rgb[1]; vertices[i + 5] = rgb[2];
+          vertices[i + 6] = alpha; vertices[i + 7] = 1;
+        };
+        for (let along = 0; along < 8; along++) {
+          const t0 = along / 8, t1 = (along + 1) / 8;
+          for (let acrossIndex = 0; acrossIndex < across; acrossIndex++) {
+            const a = -1 + acrossIndex * 2 / across, b = -1 + (acrossIndex + 1) * 2 / across;
+            write(t0, a); write(t1, a); write(t1, b);
+            write(t0, a); write(t1, b); write(t0, b);
+          }
+        }
+      }
+    }
+  }
+}
+
 class SpaceRenderer {
   constructor(canvas) {
     this.canvas = canvas;
@@ -156,6 +226,7 @@ class SpaceRenderer {
     this.syncReference = 'listener';
     this.particleSpeed = 2;
     this.particleSize = 1; this.particleOpacity = 1; this.listenerSize = 1.5; this.listenerBrightness = 1.4;
+    this.speakerBeams = false; this.beamStrength = .8; this.beamMesh = new SpeakerBeamMesh();
     this.lines = []; this.speakers = []; this.bands = new Float32Array(0); this.budgets = [];
     this.camera = { yaw: .48, pitch: .56, distance: 12.8, target: [0, .8, 0] }; this.listenerView = false;
     this.setClip({ channels: ['FL', 'FR', 'FC', 'LFE', 'SL', 'SR'], bandCount: 16, centers: Array.from({ length: 16 }, (_, i) => 20 * 1000 ** ((i + .5) / 16)), dispersion: [] });
@@ -164,6 +235,7 @@ class SpaceRenderer {
   }
   clear() {
     this.count = 0; this.visibleCount = 0; this.budgets.fill(0); this.bands.fill(0);
+    this.beamMesh.vertexCount = 0;
   }
   setSyncReference(value) {
     const next = value === 'speaker' ? 'speaker' : 'listener';
@@ -181,6 +253,7 @@ class SpaceRenderer {
       const direction = norm(sub([0, 1.05, 0], position)), side = norm(cross(direction, [0, 1, 0])), up = norm(cross(side, direction));
       return { code, position, direction, side, up, label, azimuth: Math.atan2(-position[2], -position[0]), radius: Math.hypot(position[0], position[2]) };
     });
+    this.beamMesh.configure(this.speakers, info);
     this.buildScene();
   }
   line(a, b, c = [.2, .33, .43], alpha = .45) { this.lines.push(...a, ...c, alpha, 1, ...b, ...c, alpha, 1); }
@@ -405,6 +478,11 @@ class SpaceRenderer {
       for (let r = 0; r < 4; r++) { const radius = ((time * .8 + r * 1.5) % 6); this.circle([0, .025, 0], radius, [.85, .23, .08], level * .2 * (1 - radius / 7), 'floor', 90); }
       if (this.lines.length) { const rings = new Float32Array(this.lines); gl.bufferData(gl.ARRAY_BUFFER, rings, gl.DYNAMIC_DRAW); gl.drawArrays(gl.LINES, 0, rings.length / 8); }
     }
+    this.beamMesh.build(this, pose.eye);
+    if (this.beamMesh.vertexCount) {
+      gl.bufferData(gl.ARRAY_BUFFER, this.beamMesh.vertices.subarray(0, this.beamMesh.vertexCount * 8), gl.DYNAMIC_DRAW);
+      gl.drawArrays(gl.TRIANGLES, 0, this.beamMesh.vertexCount);
+    }
     this.visibleCount = 0;
     for (let p = 0; p < this.count; p++) {
       const i = p * PARTICLE_STRIDE, v = p * 8, a = this.data, age = a[i + 6] / a[i + 7];
@@ -538,6 +616,11 @@ $('listener-brightness').oninput = () => {
   renderer.listenerBrightness = clamp(Number($('listener-brightness').value), 1, 4);
   $('listener-brightness-value').textContent = `${renderer.listenerBrightness.toFixed(1)}×`;
 };
+$('speaker-beams').onchange = () => { renderer.speakerBeams = $('speaker-beams').checked; };
+$('beam-strength').oninput = () => {
+  renderer.beamStrength = clamp(Number($('beam-strength').value), 0, 2);
+  $('beam-strength-value').textContent = `${renderer.beamStrength.toFixed(1)}×`;
+};
 $('transparency').oninput = () => {
   const percent = clamp(Number($('transparency').value), 0, 100);
   renderer.particleOpacity = 1 - percent / 100;
@@ -573,6 +656,7 @@ function captureSettings() {
     version: 1, signal: $('analysis-mode').value, view: $('view').value, syncReference: $('sync-reference').value,
     spread: Number($('spread').value), particleSize: Number($('particle-size').value), particleSpeed: Number($('particle-speed').value),
     listenerSize: Number($('listener-size').value), listenerBrightness: Number($('listener-brightness').value), transparency: Number($('transparency').value), density: Number($('density').value),
+    speakerBeams: $('speaker-beams').checked, beamStrength: Number($('beam-strength').value),
     persistence: Number($('tail').value), demoVolume: Number($('volume').value),
     grid: $('grid').checked, labels: $('names').checked, lfeRipples: $('lfe').checked, hideUi: uiHidden,
     camera: renderer.camera || { yaw: .48, pitch: .56, distance: 12.8, target: [0, .8, 0] }
@@ -585,6 +669,8 @@ function applySettings(value) {
   $('particle-speed').value = value.particleSpeed ?? 2; $('particle-speed').oninput();
   $('listener-size').value = value.listenerSize ?? 1.5; $('listener-size').oninput();
   $('listener-brightness').value = value.listenerBrightness ?? 1.4; $('listener-brightness').oninput();
+  $('speaker-beams').checked = value.speakerBeams ?? false; $('speaker-beams').onchange();
+  $('beam-strength').value = value.beamStrength ?? .8; $('beam-strength').oninput();
   for (const [id, key] of [['spread', 'spread'], ['particle-size', 'particleSize'], ['transparency', 'transparency'],
     ['density', 'density'], ['tail', 'persistence'], ['volume', 'demoVolume']]) {
     $(id).value = value[key]; $(id).oninput();

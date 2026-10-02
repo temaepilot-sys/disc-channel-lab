@@ -4,6 +4,16 @@
 
 Space sketch is an experimental companion viewer for DiscChannelLab. It turns each channel’s frequency-band energy into colored particles, helping you explore how multichannel recordings fill a listening space. It also works as a place to simply watch music unfold.
 
+## See the light where the channels meet
+
+Multichannel recordings can bring sound from the front, wrap it around you from behind, and fill the space at your feet with bass. Space sketch lets you trace the channel layout and the movement of sound, then watch their frequency-band energy overlap at the listener. Explore the recording, or simply enjoy light gathering with the music and drifting like fireflies.
+
+![Frequency-colored particles glowing together at the listener](screenshots/listener-sound-focus.png)
+
+This screenshot uses **Camera: Overview / Sync at: Listener (sound) / Signal: Input channels**. Listener emphasis works with every camera preset. Raising **Listener brightness** brightens the center while dimming distant particles, bringing the overlapping energy into focus. **Listener size** adjusts the central particle size as well.
+
+Listener sync brings each particle's closest horizontal approach to the listener into approximate alignment with playback of its corresponding audio. The data being visualized is channel energy across frequency bands; color and particle spread make its changes tangible.
+
 ## Overview
 
 ![Space sketch: overview with multichannel particles](screenshots/visualizer.png)

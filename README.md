@@ -20,7 +20,17 @@ Japanese screenshots: [Main window](docs/screenshots/japanese.png) · [Channel m
 
 ## 3D visualizer — Space sketch
 
-A separate viewer turns the playing channels into frequency-colored particles around a listener. Watch a space fill with sound, or compare Input, Post-mix and final stereo output. It includes camera controls, a distraction-free view and saved JSON settings, with an English UI.
+**The sound you hear becomes light you can see.**
+
+Space sketch lets you follow which channels are active and the directions their sound flows from, through particles colored by frequency. With **Listener (sound)**, particles make their closest approach to the listener at approximately the moment the corresponding audio plays, bringing the channels' overlapping energy into focus.
+
+Bass glows red and orange; treble shines blue and violet. Light gathers with the music, trembles, and flows back into the surrounding space, like sound taking the form of fireflies. We want to open the black box of multichannel audio: hear its details, discover them with your eyes, and enjoy simply watching the music unfold.
+
+![Sound particles glowing together at the listener, with Listener sync and Input channels selected](docs/screenshots/listener-sound-focus.png)
+
+*Channel energy across frequency bands, expressed as overlapping light at the listener.*
+
+This companion window follows DiscChannelLab playback and lets you compare Input, Post-mix and final stereo output. It includes camera controls, a distraction-free view and saved JSON settings, with an English UI.
 
 ![Visualizer overview](docs/screenshots/visualizer.png)
 

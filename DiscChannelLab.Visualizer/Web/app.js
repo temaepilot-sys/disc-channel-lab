@@ -155,7 +155,7 @@ class SpaceRenderer {
     this.spreadDegrees = 20;
     this.syncReference = 'listener';
     this.particleSpeed = 2;
-    this.particleSize = 1; this.particleOpacity = 1;
+    this.particleSize = 1; this.particleOpacity = 1; this.listenerSize = 1.5;
     this.lines = []; this.speakers = []; this.bands = new Float32Array(0); this.budgets = [];
     this.camera = { yaw: .48, pitch: .56, distance: 12.8, target: [0, .8, 0] }; this.listenerView = false;
     this.setClip({ channels: ['FL', 'FR', 'FC', 'LFE', 'SL', 'SR'], bandCount: 16, centers: Array.from({ length: 16 }, (_, i) => 20 * 1000 ** ((i + .5) / 16)), dispersion: [] });
@@ -296,11 +296,11 @@ class SpaceRenderer {
     }
 
   }
-  listenerFocus(x, z) {
+  listenerFocus(x, z, outerRadius = .9) {
     if (this.syncReference !== 'listener') return 0;
     // Frequency is encoded by height, so emphasize the listener's horizontal column.
     // Full emphasis within 25 cm, smoothly fading to normal by 90 cm.
-    const t = clamp((Math.hypot(x, z) - .25) / .65, 0, 1);
+    const t = clamp((Math.hypot(x, z) - .25) / (outerRadius - .25), 0, 1);
     return 1 - t * t * (3 - 2 * t);
   }
   travelTime(channel, band, fan) {
@@ -409,7 +409,8 @@ class SpaceRenderer {
       this.vertices[v + 7] = a[i + 11] * (1 + age * .4) * this.particleSize;
       const focus = this.listenerFocus(a[i], a[i + 2]);
       this.vertices[v + 6] *= 1 + .5 * focus; // Brighter through opacity; retain each frequency's hue.
-      this.vertices[v + 7] *= 1 + .2 * focus;
+      // Start enlarging farther out than the light/vibration emphasis, without a visible step.
+      this.vertices[v + 7] *= 1 + (this.listenerSize - 1) * this.listenerFocus(a[i], a[i + 2], 1.8);
       if (this.vertices[v + 6] > .001) this.visibleCount++;
     }
     gl.uniform1f(this.pointLocation, 1); gl.bufferData(gl.ARRAY_BUFFER, this.vertices.subarray(0, this.count * 8), gl.DYNAMIC_DRAW); gl.drawArrays(gl.POINTS, 0, this.count);
@@ -497,7 +498,10 @@ $('timeline').oninput = () => { draggingTimeline = true; $('time').textContent =
 $('timeline').onchange = () => { draggingTimeline = false; seek(Number($('timeline').value)).catch(e => error(e.message)); };
 $('view').onchange = () => renderer.view($('view').value);
 $('reset-view').onclick = () => { $('view').value = 'orbit'; renderer.view('orbit'); };
-$('sync-reference').onchange = () => renderer.setSyncReference($('sync-reference').value);
+$('sync-reference').onchange = () => {
+  renderer.setSyncReference($('sync-reference').value);
+  $('listener-size').disabled = $('sync-reference').value !== 'listener';
+};
 $('particle-speed').oninput = () => {
   const speed = clamp(Number($('particle-speed').value), .5, 4);
   $('particle-speed-value').textContent = `${speed.toFixed(1)}×`;
@@ -514,6 +518,10 @@ $('spread').oninput = () => {
 $('particle-size').oninput = () => {
   renderer.particleSize = clamp(Number($('particle-size').value), .3, 3);
   $('particle-size-value').textContent = `${renderer.particleSize.toFixed(1)}×`;
+};
+$('listener-size').oninput = () => {
+  renderer.listenerSize = clamp(Number($('listener-size').value), 1, 3);
+  $('listener-size-value').textContent = `${renderer.listenerSize.toFixed(1)}×`;
 };
 $('transparency').oninput = () => {
   const percent = clamp(Number($('transparency').value), 0, 100);
@@ -549,7 +557,7 @@ function captureSettings() {
   return {
     version: 1, signal: $('analysis-mode').value, view: $('view').value, syncReference: $('sync-reference').value,
     spread: Number($('spread').value), particleSize: Number($('particle-size').value), particleSpeed: Number($('particle-speed').value),
-    transparency: Number($('transparency').value), density: Number($('density').value),
+    listenerSize: Number($('listener-size').value), transparency: Number($('transparency').value), density: Number($('density').value),
     persistence: Number($('tail').value), demoVolume: Number($('volume').value),
     grid: $('grid').checked, labels: $('names').checked, lfeRipples: $('lfe').checked, hideUi: uiHidden,
     camera: renderer.camera || { yaw: .48, pitch: .56, distance: 12.8, target: [0, .8, 0] }
@@ -560,6 +568,7 @@ function applySettings(value) {
   $('sync-reference').value = value.syncReference === 'speaker' ? 'speaker' : 'listener';
   $('sync-reference').onchange();
   $('particle-speed').value = value.particleSpeed ?? 2; $('particle-speed').oninput();
+  $('listener-size').value = value.listenerSize ?? 1.5; $('listener-size').oninput();
   for (const [id, key] of [['spread', 'spread'], ['particle-size', 'particleSize'], ['transparency', 'transparency'],
     ['density', 'density'], ['tail', 'persistence'], ['volume', 'demoVolume']]) {
     $(id).value = value[key]; $(id).oninput();

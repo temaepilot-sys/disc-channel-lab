@@ -383,7 +383,8 @@ function tick(seconds) { for (let i = 0; i < Math.ceil(seconds * 60); i++) { now
   renderer.draw(emissionClock);
   const speakerAlpha = renderer.vertices[6], speakerSize = renderer.vertices[7];
   renderer.syncReference = 'listener'; renderer.aimParticle(0); renderer.draw(emissionClock);
-  assert(Math.abs(renderer.vertices[6] / speakerAlpha - 1.5) < 1e-5, 'Listener center is 50% brighter');
+  const centerBrightness = renderer.vertices[6] / speakerAlpha;
+  assert(centerBrightness > 1.398 && centerBrightness <= 1.4, 'Listener center is about 40% brighter with small vibration');
   assert(Math.abs(renderer.vertices[7] / speakerSize - 1.5) < 1e-5, 'Listener center is 50% larger by default');
   assert.deepEqual([a[3], a[5], a[6], a[7]], timing, 'Highlight and vibration do not change velocity, age or lifetime');
   assert.equal(renderer.count, 1, 'No stationary particles are injected');
@@ -391,10 +392,26 @@ function tick(seconds) { for (let i = 0; i < Math.ceil(seconds * 60); i++) { now
   for (const multiplier of [1, 1.2, 2.4, 3]) {
     adjust('listener-size', multiplier); renderer.draw(emissionClock);
     assert(Math.abs(renderer.vertices[7] / speakerSize - multiplier) < 1e-5, 'Listener size slider immediately changes central size');
-    assert(Math.abs(renderer.vertices[6] / speakerAlpha - 1.5) < 1e-5, 'Size slider does not alter brightness');
+    assert(Math.abs(renderer.vertices[6] / speakerAlpha - centerBrightness) < 1e-5, 'Size slider does not alter brightness');
   }
   assert.deepEqual(renderer.data.slice(0,stride), particleBeforeSize, 'Sizing does not rebuild, move or retime particles');
   adjust('listener-size', 1.5);
+  for (const multiplier of [1, 1.4, 1.8, 2]) {
+    adjust('listener-brightness', multiplier); renderer.draw(emissionClock);
+    assert(Math.abs(renderer.vertices[6] / speakerAlpha - renderer.listenerBrightnessAt(a[0], a[2])) < 1e-5, 'Brightness slider changes rendered alpha while paused');
+    assert(Math.abs(renderer.vertices[7] / speakerSize - 1.5) < 1e-5, 'Brightness leaves size unchanged');
+    assert.equal(renderer.listenerBrightnessAt(0,0), multiplier);
+    for (const radius of [.15, .3, .45, .6, 1]) {
+      const expected = 1 + (multiplier - 1) * Math.max(0, 1 - radius * radius / .36);
+      assert(Math.abs(renderer.listenerBrightnessAt(radius,0) - expected) < 1e-12, 'Parabolic brightness decreases toward 60 cm');
+      assert.equal(renderer.listenerBrightnessAt(-radius,0), renderer.listenerBrightnessAt(0,radius), 'Brightness is symmetric around listener');
+    }
+    renderer.syncReference = 'speaker';
+    assert.equal(renderer.listenerBrightnessAt(0,0), 1, 'Speaker sync ignores central brightness');
+    renderer.syncReference = 'listener';
+  }
+  assert.deepEqual(renderer.data.slice(0,stride), particleBeforeSize, 'Brightness does not change particles or timing');
+  adjust('listener-brightness', 1.4);
   const approach = [1.8, 1.5, 1, .6, .25, 0].map(r => 1 + .5 * renderer.listenerFocus(r, 0, 1.8));
   assert.equal(approach[0], 1); assert.equal(approach.at(-1), 1.5);
   for (let i = 1; i < approach.length; i++) assert(approach[i] >= approach[i-1], 'Particles grow progressively toward the listener');
@@ -420,9 +437,11 @@ function tick(seconds) { for (let i = 0; i < Math.ceil(seconds * 60); i++) { now
   adjust('transparency', 0);
   assert.equal(sandbox.lab.state.time, emissionClock, 'Highlight never seeks or delays audio');
   element('sync-reference').value = 'listener'; element('sync-reference').onchange();
-  adjust('particle-speed', 3.2); adjust('listener-size', 2.4); await element('save-settings').onclick();
+  adjust('particle-speed', 3.2); adjust('listener-size', 2.4); adjust('listener-brightness', 1.8); await element('save-settings').onclick();
   element('sync-reference').value = 'speaker'; element('sync-reference').onchange(); adjust('particle-speed', 1);
+  adjust('listener-brightness', 1);
   await element('load-settings').onclick();
+  assert.equal(renderer.listenerBrightness, 1.8, 'Listener brightness persists with saved settings');
   assert.equal(renderer.syncReference, 'listener'); assert.equal(renderer.particleSpeed, 3.2); assert.equal(renderer.listenerSize, 2.4, 'Listener size persists with saved settings');
   const result = { mode: 'Simulated APIs; GPU/audio-device validation still required', passed: ['Demo packet parsing', 'Explicit channels', 'Audio output clock compensation', 'Particles generated', 'Pause freezes time and particles', 'Seek clears old particles', 'Resume', 'All six camera matrices finite', 'Particle cap', 'Stop reset', 'Natural end'], particlesAt8Seconds: running.particles, drawCalls };
   result.passed.push('Shared shader uniform precision matches', 'Live mode produces no duplicate audio', 'Output mode has two channels', 'Muted Post / visible Input', 'Live pause and seek', 'Disconnected player stops', 'Return to demo mode');
@@ -432,6 +451,7 @@ function tick(seconds) { for (let i = 0; i < Math.ceil(seconds * 60); i++) { now
   result.passed.push('Legacy settings default to listener sync and 2x speed', 'Particles begin at speakers using future spectra', 'Bass and treble arrive at the source timestamp', 'Speed 0.5x through 4x preserves arrival timing', 'Missing/stale forecast rejected', 'Mixer forecast revisions clear old trails', 'Sync reference and speed settings round-trip', 'Speaker sync keeps source-timed emission');
   result.passed.push('Listener-only brightness and adjustable size emphasis', 'Smooth local falloff without new stationary particles', 'Listener vibration remains bounded and freezes on pause', 'Emphasis preserves timing and transparency');
   result.passed.push('Listener preset looks toward the center from behind', 'Central bass, treble and LFE fit the listener view');
+  result.passed.push('Parabolic brightness limited to central 60 cm', 'Brightness slider updates paused particles without size or timing changes', 'Brightness setting persists');
   result.passed.push('Progressive enlargement begins 1.8 m out', 'Listener size adjusts live without retiming particles', 'Listener size defaults and persistence');
   result.passed.push('Bounded smooth XYZ drift', 'Drift freezes while paused and vanishes at arrival', 'Frequency-dependent post-listener attenuation');
   result.passed.push('Non-LFE channels aim toward listener at zero spread', 'Base frequency heights are shared and increasing', 'Small vertical drift around frequency height', 'Adjustable horizontal angle limits', 'Paused spread updates existing particles', 'Live size and transparency scaling', 'Full transparency hides particles', 'Appearance preserves audio time and particle state', 'LFE radiates outward from listener feet', 'LFE covers all azimuths independently of spread');

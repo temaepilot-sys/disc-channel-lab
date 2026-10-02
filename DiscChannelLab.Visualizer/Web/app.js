@@ -155,7 +155,7 @@ class SpaceRenderer {
     this.spreadDegrees = 20;
     this.syncReference = 'listener';
     this.particleSpeed = 2;
-    this.particleSize = 1; this.particleOpacity = 1; this.listenerSize = 1.5;
+    this.particleSize = 1; this.particleOpacity = 1; this.listenerSize = 1.5; this.listenerBrightness = 1.4;
     this.lines = []; this.speakers = []; this.bands = new Float32Array(0); this.budgets = [];
     this.camera = { yaw: .48, pitch: .56, distance: 12.8, target: [0, .8, 0] }; this.listenerView = false;
     this.setClip({ channels: ['FL', 'FR', 'FC', 'LFE', 'SL', 'SR'], bandCount: 16, centers: Array.from({ length: 16 }, (_, i) => 20 * 1000 ** ((i + .5) / 16)), dispersion: [] });
@@ -305,6 +305,13 @@ class SpaceRenderer {
     const t = clamp((Math.hypot(x, z) - .25) / (outerRadius - .25), 0, 1);
     return 1 - t * t * (3 - 2 * t);
   }
+  listenerBrightnessAt(x, z) {
+    if (this.syncReference !== 'listener') return 1;
+    // Visual opacity emphasis, not acoustic energy. Preserve frequency-encoded height.
+    // A modest parabola peaks at the listener and reaches normal brightness at 60 cm.
+    const focus = Math.max(0, 1 - (x * x + z * z) / (.6 * .6));
+    return 1 + (this.listenerBrightness - 1) * focus;
+  }
   travelTime(channel, band, fan) {
     const speaker = this.speakers[channel];
     if (speaker.code === 'LFE') return 0;
@@ -409,8 +416,7 @@ class SpaceRenderer {
       const pastDistance = Math.max(0, a[i + 6] - travel) * speed;
       this.vertices[v + 6] *= Math.exp(-pastDistance * (.015 + .12 * a[i + 13] ** 1.4));
       this.vertices[v + 7] = a[i + 11] * (1 + age * .4) * this.particleSize;
-      const focus = this.listenerFocus(a[i], a[i + 2]);
-      this.vertices[v + 6] *= 1 + .5 * focus; // Brighter through opacity; retain each frequency's hue.
+      this.vertices[v + 6] *= this.listenerBrightnessAt(a[i], a[i + 2]); // Brighter through opacity; retain each frequency's hue.
       // Start enlarging farther out than the light/vibration emphasis, without a visible step.
       this.vertices[v + 7] *= 1 + (this.listenerSize - 1) * this.listenerFocus(a[i], a[i + 2], 1.8);
       if (this.vertices[v + 6] > .001) this.visibleCount++;
@@ -525,6 +531,10 @@ $('listener-size').oninput = () => {
   renderer.listenerSize = clamp(Number($('listener-size').value), 1, 3);
   $('listener-size-value').textContent = `${renderer.listenerSize.toFixed(1)}×`;
 };
+$('listener-brightness').oninput = () => {
+  renderer.listenerBrightness = clamp(Number($('listener-brightness').value), 1, 2);
+  $('listener-brightness-value').textContent = `${renderer.listenerBrightness.toFixed(1)}×`;
+};
 $('transparency').oninput = () => {
   const percent = clamp(Number($('transparency').value), 0, 100);
   renderer.particleOpacity = 1 - percent / 100;
@@ -559,7 +569,7 @@ function captureSettings() {
   return {
     version: 1, signal: $('analysis-mode').value, view: $('view').value, syncReference: $('sync-reference').value,
     spread: Number($('spread').value), particleSize: Number($('particle-size').value), particleSpeed: Number($('particle-speed').value),
-    listenerSize: Number($('listener-size').value), transparency: Number($('transparency').value), density: Number($('density').value),
+    listenerSize: Number($('listener-size').value), listenerBrightness: Number($('listener-brightness').value), transparency: Number($('transparency').value), density: Number($('density').value),
     persistence: Number($('tail').value), demoVolume: Number($('volume').value),
     grid: $('grid').checked, labels: $('names').checked, lfeRipples: $('lfe').checked, hideUi: uiHidden,
     camera: renderer.camera || { yaw: .48, pitch: .56, distance: 12.8, target: [0, .8, 0] }
@@ -571,6 +581,7 @@ function applySettings(value) {
   $('sync-reference').onchange();
   $('particle-speed').value = value.particleSpeed ?? 2; $('particle-speed').oninput();
   $('listener-size').value = value.listenerSize ?? 1.5; $('listener-size').oninput();
+  $('listener-brightness').value = value.listenerBrightness ?? 1.4; $('listener-brightness').oninput();
   for (const [id, key] of [['spread', 'spread'], ['particle-size', 'particleSize'], ['transparency', 'transparency'],
     ['density', 'density'], ['tail', 'persistence'], ['volume', 'demoVolume']]) {
     $(id).value = value[key]; $(id).oninput();

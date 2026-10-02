@@ -307,7 +307,7 @@ function tick(seconds) { for (let i = 0; i < Math.ceil(seconds * 60); i++) { now
   for (const p of bass) assert(Math.hypot(renderer.data[p * stride], renderer.data[p * stride + 2]) > 3, 'No particle is injected at the listener');
   const p = bass[0], i = p * stride, snapshot = renderer.data.slice(i, i + stride);
   renderer.data[i + 6] = bassTravel; renderer.aimParticle(p);
-  assert(Math.hypot(renderer.data[i], renderer.data[i + 2]) < 1e-5, 'Burst reaches listener at its source timestamp');
+  assert(Math.hypot(renderer.data[i], renderer.data[i + 2]) <= .026, 'Burst reaches listener with bounded decorative vibration');
   renderer.data.set(snapshot, i);
   for (const speed of [.5, 1, 2, 4]) {
     adjust('particle-speed', speed);
@@ -319,7 +319,9 @@ function tick(seconds) { for (let i = 0; i < Math.ceil(seconds * 60); i++) { now
       const index = (renderer.count - 1) * stride;
       assert(Math.hypot(renderer.data[index], renderer.data[index + 2]) > 3.4, 'Every new particle starts at a speaker');
       renderer.data[index + 6] = travel; renderer.aimParticle(renderer.count - 1);
-      assert(Math.hypot(renderer.data[index], renderer.data[index + 2]) < 1e-5, 'Speed and frequency do not change arrival timestamp');
+      assert(Math.hypot(renderer.data[index], renderer.data[index + 2]) <= .026, 'Speed and frequency preserve arrival within the small vibration radius');
+      const origin = renderer.speakers[0].position;
+      assert(Math.hypot(origin[0] + renderer.data[index+3] * travel, origin[2] + renderer.data[index+5] * travel) < 1e-5, 'Nominal trajectory still reaches the listener at the scheduled time');
     }
   }
   adjust('particle-speed', 2);
@@ -362,6 +364,36 @@ function tick(seconds) { for (let i = 0; i < Math.ceil(seconds * 60); i++) { now
     assert(Math.abs(ratios[p] - attenuation(a[i+13])) < 1e-5);
   }
   assert(ratios[0] > ratios[1], 'Treble fades faster beyond the listener');
+  // Compare identical moving particles in both modes, without changing their age or emission.
+  renderer.clear(); renderer.emit(0, 8, .8, 0);
+  a[17] = .73; a[6] = renderer.travelTime(0, 8, 0); renderer.aimParticle(0);
+  const timing = [a[3], a[5], a[6], a[7]], emissionClock = sandbox.lab.state.time;
+  renderer.draw(emissionClock);
+  const speakerAlpha = renderer.vertices[6], speakerSize = renderer.vertices[7];
+  renderer.syncReference = 'listener'; renderer.aimParticle(0); renderer.draw(emissionClock);
+  assert(Math.abs(renderer.vertices[6] / speakerAlpha - 1.5) < 1e-5, 'Listener center is 50% brighter');
+  assert(Math.abs(renderer.vertices[7] / speakerSize - 1.2) < 1e-5, 'Listener center is 20% larger');
+  assert.deepEqual([a[3], a[5], a[6], a[7]], timing, 'Highlight and vibration do not change velocity, age or lifetime');
+  assert.equal(renderer.count, 1, 'No stationary particles are injected');
+  const center = [a[0], a[1], a[2]], baseHeight = .18 + a[13] * 2.42;
+  assert(Math.hypot(a[0], a[1] - baseHeight, a[2]) > .001, 'Vibration remains at the listener instead of locking to the center');
+  assert(Math.hypot(a[0], a[2]) < .026);
+  renderer.aimParticle(0); assert.deepEqual([a[0], a[1], a[2]], center, 'Paused vibration stays still');
+  a[6] += .03; renderer.aimParticle(0);
+  const speaker = renderer.speakers[0].position;
+  const laterDrift = [a[0] - speaker[0] - a[3]*a[6], a[1] - baseHeight, a[2] - speaker[2] - a[5]*a[6]];
+  assert(laterDrift.some((v, axis) => Math.abs(v - (axis === 1 ? center[1] - baseHeight : center[axis])) > .001), 'Local vibration changes smoothly with playback age');
+  assert.equal(renderer.listenerFocus(0,0), 1); assert.equal(renderer.listenerFocus(.25,0), 1);
+  assert(renderer.listenerFocus(.4,0) > renderer.listenerFocus(.7,0));
+  assert.equal(renderer.listenerFocus(.9,0), 0); assert.equal(renderer.listenerFocus(3.5,0), 0);
+  a[6] = 0; renderer.aimParticle(0); renderer.draw(emissionClock);
+  const farAlpha = renderer.vertices[6], farSize = renderer.vertices[7];
+  renderer.syncReference = 'speaker'; renderer.draw(emissionClock);
+  assert.equal(renderer.vertices[6], farAlpha); assert.equal(renderer.vertices[7], farSize, 'Source particles keep the same size in both modes');
+  renderer.syncReference = 'listener'; a[6] = renderer.travelTime(0,8,0); renderer.aimParticle(0);
+  adjust('transparency', 100); renderer.draw(emissionClock); assert.equal(renderer.vertices[6], 0, 'Highlight respects full transparency');
+  adjust('transparency', 0);
+  assert.equal(sandbox.lab.state.time, emissionClock, 'Highlight never seeks or delays audio');
   element('sync-reference').value = 'listener'; element('sync-reference').onchange();
   adjust('particle-speed', 3.2); await element('save-settings').onclick();
   element('sync-reference').value = 'speaker'; element('sync-reference').onchange(); adjust('particle-speed', 1);
@@ -373,6 +405,7 @@ function tick(seconds) { for (let i = 0; i < Math.ceil(seconds * 60); i++) { now
   result.passed.push('Settings restored on startup without autoplay', 'Save/load all controls and exact camera', 'Settings requests retain authentication', 'Settings I/O errors preserve current state');
   result.passed.push('Hide/show UI and saved visibility leave playback unchanged');
   result.passed.push('Legacy settings default to listener sync and 2x speed', 'Particles begin at speakers using future spectra', 'Bass and treble arrive at the source timestamp', 'Speed 0.5x through 4x preserves arrival timing', 'Missing/stale forecast rejected', 'Mixer forecast revisions clear old trails', 'Sync reference and speed settings round-trip', 'Speaker sync keeps source-timed emission');
+  result.passed.push('Listener-only 50% brightness and 20% size emphasis', 'Smooth local falloff without new stationary particles', 'Listener vibration remains bounded and freezes on pause', 'Emphasis preserves timing and transparency');
   result.passed.push('Bounded smooth XYZ drift', 'Drift freezes while paused and vanishes at arrival', 'Frequency-dependent post-listener attenuation');
   result.passed.push('Non-LFE channels aim toward listener at zero spread', 'Base frequency heights are shared and increasing', 'Small vertical drift around frequency height', 'Adjustable horizontal angle limits', 'Paused spread updates existing particles', 'Live size and transparency scaling', 'Full transparency hides particles', 'Appearance preserves audio time and particle state', 'LFE radiates outward from listener feet', 'LFE covers all azimuths independently of spread');
   fs.writeFileSync(path.join(output, 'visualizer-frontend-results.json'), JSON.stringify(result, null, 2));

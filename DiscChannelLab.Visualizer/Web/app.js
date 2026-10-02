@@ -285,6 +285,23 @@ class SpaceRenderer {
     a[i + 1] += amplitude * Math.sin(age * .91 + seed * 1.37);
     a[i + 2] += amplitude * Math.sin(age * 1.31 + seed * 1.73);
 
+    // A small, smooth vibration remains near the listener in Listener mode. It is only
+    // a positional decoration: the emission/travel clock and particle velocity stay unchanged.
+    const focus = this.listenerFocus(speaker.position[0] + a[i + 3] * age, speaker.position[2] + a[i + 5] * age);
+    const vibration = Math.min(.018, .07 - amplitude) * focus * Math.min(1, age * 2);
+    if (vibration > 0) {
+      a[i] += vibration * Math.sin(age * 7.3 + seed);
+      a[i + 1] += vibration * Math.sin(age * 9.1 + seed * 1.37);
+      a[i + 2] += vibration * Math.sin(age * 8.3 + seed * 1.73);
+    }
+
+  }
+  listenerFocus(x, z) {
+    if (this.syncReference !== 'listener') return 0;
+    // Frequency is encoded by height, so emphasize the listener's horizontal column.
+    // Full emphasis within 25 cm, smoothly fading to normal by 90 cm.
+    const t = clamp((Math.hypot(x, z) - .25) / .65, 0, 1);
+    return 1 - t * t * (3 - 2 * t);
   }
   travelTime(channel, band, fan) {
     const speaker = this.speakers[channel];
@@ -390,6 +407,9 @@ class SpaceRenderer {
       const pastDistance = Math.max(0, a[i + 6] - travel) * speed;
       this.vertices[v + 6] *= Math.exp(-pastDistance * (.015 + .12 * a[i + 13] ** 1.4));
       this.vertices[v + 7] = a[i + 11] * (1 + age * .4) * this.particleSize;
+      const focus = this.listenerFocus(a[i], a[i + 2]);
+      this.vertices[v + 6] *= 1 + .5 * focus; // Brighter through opacity; retain each frequency's hue.
+      this.vertices[v + 7] *= 1 + .2 * focus;
       if (this.vertices[v + 6] > .001) this.visibleCount++;
     }
     gl.uniform1f(this.pointLocation, 1); gl.bufferData(gl.ARRAY_BUFFER, this.vertices.subarray(0, this.count * 8), gl.DYNAMIC_DRAW); gl.drawArrays(gl.POINTS, 0, this.count);

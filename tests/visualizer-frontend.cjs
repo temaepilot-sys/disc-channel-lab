@@ -396,15 +396,33 @@ function tick(seconds) { for (let i = 0; i < Math.ceil(seconds * 60); i++) { now
   }
   assert.deepEqual(renderer.data.slice(0,stride), particleBeforeSize, 'Sizing does not rebuild, move or retime particles');
   adjust('listener-size', 1.5);
-  for (const multiplier of [1, 1.4, 1.8, 2]) {
+  const frequencyColor = Array.from(renderer.vertices.slice(3,6));
+  let previousCenter = 0, previousSurrounding = Infinity;
+  for (const multiplier of [1, 1.4, 2, 3, 4]) {
     adjust('listener-brightness', multiplier); renderer.draw(emissionClock);
-    assert(Math.abs(renderer.vertices[6] / speakerAlpha - renderer.listenerBrightnessAt(a[0], a[2])) < 1e-5, 'Brightness slider changes rendered alpha while paused');
+    assert(Math.abs(renderer.vertices[6] - Math.min(1, speakerAlpha * renderer.listenerBrightnessAt(a[0], a[2]))) < 1e-5, 'Brightness slider changes rendered alpha while paused');
+    assert(renderer.vertices[6] >= 0 && renderer.vertices[6] <= 1, 'Strong emphasis stays within the valid blending range');
+    assert.deepEqual(Array.from(renderer.vertices.slice(3,6)), frequencyColor, 'Strong emphasis retains frequency colors');
+    const central = renderer.listenerBrightnessAt(0,0), surrounding = renderer.listenerBrightnessAt(3.5,0);
+    assert(central > previousCenter && surrounding < previousSurrounding, 'Increasing brightness brightens center and dims surroundings');
+    previousCenter = central; previousSurrounding = surrounding;
+    if (multiplier === 1) assert.equal(surrounding, 1, 'At 1x the whole scene uses normal brightness');
+    if (multiplier === 4) {
+      assert(surrounding > .35 && surrounding < .37, 'Maximum emphasis retains about 36% distant opacity');
+      assert.equal(renderer.vertices[6], 1, 'Bright central particle saturates cleanly without exceeding alpha 1');
+    }
     assert(Math.abs(renderer.vertices[7] / speakerSize - 1.5) < 1e-5, 'Brightness leaves size unchanged');
     assert.equal(renderer.listenerBrightnessAt(0,0), multiplier);
-    for (const radius of [.15, .3, .45, .6, 1]) {
-      const expected = 1 + (multiplier - 1) * Math.max(0, 1 - radius * radius / .36);
-      assert(Math.abs(renderer.listenerBrightnessAt(radius,0) - expected) < 1e-12, 'Parabolic brightness decreases toward 60 cm');
+    // Quarter- and half-radius samples distinguish a parabola from a linear falloff.
+    assert(Math.abs(renderer.listenerBrightnessAt(.15,0) - (central * .9375 + surrounding * .0625)) < 1e-12);
+    assert(Math.abs(renderer.listenerBrightnessAt(.3,0) - (central * .75 + surrounding * .25)) < 1e-12);
+    let previousRadial = central;
+    for (const radius of [.15, .3, .45, .6, 1, 3.5]) {
+      const value = renderer.listenerBrightnessAt(radius,0);
+      assert(value <= previousRadial, 'Brightness decreases with distance');
+      if (radius >= .6) assert.equal(value, surrounding, 'Distant brightness stays at its dimmed floor');
       assert.equal(renderer.listenerBrightnessAt(-radius,0), renderer.listenerBrightnessAt(0,radius), 'Brightness is symmetric around listener');
+      previousRadial = value;
     }
     renderer.syncReference = 'speaker';
     assert.equal(renderer.listenerBrightnessAt(0,0), 1, 'Speaker sync ignores central brightness');
@@ -429,19 +447,21 @@ function tick(seconds) { for (let i = 0; i < Math.ceil(seconds * 60); i++) { now
   assert(renderer.listenerFocus(.4,0) > renderer.listenerFocus(.7,0));
   assert.equal(renderer.listenerFocus(.9,0), 0); assert.equal(renderer.listenerFocus(3.5,0), 0);
   a[6] = 0; renderer.aimParticle(0); renderer.draw(emissionClock);
-  const farAlpha = renderer.vertices[6], farSize = renderer.vertices[7];
+  const farAlpha = renderer.vertices[6], farSize = renderer.vertices[7], farFactor = renderer.listenerBrightnessAt(a[0],a[2]);
   renderer.syncReference = 'speaker'; renderer.draw(emissionClock);
-  assert.equal(renderer.vertices[6], farAlpha); assert.equal(renderer.vertices[7], farSize, 'Source particles keep the same size in both modes');
+  assert(farAlpha < renderer.vertices[6], 'Listener sync dims far particles relative to speaker sync');
+  assert(Math.abs(farAlpha / renderer.vertices[6] - farFactor) < 1e-5, 'Distant alpha includes the contrast setting only in Listener sync');
+  assert.equal(renderer.vertices[7], farSize, 'Source particles keep the same size in both modes');
   renderer.syncReference = 'listener'; a[6] = renderer.travelTime(0,8,0); renderer.aimParticle(0);
   adjust('transparency', 100); renderer.draw(emissionClock); assert.equal(renderer.vertices[6], 0, 'Highlight respects full transparency');
   adjust('transparency', 0);
   assert.equal(sandbox.lab.state.time, emissionClock, 'Highlight never seeks or delays audio');
   element('sync-reference').value = 'listener'; element('sync-reference').onchange();
-  adjust('particle-speed', 3.2); adjust('listener-size', 2.4); adjust('listener-brightness', 1.8); await element('save-settings').onclick();
+  adjust('particle-speed', 3.2); adjust('listener-size', 2.4); adjust('listener-brightness', 4); await element('save-settings').onclick();
   element('sync-reference').value = 'speaker'; element('sync-reference').onchange(); adjust('particle-speed', 1);
   adjust('listener-brightness', 1);
   await element('load-settings').onclick();
-  assert.equal(renderer.listenerBrightness, 1.8, 'Listener brightness persists with saved settings');
+  assert.equal(renderer.listenerBrightness, 4, 'Listener brightness persists with saved settings');
   assert.equal(renderer.syncReference, 'listener'); assert.equal(renderer.particleSpeed, 3.2); assert.equal(renderer.listenerSize, 2.4, 'Listener size persists with saved settings');
   const result = { mode: 'Simulated APIs; GPU/audio-device validation still required', passed: ['Demo packet parsing', 'Explicit channels', 'Audio output clock compensation', 'Particles generated', 'Pause freezes time and particles', 'Seek clears old particles', 'Resume', 'All six camera matrices finite', 'Particle cap', 'Stop reset', 'Natural end'], particlesAt8Seconds: running.particles, drawCalls };
   result.passed.push('Shared shader uniform precision matches', 'Live mode produces no duplicate audio', 'Output mode has two channels', 'Muted Post / visible Input', 'Live pause and seek', 'Disconnected player stops', 'Return to demo mode');
@@ -451,7 +471,7 @@ function tick(seconds) { for (let i = 0; i < Math.ceil(seconds * 60); i++) { now
   result.passed.push('Legacy settings default to listener sync and 2x speed', 'Particles begin at speakers using future spectra', 'Bass and treble arrive at the source timestamp', 'Speed 0.5x through 4x preserves arrival timing', 'Missing/stale forecast rejected', 'Mixer forecast revisions clear old trails', 'Sync reference and speed settings round-trip', 'Speaker sync keeps source-timed emission');
   result.passed.push('Listener-only brightness and adjustable size emphasis', 'Smooth local falloff without new stationary particles', 'Listener vibration remains bounded and freezes on pause', 'Emphasis preserves timing and transparency');
   result.passed.push('Listener preset looks toward the center from behind', 'Central bass, treble and LFE fit the listener view');
-  result.passed.push('Parabolic brightness limited to central 60 cm', 'Brightness slider updates paused particles without size or timing changes', 'Brightness setting persists');
+  result.passed.push('Parabolic brightness limited to central 60 cm', 'Brightness slider updates paused particles without size or timing changes', 'Brightness setting persists', 'Higher brightness dims distant particles', 'Strong emphasis preserves hue and valid alpha');
   result.passed.push('Progressive enlargement begins 1.8 m out', 'Listener size adjusts live without retiming particles', 'Listener size defaults and persistence');
   result.passed.push('Bounded smooth XYZ drift', 'Drift freezes while paused and vanishes at arrival', 'Frequency-dependent post-listener attenuation');
   result.passed.push('Non-LFE channels aim toward listener at zero spread', 'Base frequency heights are shared and increasing', 'Small vertical drift around frequency height', 'Adjustable horizontal angle limits', 'Paused spread updates existing particles', 'Live size and transparency scaling', 'Full transparency hides particles', 'Appearance preserves audio time and particle state', 'LFE radiates outward from listener feet', 'LFE covers all azimuths independently of spread');

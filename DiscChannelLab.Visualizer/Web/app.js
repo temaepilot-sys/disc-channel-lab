@@ -308,9 +308,11 @@ class SpaceRenderer {
   listenerBrightnessAt(x, z) {
     if (this.syncReference !== 'listener') return 1;
     // Visual opacity emphasis, not acoustic energy. Preserve frequency-encoded height.
-    // A modest parabola peaks at the listener and reaches normal brightness at 60 cm.
+    // Raising the center also dims distant particles. Keep some light outside the
+    // central 60 cm so the speaker-to-listener streams remain visible.
+    const surrounding = 1 / (1 + .6 * (this.listenerBrightness - 1));
     const focus = Math.max(0, 1 - (x * x + z * z) / (.6 * .6));
-    return 1 + (this.listenerBrightness - 1) * focus;
+    return surrounding + (this.listenerBrightness - surrounding) * focus;
   }
   travelTime(channel, band, fan) {
     const speaker = this.speakers[channel];
@@ -416,7 +418,8 @@ class SpaceRenderer {
       const pastDistance = Math.max(0, a[i + 6] - travel) * speed;
       this.vertices[v + 6] *= Math.exp(-pastDistance * (.015 + .12 * a[i + 13] ** 1.4));
       this.vertices[v + 7] = a[i + 11] * (1 + age * .4) * this.particleSize;
-      this.vertices[v + 6] *= this.listenerBrightnessAt(a[i], a[i + 2]); // Brighter through opacity; retain each frequency's hue.
+      // Keep opacity in the blending range even at maximum central emphasis.
+      this.vertices[v + 6] = clamp(this.vertices[v + 6] * this.listenerBrightnessAt(a[i], a[i + 2]), 0, 1);
       // Start enlarging farther out than the light/vibration emphasis, without a visible step.
       this.vertices[v + 7] *= 1 + (this.listenerSize - 1) * this.listenerFocus(a[i], a[i + 2], 1.8);
       if (this.vertices[v + 6] > .001) this.visibleCount++;
@@ -532,7 +535,7 @@ $('listener-size').oninput = () => {
   $('listener-size-value').textContent = `${renderer.listenerSize.toFixed(1)}×`;
 };
 $('listener-brightness').oninput = () => {
-  renderer.listenerBrightness = clamp(Number($('listener-brightness').value), 1, 2);
+  renderer.listenerBrightness = clamp(Number($('listener-brightness').value), 1, 4);
   $('listener-brightness-value').textContent = `${renderer.listenerBrightness.toFixed(1)}×`;
 };
 $('transparency').oninput = () => {

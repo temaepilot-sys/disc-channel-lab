@@ -31,7 +31,7 @@ public sealed record ViewerPreferences
         Check(Spread, 0, 90); Check(ParticleSize, .3, 3); Check(Transparency, 0, 100);
         Check(ParticleSpeed, .5, 4);
         Check(ListenerSize, 1, 3);
-        Check(ListenerBrightness, 1, 2);
+        Check(ListenerBrightness, 1, 4);
         Check(Density, .3, 3); Check(Persistence, .5, 1.8); Check(DemoVolume, 0, 100);
         if (Camera is null || Camera.Target is null || Camera.Target.Length != 3)
             throw new InvalidDataException("Invalid saved camera.");

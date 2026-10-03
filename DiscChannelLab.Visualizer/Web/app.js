@@ -159,7 +159,9 @@ class SpeakerBeamMesh {
       if (intensity <= .005) continue;
       // The whole beam responds to the CURRENT playback spectrum simultaneously.
       // No travel clock or lookahead: this is the intentional zero-lag representation.
-      const power = intensity ** 1.2 * scene.beamStrength * scene.particleOpacity;
+      // Fast levels can be weaker between transients. Lift quiet active bands so
+      // their direction stays visible without extending the light envelope.
+      const power = intensity ** .65 * scene.beamStrength * scene.particleOpacity;
       const { speaker, x, z, dx, dz, sx, sz, height, color: rgb } = item;
       const ex = eye[0] - x * .5, ey = eye[1] - height, ez = eye[2] - z * .5;
       let rx = -dz * ey, ry = dz * ex - dx * ez, rz = dx * ey;
@@ -168,10 +170,10 @@ class SpeakerBeamMesh {
       else { rx /= length; ry /= length; rz /= length; }
       const angle = Math.min(scene.spreadDegrees, scene.info.dispersion[item.band] ?? 180, 35) * Math.PI / 180;
       const tangent = Math.tan(angle);
-      const coreRadius = .02 + .028 * intensity;
+      const coreRadius = .03 + .035 * Math.sqrt(intensity);
       // Use a small grid, without adding particles or allocating per-vertex objects.
       for (let sheet = 0; sheet < 4; sheet++) {
-        const core = sheet === 3, across = core ? 2 : 4, amplitude = power * (core ? .30 : .025);
+        const core = sheet === 3, across = core ? 2 : 4, amplitude = power * (core ? .50 : .045);
         const cos = Math.cos(sheet * Math.PI / 3), sin = Math.sin(sheet * Math.PI / 3);
         const write = (t, offset) => {
           const distance = speaker.radius * t;
@@ -183,7 +185,10 @@ class SpeakerBeamMesh {
           const vz = pz + (core ? rz * coreRadius : sz * haloWidth * cos) * offset;
           const crossFade = core ? 1 - Math.abs(offset) : Math.max(0, 1 - offset * offset) ** 2;
           const endFade = Math.min(1, .2 + t * 12, .5 + (1 - t) * 8);
-          const alpha = clamp(amplitude * crossFade * endFade * scene.listenerBrightnessAt(vx, vz), 0, 1);
+          // The particle contrast setting may darken the room heavily. Keep a
+          // readable beam along the route, while still emphasizing the listener.
+          const spatialBrightness = Math.max(.65, scene.listenerBrightnessAt(vx, vz));
+          const alpha = clamp(amplitude * crossFade * endFade * spatialBrightness, 0, 1);
           const i = this.vertexCount++ * 8;
           vertices[i] = vx; vertices[i + 1] = vy; vertices[i + 2] = vz;
           vertices[i + 3] = rgb[0]; vertices[i + 4] = rgb[1]; vertices[i + 5] = rgb[2];

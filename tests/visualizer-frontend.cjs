@@ -497,6 +497,24 @@ function tick(seconds) { for (let i = 0; i < Math.ceil(seconds * 60); i++) { now
     peakAlpha = Math.max(peakAlpha, v[i+6]);
   }
   assert(sourceVisible && listenerVisible, 'Speaker and listener ends light up in the same draw with no waiting');
+  // Representative soft current energy with maximum room dimming used to vanish.
+  const originalRoomBrightness=renderer.listenerBrightness;
+  adjust('listener-brightness',4); renderer.bands[8]=.2; drawBeams();
+  let routeCoreAlpha=0, routeHaloAlpha=0, routeWidth=0;
+  for (let vertex=0; vertex<mesh.vertexCount; vertex++) {
+    const i=vertex*8, v=mesh.vertices;
+    const along=(v[i]-beam.x)*beam.dx+(v[i+2]-beam.z)*beam.dz;
+    if (along>beam.speaker.radius*.3 && along<beam.speaker.radius*.7) {
+      routeWidth=Math.max(routeWidth,Math.hypot(v[i]-beam.x-beam.dx*along,v[i+1]-beam.height,v[i+2]-beam.z-beam.dz*along));
+      if(vertex>=3*8*4*6) routeCoreAlpha=Math.max(routeCoreAlpha,v[i+6]);
+      else routeHaloAlpha=Math.max(routeHaloAlpha,v[i+6]);
+    }
+  }
+  assert(routeCoreAlpha>.08, 'A quiet active beam retains a readable core even at maximum room dimming');
+  assert(routeHaloAlpha>.006 && routeHaloAlpha<routeCoreAlpha, 'Soft halo remains visible around the stronger core');
+  assert(routeWidth>.03, 'Beam has appreciable width away from the listener');
+  renderer.bands.fill(0); drawBeams(); assert.equal(mesh.vertexCount,0, 'Visibility boost does not create beams in silence');
+  adjust('listener-brightness',originalRoomBrightness); renderer.bands[8]=.8; drawBeams();
   const pausedBeam = activeGeometry(); drawBeams();
   assert.deepEqual(activeGeometry(), pausedBeam, 'Beam freezes while audio is paused');
   const reusedBuffer = mesh.vertices;
@@ -554,7 +572,7 @@ function tick(seconds) { for (let i = 0; i < Math.ceil(seconds * 60); i++) { now
   result.passed.push('Listener-only brightness and adjustable size emphasis', 'Smooth local falloff without new stationary particles', 'Listener vibration remains bounded and freezes on pause', 'Emphasis preserves timing and transparency');
   result.passed.push('Listener preset looks toward the center from behind', 'Central bass, treble and LFE fit the listener view');
   result.passed.push('Parabolic brightness limited to central 60 cm', 'Brightness slider updates paused particles without size or timing changes', 'Brightness setting persists', 'Higher brightness dims distant particles', 'Strong emphasis preserves hue and valid alpha');
-  result.passed.push('Zero-lag beams illuminate both endpoints together', 'Soft beam meshes aim at listener with fixed frequency heights', 'Beam silence, LFE exclusion, transparency and toggles', 'Beam strength and settings persist', 'Beam views are finite and buffers reused', 'Beams preserve particle vibration and playback time');
+  result.passed.push('Zero-lag beams illuminate both endpoints together', 'Soft beam meshes aim at listener with fixed frequency heights', 'Beam silence, LFE exclusion, transparency and toggles', 'Beam strength and settings persist', 'Beam views are finite and buffers reused', 'Beams preserve particle vibration and playback time', 'Quiet beams retain a visible core and halo under maximum room dimming');
   result.passed.push('Fast current levels drive listener particles independently of their age', 'Listener light attack under 50ms and fade under 120ms after data reception', 'Current light keeps channel and signal separation', 'Pulse preserves trails, vibration, pause and playback clock');
   result.passed.push('Progressive enlargement begins 1.8 m out', 'Listener size adjusts live without retiming particles', 'Listener size defaults and persistence');
   result.passed.push('Bounded smooth XYZ drift', 'Drift freezes while paused and vanishes at arrival', 'Frequency-dependent post-listener attenuation');

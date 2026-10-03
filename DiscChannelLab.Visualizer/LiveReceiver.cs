@@ -13,7 +13,7 @@ public sealed class LiveReceiver(string? pipeName, VisualizationSettings setting
 {
     readonly object gate = new();
     readonly CancellationTokenSource stop = new();
-    readonly Queue<(double Time, float[] Values)> frames = new();
+    readonly Queue<(double Time, float[] Values, float[] FastValues)> frames = new();
     readonly Queue<(double Time, float[] Values)> forecasts = new();
     SpectrumAnalyzer? forecastAnalyzer;
     string[] forecastChannels = [];
@@ -25,7 +25,7 @@ public sealed class LiveReceiver(string? pipeName, VisualizationSettings setting
     SpectrumAnalyzer? analyzer;
     int analyzerEpoch = -1;
     double expectedTime = -1, baseTime;
-    (double Time, float[] Values)? selected;
+    (double Time, float[] Values, float[] FastValues)? selected;
     bool connected;
     long revision;
     string? lastError;
@@ -120,14 +120,14 @@ public sealed class LiveReceiver(string? pipeName, VisualizationSettings setting
                 if (analyzer is null || analyzerEpoch != epoch || !channels.SequenceEqual(codes) || Math.Abs(time - expectedTime) > 2d / 48000)
                 {
                     Reset(); channels = codes; analyzerEpoch = epoch; baseTime = time;
-                    analyzer = new SpectrumAnalyzer(codes.Length * 2 + 2, settings, (seconds, values) =>
+                    analyzer = new SpectrumAnalyzer(codes.Length * 2 + 2, settings, retainFrames: false, onDetailedFrame: (seconds, values, fastValues) =>
                     {
                         lock (gate)
                         {
-                            frames.Enqueue((baseTime + seconds, values));
+                            frames.Enqueue((baseTime + seconds, values, fastValues));
                             while (frames.Count > 192) frames.Dequeue();
                         }
-                    }, retainFrames: false);
+                    });
                 }
                 expectedTime = time + count / 48000d;
                 current = analyzer!;
@@ -172,6 +172,7 @@ public sealed class LiveReceiver(string? pipeName, VisualizationSettings setting
             while (frames.TryPeek(out var frame) && frame.Time <= position) selected = frames.Dequeue();
             bool hasData = selected is { } value && Math.Abs(position - value.Time) < .25;
             var values = hasData ? selected!.Value.Values : new float[(channels.Length * 2 + 2) * settings.BandCount];
+            var fastValues = hasData ? selected!.Value.FastValues : values;
             int width = channels.Length * settings.BandCount;
             while (forecasts.TryPeek(out var old) && old.Time < position - .1) forecasts.Dequeue();
             signal = signal is "input" or "output" ? signal : "post";
@@ -186,6 +187,8 @@ public sealed class LiveReceiver(string? pipeName, VisualizationSettings setting
                 sourceSampleRate = clock?.SourceSampleRate ?? 48000, sampleRate = 48000, channels,
                 bandCount = settings.BandCount, centers = settings.Centers, dispersion = settings.Centers.Select(DispersionAngleMapper.Map).ToArray(),
                 input = values.Take(width).ToArray(), post = values.Skip(width).Take(width).ToArray(), output = values.Skip(width * 2).Take(settings.BandCount * 2).ToArray(),
+                fastInput = fastValues.Take(width).ToArray(), fastPost = fastValues.Skip(width).Take(width).ToArray(),
+                fastOutput = fastValues.Skip(width * 2).Take(settings.BandCount * 2).ToArray(),
                 lookahead = new { revision = forecastRevision, signal, channels = signal == "output" ? new[] { "FL", "FR" } : forecastChannels,
                     times = ahead.Select(f => f.Time).ToArray(), values = ahead.SelectMany(f => f.Values.Skip(start).Take(length)).ToArray() },
                 error = lastError

@@ -82,6 +82,18 @@ Timing and failure behavior
   Hardware output latency is not measured by this protocol.
   Disconnects and reconnects do not restart DiscChannelLab playback.
 
+Listener brightness
+  Current spectra also expose fastInput/fastPost/fastOutput, normalized from the same
+  FFT's unsmoothed band energy and selected using the same player-clock timestamp.
+  These bounded frames do not affect decoded audio, particle-emission smoothing or
+  the forecast queue. The browser uses a 12ms attack / 60ms release light envelope.
+  Central moving particles react to their current channel and band, leaving a faint
+  4% glow at silence. Speaker beams use the fast levels throughout their geometry.
+  Pause freezes the envelope; clearing a scene resets it. Legacy data without fast
+  fields falls back to the regular spectra.
+  Demo packets set fastAnalysis=true and append an equally sized fast spectrum tail
+  after the regular spectrum tail. Packets without this flag retain the old layout.
+
 Rendering
   GLSL ES shared uniforms have explicit, matching precision qualifiers.
   uPoint is mediump in both vertex and fragment shaders; vColor is also explicit.

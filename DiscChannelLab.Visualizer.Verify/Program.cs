@@ -68,6 +68,12 @@ using (var receiver = new LiveReceiver(null, settings, Console.WriteLine))
     var post = data.GetProperty("post").EnumerateArray().Select(x => x.GetSingle()).ToArray();
     Check(input.Skip(32).Take(16).Max() > .1f && post.Skip(32).Take(16).All(x => x == 0), "Input / Post spectra reflect Mute separately");
     Check(data.GetProperty("output").GetArrayLength() == 32, "Final stereo spectrum has exactly two channels");
+    var fastInput = data.GetProperty("fastInput").EnumerateArray().Select(x => x.GetSingle()).ToArray();
+    var fastPost = data.GetProperty("fastPost").EnumerateArray().Select(x => x.GetSingle()).ToArray();
+    Check(fastInput.Length == input.Length && fastPost.Length == post.Length && data.GetProperty("fastOutput").GetArrayLength() == 32,
+        "Fast brightness frames preserve Input/Post/Output channel dimensions");
+    Check(fastInput.Skip(32).Take(16).Max() > .1f && fastPost.Skip(32).Take(16).All(x => x == 0),
+        "Fast brightness follows selected signal and keeps muted Post dark");
     receiver.Consume(VisualizerBridge.Encode(new VisualizerClock(1, 8, "Seek", "PCM", 48000, 12, 30, false, Environment.TickCount64)));
     receiver.Consume(VisualizerBridge.Encode((7, tapped.Frames[0])));
     using var afterSeek = JsonDocument.Parse(JsonSerializer.Serialize(receiver.Snapshot()));

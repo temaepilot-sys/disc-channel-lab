@@ -86,6 +86,9 @@ public static class SelfTests
             Check(Array.IndexOf(last[..16], last[..16].Max()) == band, "1 kHz tone appears in correct log band");
             Check(Math.Abs((last[band] - last[16 + band]) * 70 - 6.0206) < .01, "Half amplitude gives -6.02 dB");
             Check(last.Skip(16).All(float.IsFinite), "Finite spectrum values");
+            Check(tone.FastFrames.Count == tone.Frames.Count && tone.FastFrames[^1].All(x => float.IsFinite(x) && x >= 0 && x <= 1), "Fast light frames share analysis timestamps and valid ranges");
+            for (int i = 0; i < 4800; i++) tone.Push([0, 0]);
+            Check(tone.FastFrames[^1].All(x => x == 0) && tone.Frames[^1][band] > .5f, "Fast light frame detects silence without waiting for the emission release");
             var weights = ChannelMapper.StereoWeights(ChannelMapper.Map("7.1", 8));
             Check(weights.Sum(w => w.Left) <= 1.00001 && weights.Sum(w => w.Right) <= 1.00001, "Stereo preview fixed gain bound");
             var clip = new ClipBuilder(new("test", "PCM", 48000, "16", "stereo", ["FL", "FR"], .1, false), settings);
@@ -96,6 +99,9 @@ public static class SelfTests
             int audioOffset = (4 + headerSize + 3) & ~3;
             Check(BitConverter.ToSingle(packed, audioOffset) == .25f && BitConverter.ToSingle(packed, audioOffset + 4) == -.25f, "Packet alignment / stereo samples");
             Check(doc.RootElement.GetProperty("sampleFrames").GetInt32() == 4800, "Packet frame count");
+            int analysisBytes = doc.RootElement.GetProperty("analysisFrames").GetInt32() * settings.BandCount * 2 * sizeof(float);
+            Check(doc.RootElement.GetProperty("fastAnalysis").GetBoolean() && packed.Length == audioOffset + 4800 * 8 + analysisBytes * 2,
+                "Demo packet includes aligned fast light frames without changing audio samples");
             report.Add($"{tests} tests passed.");
             File.WriteAllLines(Path.Combine(AppContext.BaseDirectory, "self-test-results.txt"), report);
             Console.WriteLine(string.Join(Environment.NewLine, report));

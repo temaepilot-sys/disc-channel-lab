@@ -115,17 +115,21 @@ public sealed class SpectrumAnalyzer
     readonly (int Bin, double Weight)[][] bandWeights;
     readonly double powerScale;
     readonly Action<double, float[]>? onFrame;
+    readonly Action<double, float[], float[]>? onDetailedFrame;
     readonly bool retainFrames;
     int position;
     long samples;
     public List<float[]> Frames { get; } = [];
+    public List<float[]> FastFrames { get; } = [];
     public int ChannelCount => ring.Length;
 
-    public SpectrumAnalyzer(int channels, VisualizationSettings settings, Action<double, float[]>? onFrame = null, bool retainFrames = true)
+    public SpectrumAnalyzer(int channels, VisualizationSettings settings, Action<double, float[]>? onFrame = null, bool retainFrames = true,
+        Action<double, float[], float[]>? onDetailedFrame = null)
     {
         settings.Validate();
         this.settings = settings;
         this.onFrame = onFrame;
+        this.onDetailedFrame = onDetailedFrame;
         this.retainFrames = retainFrames;
         ring = Enumerable.Range(0, channels).Select(_ => new float[settings.FftSize]).ToArray();
         smoothed = Enumerable.Range(0, channels).Select(_ => new double[settings.BandCount]).ToArray();
@@ -159,6 +163,9 @@ public sealed class SpectrumAnalyzer
     void Analyze()
     {
         var values = new float[ring.Length * settings.BandCount];
+        // Reuse each FFT for an unsmoothed brightness frame. Forecast-only analysis
+        // does not allocate or retain this additional array.
+        var fastValues = retainFrames || onDetailedFrame is not null ? new float[values.Length] : null;
         for (int c = 0; c < ring.Length; c++)
         {
             for (int i = 0; i < transform.Length; i++) transform[i] = ring[c][(position + i) % transform.Length] * window[i];
@@ -173,10 +180,17 @@ public sealed class SpectrumAnalyzer
                 // Mean-square dBFS: a full-scale sine has -3.01 dBFS total RMS energy.
                 double db = 10 * Math.Log10(Math.Max(1e-20, smoothed[c][b]));
                 values[c * settings.BandCount + b] = (float)Math.Clamp((db - settings.MinimumDb) / (settings.MaximumDb - settings.MinimumDb), 0, 1);
+                if (fastValues is not null)
+                {
+                    double fastDb = 10 * Math.Log10(Math.Max(1e-20, energy));
+                    fastValues[c * settings.BandCount + b] = (float)Math.Clamp((fastDb - settings.MinimumDb) / (settings.MaximumDb - settings.MinimumDb), 0, 1);
+                }
             }
         }
-        if (retainFrames) Frames.Add(values);
-        onFrame?.Invoke((samples - settings.FftSize / 2d) / settings.SampleRate, values);
+        if (retainFrames) { Frames.Add(values); FastFrames.Add(fastValues!); }
+        double timestamp = (samples - settings.FftSize / 2d) / settings.SampleRate;
+        onFrame?.Invoke(timestamp, values);
+        onDetailedFrame?.Invoke(timestamp, values, fastValues!);
     }
 
     public static double Smooth(double previous, double target, double dt, double attack, double release)
@@ -280,6 +294,7 @@ public sealed class ClipBuilder(ClipInfo info, VisualizationSettings settings)
             layout = info.Layout, channels = info.Channels, sourceDuration = info.SourceDuration, demo = info.Demo,
             sampleRate = settings.SampleRate, sampleFrames = frames, duration = (double)frames / settings.SampleRate,
             bandCount = settings.BandCount, centers = settings.Centers, analysisFrames = analyzer.Frames.Count,
+            fastAnalysis = true,
             firstAnalysisTime = (double)settings.FftSize / 2 / settings.SampleRate,
             analysisStep = (double)settings.HopSize / settings.SampleRate,
             dispersion = settings.Centers.Select(DispersionAngleMapper.Map).ToArray(),
@@ -291,6 +306,7 @@ public sealed class ClipBuilder(ClipInfo info, VisualizationSettings settings)
         while (result.Position % 4 != 0) writer.Write((byte)0);
         audio.Position = 0; audio.CopyTo(result);
         foreach (var frame in analyzer.Frames) result.Write(System.Runtime.InteropServices.MemoryMarshal.AsBytes(frame.AsSpan()));
+        foreach (var frame in analyzer.FastFrames) result.Write(System.Runtime.InteropServices.MemoryMarshal.AsBytes(frame.AsSpan()));
         audio.Dispose();
         return result.ToArray();
     }

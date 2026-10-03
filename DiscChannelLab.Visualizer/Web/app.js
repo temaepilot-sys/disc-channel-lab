@@ -5,7 +5,7 @@ history.replaceState(null, '', '/');
 const api = (path, options = {}) => fetch(path, { method: 'POST', ...options, headers: { 'X-Visualizer-Token': token, ...options.headers } });
 api('/api/heartbeat').catch(() => {});
 setInterval(() => api('/api/heartbeat').catch(() => {}), 5000);
-let clip = null, spectrum = null, audioBuffer = null, context = null, gain = null, source = null;
+let clip = null, spectrum = null, fastSpectrum = null, audioBuffer = null, context = null, gain = null, source = null;
 let playing = false, offset = 0, sourceStart = 0, busy = false, generation = 0;
 let sourceEnded = false, lastVisualTime = 0, draggingTimeline = false;
 let liveMode = false, liveState = null, liveAt = 0, liveInitialized = false, livePollBusy = false, liveKey = '';
@@ -78,14 +78,17 @@ async function load(path, autoplay = false) {
     if (headerSize < 2 || headerSize > bytes.byteLength - 4) throw new Error('Invalid audio data header.');
     const metadata = JSON.parse(new TextDecoder().decode(new Uint8Array(bytes, 4, headerSize)));
     const audioOffset = (4 + headerSize + 3) & ~3;
-    const expected = audioOffset + metadata.sampleFrames * 8 + metadata.analysisFrames * metadata.channels.length * metadata.bandCount * 4;
+    const analysisValues = metadata.analysisFrames * metadata.channels.length * metadata.bandCount;
+    const expected = audioOffset + metadata.sampleFrames * 8 + analysisValues * 4 * (metadata.fastAnalysis ? 2 : 1);
     if (expected !== bytes.byteLength) throw new Error('Audio data size mismatch.');
     const samples = new Float32Array(bytes, audioOffset, metadata.sampleFrames * 2);
     const nextAudio = context.createBuffer(2, metadata.sampleFrames, metadata.sampleRate);
     const left = nextAudio.getChannelData(0), right = nextAudio.getChannelData(1);
     for (let i = 0; i < metadata.sampleFrames; i++) { left[i] = samples[i * 2]; right[i] = samples[i * 2 + 1]; }
     // Copy only the small analysis tail; release the interleaved download after loading.
-    spectrum = new Float32Array(bytes, audioOffset + metadata.sampleFrames * 8).slice();
+    const analysisOffset = audioOffset + metadata.sampleFrames * 8;
+    spectrum = new Float32Array(bytes, analysisOffset, analysisValues).slice();
+    fastSpectrum = metadata.fastAnalysis ? new Float32Array(bytes, analysisOffset + analysisValues * 4, analysisValues).slice() : null;
     clip = metadata; audioBuffer = nextAudio; offset = 0; lastVisualTime = 0; renderer.setClip(clip);
     $('filename').textContent = clip.name;
     $('format').textContent = `${clip.codec} · ${(clip.sourceSampleRate / 1000).toFixed(1)} kHz · ${clip.bitDepth}${clip.bitDepth === 'Unknown' ? '' : ' bit'} · ${clip.channels.length}ch (${clip.layout})`;
@@ -152,7 +155,7 @@ class SpeakerBeamMesh {
     const vertices = this.vertices;
     for (const item of this.items) {
       const k = item.channel * scene.info.bandCount + item.band;
-      const intensity = clamp(scene.bands[k] || 0, 0, 1);
+      const intensity = clamp(scene.lightLevels[k] || 0, 0, 1);
       if (intensity <= .005) continue;
       // The whole beam responds to the CURRENT playback spectrum simultaneously.
       // No travel clock or lookahead: this is the intentional zero-lag representation.
@@ -227,7 +230,7 @@ class SpaceRenderer {
     this.particleSpeed = 2;
     this.particleSize = 1; this.particleOpacity = 1; this.listenerSize = 1.5; this.listenerBrightness = 1.4;
     this.speakerBeams = false; this.beamStrength = .8; this.beamMesh = new SpeakerBeamMesh();
-    this.lines = []; this.speakers = []; this.bands = new Float32Array(0); this.budgets = [];
+    this.lines = []; this.speakers = []; this.bands = new Float32Array(0); this.lightLevels = new Float32Array(0); this.budgets = [];
     this.camera = { yaw: .48, pitch: .56, distance: 12.8, target: [0, .8, 0] }; this.listenerView = false;
     this.setClip({ channels: ['FL', 'FR', 'FC', 'LFE', 'SL', 'SR'], bandCount: 16, centers: Array.from({ length: 16 }, (_, i) => 20 * 1000 ** ((i + .5) / 16)), dispersion: [] });
     this.wireInput();
@@ -235,6 +238,7 @@ class SpaceRenderer {
   }
   clear() {
     this.count = 0; this.visibleCount = 0; this.budgets.fill(0); this.bands.fill(0);
+    this.lightLevels.fill(0);
     this.beamMesh.vertexCount = 0;
   }
   setSyncReference(value) {
@@ -243,6 +247,7 @@ class SpaceRenderer {
   }
   setClip(info) {
     this.info = info; this.clear(); this.budgets = new Array(info.channels.length * info.bandCount).fill(0); this.bands = new Float32Array(this.budgets.length);
+    this.lightLevels = new Float32Array(this.budgets.length);
     this.frequencies = info.centers.map(hz => clamp(Math.log(hz / 20) / Math.log(1000), 0, 1));
     const angles = { FL: -30, FR: 30, FC: 0, SL: -110, SR: 110, BL: -150, BR: 150, BC: 180, FLC: -15, FRC: 15, TFL: -30, TFR: 30 };
     $('labels').replaceChildren();
@@ -387,6 +392,24 @@ class SpaceRenderer {
     const focus = Math.max(0, 1 - (x * x + z * z) / (.6 * .6));
     return surrounding + (this.listenerBrightness - surrounding) * focus;
   }
+  updateLightLevels(values, dt) {
+    if (dt <= 0) return; // Freeze the light envelope with paused audio.
+    for (let k = 0; k < this.lightLevels.length; k++) {
+      const target = clamp(Number.isFinite(values?.[k]) ? values[k] : 0, 0, 1);
+      const previous = this.lightLevels[k];
+      const seconds = target > previous ? .012 : .060;
+      this.lightLevels[k] = target + (previous - target) * Math.exp(-dt / seconds);
+    }
+  }
+  listenerPulse(x, z, channel, band) {
+    if (this.syncReference !== 'listener') return 1;
+    const focus = Math.max(0, 1 - (x * x + z * z) / (.6 * .6));
+    const level = this.lightLevels[channel * this.info.bandCount + band] || 0;
+    // Read CURRENT energy, not the value at particle birth. Leave only a faint
+    // glow at silence; the long-lived particles continue their original paths.
+    const glow = .04 + .96 * level * level;
+    return 1 + (glow - 1) * focus;
+  }
   travelTime(channel, band, fan) {
     const speaker = this.speakers[channel];
     if (speaker.code === 'LFE') return 0;
@@ -432,16 +455,22 @@ class SpaceRenderer {
     }
     if (!clip || !playing) return;
     this.bands.fill(0);
+    let lightValues;
     if (liveMode) {
       const values = liveState?.hasData ? liveState[$('analysis-mode').value] : null;
       if (values?.length === this.bands.length) this.bands.set(values);
+      const mode = $('analysis-mode').value || 'post';
+      const fastValues = liveState?.hasData ? liveState['fast' + mode[0].toUpperCase() + mode.slice(1)] : null;
+      lightValues = fastValues?.length === this.bands.length ? fastValues : this.bands;
     } else {
       let index = Math.floor((time - clip.firstAnalysisTime) / clip.analysisStep);
       if (index < 0 || !clip.analysisFrames) return;
       index = Math.min(clip.analysisFrames - 1, index);
       const size = clip.channels.length * clip.bandCount;
       this.bands.set(spectrum.subarray(index * size, (index + 1) * size));
+      lightValues = fastSpectrum ? fastSpectrum.subarray(index * size, (index + 1) * size) : this.bands;
     }
+    this.updateLightLevels(lightValues, dt);
     const density = Number($('density').value), step = Math.min(dt, .08);
     for (let c = 0; c < this.speakers.length; c++) for (let b = 0; b < clip.bandCount; b++) {
       const k = c * clip.bandCount + b, intensity = this.bands[k];
@@ -497,7 +526,8 @@ class SpaceRenderer {
       this.vertices[v + 6] *= Math.exp(-pastDistance * (.015 + .12 * a[i + 13] ** 1.4));
       this.vertices[v + 7] = a[i + 11] * (1 + age * .4) * this.particleSize;
       // Keep opacity in the blending range even at maximum central emphasis.
-      this.vertices[v + 6] = clamp(this.vertices[v + 6] * this.listenerBrightnessAt(a[i], a[i + 2]), 0, 1);
+      this.vertices[v + 6] = clamp(this.vertices[v + 6] * this.listenerBrightnessAt(a[i], a[i + 2]) *
+        this.listenerPulse(a[i], a[i + 2], a[i + 14], a[i + 15]), 0, 1);
       // Start enlarging farther out than the light/vibration emphasis, without a visible step.
       this.vertices[v + 7] *= 1 + (this.listenerSize - 1) * this.listenerFocus(a[i], a[i + 2], 1.8);
       if (this.vertices[v + 6] > .001) this.visibleCount++;
@@ -529,7 +559,7 @@ function enterLive() {
   if (liveState) applyLive(liveState);
 }
 function leaveLive() {
-  detachSource(); playing = false; liveMode = false; clip = null; spectrum = null; audioBuffer = null;
+  detachSource(); playing = false; liveMode = false; clip = null; spectrum = null; fastSpectrum = null; audioBuffer = null;
   offset = lastVisualTime = 0; renderer.clear(); $('live-analysis').hidden = true;
   $('follow').textContent = 'Link to DiscChannelLab'; $('volume').disabled = false;
   $('play').textContent = '▶ Play'; $('source-mode').textContent = 'Input channels → Stereo playback';

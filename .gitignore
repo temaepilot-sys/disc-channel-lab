@@ -16,6 +16,9 @@ verification-output/
 *.iso
 *.ISO
 *.flac
+*.dsf
+*.dff
+*.dsdiff
 *.wav
 *.m2ts
 *.vob

@@ -14,6 +14,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
     private readonly AudioNavigationService _navigation;
     private readonly TrackEditsStore _editStore;
     private readonly IsoMountService _isoMount;
+    private readonly SacdService _sacd;
     private DiscAnalysis? _disc;
     private PlaylistInfo? _loadedPlaylist;
     private CancellationTokenSource? _work;
@@ -365,9 +366,11 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
         var paths = new ToolPaths();
         var runner = new ProcessRunner(_log);
         var probe = new FfprobeService(paths, runner);
-        _discService = new DiscService(probe, _log);
-        _conversion = new ConversionService(paths, runner, probe, _log);
-        _navigation = new AudioNavigationService(paths, runner, probe, _log);
+        _sacd = new SacdService(paths, runner, _log)
+        { Progress = new Progress<string>(message => Status = message) };
+        _discService = new DiscService(probe, _log, _sacd);
+        _conversion = new ConversionService(paths, runner, probe, _log, _sacd);
+        _navigation = new AudioNavigationService(paths, runner, probe, _log, _sacd);
         _editStore = editStore ?? new TrackEditsStore(_log);
         _isoMount = new IsoMountService(runner);
         if (string.IsNullOrWhiteSpace(_outputFolder)) _outputFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Music");
@@ -470,7 +473,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
             AlbumTitle = "ディスクを解析しています";
             Status = "ディスクを解析しています";
             Source = path;
-            _disc = await Task.Run(() => _discService.Analyze(path, _work!.Token), _work!.Token);
+            _disc = await _discService.AnalyzeAsync(path, _work!.Token);
             _disc.AlbumTitle = _editStore.LoadAlbumTitle(_disc) ?? _disc.AlbumTitle;
             RefreshMetadata();
             Playlists.Clear();
@@ -478,7 +481,8 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
             {
                 playlist.MergeShortTail = _editStore.LoadMergeShortTail(_disc, playlist);
                 playlist.ChapterTitles = _editStore.LoadChapterTitles(_disc, playlist) ??
-                    Enumerable.Repeat<string?>(null, playlist.ChapterStarts.Count).ToArray();
+                    (playlist.ChapterTitles.Count == playlist.ChapterStarts.Count ? playlist.ChapterTitles
+                        : Enumerable.Repeat<string?>(null, playlist.ChapterStarts.Count).ToArray());
                 playlist.TitleName = _editStore.LoadTitleName(_disc, playlist) ?? playlist.TitleName;
                 Playlists.Add(playlist);
             }
@@ -514,6 +518,16 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
     public async Task OpenIsoAsync(string isoPath)
     {
         if (IsBusy) return;
+        if (SacdService.IsSacdIso(isoPath))
+        {
+            var image = Path.GetFullPath(isoPath);
+            _isoRoot = image;
+            SelectedIsoPath = image;
+            if (!Sources.Contains(image)) Sources.Add(image);
+            Source = image;
+            await OpenSourceAsync(image);
+            return;
+        }
         BeginWork("ISOをマウントしています");
         string root;
         try { root = await _isoMount.MountAsync(isoPath, _work!.Token); }

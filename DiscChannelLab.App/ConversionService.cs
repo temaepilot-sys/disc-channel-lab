@@ -5,8 +5,9 @@ namespace Disc2Flac;
 
 public sealed record ConversionProgress(double Fraction, string Message);
 
-public sealed class ConversionService(ToolPaths paths, ProcessRunner runner, FfprobeService probe, AppLog log)
+public sealed class ConversionService(ToolPaths paths, ProcessRunner runner, FfprobeService probe, AppLog log, SacdService? sacd = null)
 {
+    private readonly SacdService _sacd = sacd ?? new SacdService(paths, runner, log);
     public async Task<string> ConvertAsync(
         DiscAnalysis disc, PlaylistInfo playlist, AudioStreamInfo stream, IReadOnlyList<TrackRow> selected,
         OutputQuality quality, string outputRoot, IProgress<ConversionProgress> progress, CancellationToken token,
@@ -25,7 +26,7 @@ public sealed class ConversionService(ToolPaths paths, ProcessRunner runner, Ffp
         if (saveStereoDownmix && !StereoMixSettings.Supports(stream))
             throw new InvalidOperationException("この音声のチャンネル配置は2ch変換に対応していません。");
         mix ??= StereoMixSettings.Default;
-        if (playlist.Format != DiscFormat.BluRay)
+        if (playlist.Format is not (DiscFormat.BluRay or DiscFormat.Sacd))
             return await new DvdConversionService(paths, runner, probe, log).ConvertAsync(
                 disc, playlist, stream, selected, quality, outputRoot, progress, token, groupByChapter,
                 saveStereoDownmix, mix, saveIndividualChannels, channelMix);
@@ -65,13 +66,15 @@ public sealed class ConversionService(ToolPaths paths, ProcessRunner runner, Ffp
                 for (var partIndex = 0; partIndex < segments.Count; partIndex++)
                 {
                     var segment = segments[partIndex];
-                    var sourcePath = Path.Combine(disc.Root, "BDMV", "STREAM", $"{segment.Clip.Id}.m2ts");
+                    var sourcePath = segment.Clip.Sacd is { } sacdSource ? await _sacd.PrepareAsync(sacdSource, token)
+                        : SacdService.ClipPath(disc, segment.Clip);
                     if (!File.Exists(sourcePath)) throw new FileNotFoundException($"音声クリップが見つかりません: {sourcePath}");
                     var silent = stream.IsSilentTail(playlist, segment.Clip);
                     var source = stream;
                     if (!silent && !checkedClips.TryGetValue(segment.Clip.Id, out source))
                     {
-                        source = AudioStreamMatcher.Resolve(stream, await probe.ProbeClipAsync(sourcePath, token));
+                        source = AudioStreamMatcher.Resolve(stream, segment.Clip.Sacd is null
+                            ? await probe.ProbeClipAsync(sourcePath, token) : [await probe.ProbeFileAsync(sourcePath, token)]);
                         if (quality == OutputQuality.Cd ? !source.CanMakeCd :
                             !source.CanMakeHighResolution || source.SampleRate != expectedRate || source.BitDepth != expectedDepth)
                             throw new InvalidDataException($"クリップ {segment.Clip.Id} は選択した保存音質の条件を満たしていません。");
@@ -242,6 +245,13 @@ public sealed class ConversionService(ToolPaths paths, ProcessRunner runner, Ffp
         {
             Add("BD_PLAYLIST", playlist.Id.ToString("00000", CultureInfo.InvariantCulture));
             Add("BD_TITLE_NUMBER", playlist.DisplayOrder.ToString(CultureInfo.InvariantCulture));
+        }
+        if (playlist.Format == DiscFormat.Sacd)
+        {
+            Add("SOURCE_FORMAT", "SACD ISO");
+            Add("SOURCE_ENCODING", playlist.SacdArea?.Encoding);
+            Add("SACD_AREA", playlist.SacdArea?.Channels == 2 ? "Stereo" : "Multichannel");
+            Add("DSD_TO_PCM", "24-bit / 88.2 kHz PCM intermediate");
         }
         Add("artist", track.Artist ?? disc.Artist);
         Add("album_artist", disc.Artist);

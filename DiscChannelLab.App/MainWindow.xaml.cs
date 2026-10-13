@@ -150,13 +150,32 @@ public partial class MainWindow : Window
     {
         var dialog = new OpenFileDialog
         {
-            Title = LanguageService.T("Blu-ray / DVD ISOファイルを選択"),
+            Title = LanguageService.T("Blu-ray / DVD / SACD ISOファイルを選択"),
             Filter = LanguageService.T("ISOファイル (*.iso)|*.iso"),
             CheckFileExists = true
         };
         if (dialog.ShowDialog(this) != true) return;
         CommitTrackEdits();
-        await _model.OpenIsoAsync(dialog.FileName);
+        try
+        {
+            if (SacdService.IsSacdIso(dialog.FileName) && SacdService.FindTool() is null && !ChooseSacdTool()) return;
+            await _model.OpenIsoAsync(dialog.FileName);
+        }
+        catch (Exception ex) { MessageBox.Show(this, LanguageService.T(ex.Message), "SACD ISO", MessageBoxButton.OK, MessageBoxImage.Error); }
+    }
+
+    private void SacdTool_Click(object sender, RoutedEventArgs e) => ChooseSacdTool();
+
+    private bool ChooseSacdTool()
+    {
+        var dialog = new OpenFileDialog
+        {
+            Title = LanguageService.T("sacd_extract.exe（EuFlo 0.3.9.x互換版）を選択"),
+            Filter = "sacd_extract.exe|sacd_extract.exe|Executable (*.exe)|*.exe", CheckFileExists = true
+        };
+        if (dialog.ShowDialog(this) != true) return false;
+        try { SacdService.SaveTool(dialog.FileName); return true; }
+        catch (Exception ex) { MessageBox.Show(this, LanguageService.T(ex.Message), "SACD tool", MessageBoxButton.OK, MessageBoxImage.Error); return false; }
     }
 
     private async void Playlist_SelectionChanged(object sender, SelectionChangedEventArgs e)

@@ -116,6 +116,27 @@ dotnet run --project DiscChannelLab.Verify -c Release -- diagnose H:\ diagnostic
 
 The regression checks generate their own small clips and cover original boundaries, correction/edit persistence, menu ranking, timeouts/cancellation, stream-ID remapping and sample-rate changes, direct-clip fallback, failed-title isolation/retry, no-audio detection, and exact sample counts in cross-clip FLAC exports.
 
+## SACD ISO input
+
+**Open ISO** also accepts existing, readable SACD ISO files, read directly without mounting. Supply a Windows `sacd_extract.exe` compatible with the [EuFlo 0.3.9.x command line](https://github.com/EuFlo/sacd-ripper). Choose it with **SACD extraction tool**, put it in `tools` beside the app, or add it to `PATH`. It must support `-P`, `-2`, `-m`, `-s`, `-c`, `-t` and `-y`. No foobar2000 installation is needed.
+
+- Stereo and multichannel areas appear as separate titles. Select the multichannel title to explore its channels. Names, performers and album/disc information are imported when present; existing editing and per-disc/area saved metadata work.
+- The first track of a selected area is prepared to establish its actual format. Other tracks are extracted only when needed, with cancellation available. Completed caches are reused.
+- DSD/DST is extracted to temporary DSF, then FFmpeg decodes/resamples it to **24-bit / 88.2 kHz PCM**, cached internally as FLAC. Channel layout comes from the extracted file; unknown/mismatched layouts are rejected. Existing playback, seek, mixer, meters, visualizer, stereo conversion and individual-channel export use this PCM.
+- **CD quality** saves 16-bit / 44.1 kHz FLAC; **High resolution** uses the PCM intermediate. FLAC is lossless relative to that PCM. DSD-to-PCM conversion does not preserve the original DSD bitstream. Native DSD/DoP output and physical SACD extraction are outside this feature's scope.
+
+The tool path is saved in `%LOCALAPPDATA%\DiscChannelLab\sacd-tool.json`; PCM caches use `sacd-cache` under the same app folder and consume disk space. Temporary files are confined to new job directories in that cache and removed on completion/cancellation. The application never writes to the input ISO.
+
+The public build neither embeds nor downloads `sacd_extract`. The upstream source includes GPL licensing; retain its license and review its distribution conditions separately if distributing the executable. The adapter does not copy/link the extractor implementation. It uses file-mode commands and adds no copy-protection removal.
+
+Developer check (use a new output folder per run):
+
+```powershell
+dotnet run --project DiscChannelLab.Verify -c Release -- sacd-tests verification-output/sacd-test
+```
+
+The check simulates the external tool's ISO/TOC interface and generates real multichannel DSF data, decoded through FFmpeg and the existing mixer/export paths; preview uses a dummy audio device. An actual SACD ISO and compatible extractor are still needed to verify image-specific compatibility and listening quality.
+
 ## Requirements
 
 - Windows x64.

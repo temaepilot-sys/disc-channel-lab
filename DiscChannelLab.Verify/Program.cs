@@ -10,6 +10,17 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Threading;
 
+if (args.Length >= 2 && args[0] == "sacd-tool-fixture")
+{
+    await SacdTests.FixtureAsync(args[1], args.Skip(2).ToArray());
+    return 0;
+}
+if (args is ["sacd-tests", var sacdTestOutput])
+{
+    await SacdTests.RunAsync(sacdTestOutput);
+    return 0;
+}
+
 if (args is ["settings-migration-test", var settingsOutput])
 {
     SettingsMigrationTests.Run(settingsOutput);

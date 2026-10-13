@@ -6,8 +6,9 @@ using System.Text.RegularExpressions;
 
 namespace Disc2Flac;
 
-public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner, FfprobeService probe, AppLog log)
+public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner, FfprobeService probe, AppLog log, SacdService? sacd = null)
 {
+    private readonly SacdService _sacd = sacd ?? new SacdService(paths, runner, log);
     private static readonly Regex SilenceEvent = new(@"silence_(start|end):\s*([0-9]+(?:\.[0-9]+)?)", RegexOptions.Compiled);
     internal const double MeterWindowSeconds = 0.02;
     private const string MeterFilter = "asetnsamples=n=960:p=0,astats=metadata=1:reset=1:measure_perchannel=Peak_level+RMS_level:measure_overall=none,ametadata=mode=print";
@@ -33,7 +34,7 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
         if (liveMix is not null && mixedLevels is not null && StereoMixSettings.Supports(stream))
             channelLevels = null;
         if (channelLevels is not null && !await MeterFiltersAvailableAsync(token)) channelLevels = null;
-        if (playlist.Format != DiscFormat.BluRay)
+        if (playlist.Format is not (DiscFormat.BluRay or DiscFormat.Sacd))
         {
             await PlayDvdAsync(ffplay, disc, playlist, stream, startTicks, endTicks,
                 token, segmentStarted, volume ?? (() => 1), mix, soloChannel, channelLevels, playbackPosition, liveMix, mixedLevels, visualization);
@@ -398,7 +399,7 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
     public async Task<IReadOnlyList<SplitCandidate>> FindSilenceAsync(DiscAnalysis disc, PlaylistInfo playlist,
         AudioStreamInfo stream, TrackRow track, CancellationToken token)
     {
-        if (playlist.Format != DiscFormat.BluRay)
+        if (playlist.Format is not (DiscFormat.BluRay or DiscFormat.Sacd))
             return await FindDvdSilenceAsync(disc, playlist, stream, track, token);
         var positions = new List<long>();
         foreach (var segment in PlaylistSegments.ForRange(playlist, track.StartTicks, track.EndTicks))
@@ -483,12 +484,14 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
     private async Task<(string Path, long SeekTicks, AudioStreamInfo Source)> GetSourceAsync(DiscAnalysis disc, AudioStreamInfo stream,
         PlaylistSegment segment, CancellationToken token)
     {
-        var path = Path.Combine(disc.Root, "BDMV", "STREAM", $"{segment.Clip.Id}.m2ts");
+        var path = segment.Clip.Sacd is { } sacdSource ? await _sacd.PrepareAsync(sacdSource, token)
+            : SacdService.ClipPath(disc, segment.Clip);
         if (!File.Exists(path)) throw new FileNotFoundException($"音声クリップが見つかりません: {path}");
         var cacheKey = $"{path}|{AudioStreamMatcher.Identity(stream)}";
         if (!_clipCache.TryGetValue(cacheKey, out var source))
         {
-            source = AudioStreamMatcher.Resolve(stream, await probe.ProbeClipAsync(path, token));
+            source = AudioStreamMatcher.Resolve(stream, segment.Clip.Sacd is null
+                ? await probe.ProbeClipAsync(path, token) : [await probe.ProbeFileAsync(path, token)]);
             _clipCache[cacheKey] = source;
         }
         if (source.StartTimeTicks is null) throw new InvalidDataException($"クリップ {segment.Clip.Id} の音声開始時刻が不明です。");

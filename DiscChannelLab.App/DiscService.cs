@@ -6,8 +6,14 @@ using System.Collections.Concurrent;
 
 namespace Disc2Flac;
 
-public sealed class DiscService(FfprobeService probe, AppLog log)
+public sealed class DiscService(FfprobeService probe, AppLog log, SacdService? sacd = null)
 {
+    public async Task<DiscAnalysis> AnalyzeAsync(string path, CancellationToken token)
+    {
+        if (SacdService.IsSacdIso(path))
+            return await (sacd ?? throw new InvalidOperationException("SACD reader is not configured.")).AnalyzeAsync(path, token);
+        return await Task.Run(() => Analyze(path, token), token);
+    }
     private readonly ConcurrentDictionary<(string Disc, int Title), PlaylistProbeResult> _inspections = new();
     public void ClearCache() { _inspections.Clear(); probe.ClearCache(); }
     public DiscAnalysis Analyze(string path, CancellationToken token = default)
@@ -77,7 +83,7 @@ public sealed class DiscService(FfprobeService probe, AppLog log)
     public static bool HasSupportedSource(string root) =>
         Directory.Exists(Path.Combine(root, "BDMV", "PLAYLIST")) ||
         File.Exists(Path.Combine(root, "AUDIO_TS", "AUDIO_TS.IFO")) ||
-        File.Exists(Path.Combine(root, "VIDEO_TS", "VIDEO_TS.IFO"));
+        File.Exists(Path.Combine(root, "VIDEO_TS", "VIDEO_TS.IFO")) || SacdService.IsSacdIso(root);
 
     public async Task<(IReadOnlyList<AudioStreamInfo> Streams, IReadOnlyList<TrackRow> Tracks)> AnalyzePlaylistAsync(DiscAnalysis disc, PlaylistInfo playlist, CancellationToken token)
     {
@@ -123,7 +129,9 @@ public sealed class DiscService(FfprobeService probe, AppLog log)
                 playlist.ChapterTitles = Enumerable.Repeat<string?>(null, structure.Chapters.Count).ToArray();
                 playlist.RefreshLanguage();
             }
-            result = await probe.ProbePlaylistAsync(disc.Root, playlist, token, force);
+            result = playlist.Format == DiscFormat.Sacd
+                ? await (sacd ?? throw new InvalidOperationException("SACD reader is not configured.")).InspectAsync(playlist, token)
+                : await probe.ProbePlaylistAsync(disc.Root, playlist, token, force);
         }
         catch (OperationCanceledException)
         { if (playlist.InspectionVersion == version) playlist.Availability = AudioAvailability.Pending; throw; }
@@ -157,17 +165,19 @@ public sealed class DiscService(FfprobeService probe, AppLog log)
             var chapter = result?.Chapters.Values.FirstOrDefault(x => x.StartTicks is { } time && Math.Abs(time - start) < 4500);
             if (chapter is null && result?.Chapters.TryGetValue(i + 1, out var byNumber) == true && byNumber.StartTicks is null)
                 chapter = byNumber;
-            var title = chapter?.Title;
-            var hasTitle = !string.IsNullOrWhiteSpace(title) && !title.StartsWith("Chapter", StringComparison.OrdinalIgnoreCase);
+            var sacdTrack = playlist.SacdArea?.Tracks.ElementAtOrDefault(i);
+            var title = chapter?.Title ?? sacdTrack?.Title;
+            var hasTitle = !string.IsNullOrWhiteSpace(title) &&
+                (playlist.Format == DiscFormat.Sacd || !title.StartsWith("Chapter", StringComparison.OrdinalIgnoreCase));
             tracks.Add(new TrackRow
             {
                 Number = i + 1,
                 StartTicks = start,
                 EndTicks = end,
-                IsChapter = playlist.Format != DiscFormat.DvdAudio && !hasTitle && !wholePlaylistIsOneTrack,
+                IsChapter = playlist.Format is not (DiscFormat.DvdAudio or DiscFormat.Sacd) && !hasTitle && !wholePlaylistIsOneTrack,
                 IsSelected = playlist.Format != DiscFormat.DvdAudio || end - start >= 2 * 45000,
-                Title = hasTitle ? title!.Trim() : playlist.Format == DiscFormat.DvdAudio ? $"Track {i + 1:00}" : wholePlaylistIsOneTrack ? LanguageService.T("Track 01 (全編)") : $"Chapter {i + 1:00}",
-                Artist = chapter?.Artist ?? disc.Artist
+                Title = hasTitle ? title!.Trim() : playlist.Format is DiscFormat.DvdAudio or DiscFormat.Sacd ? $"Track {i + 1:00}" : wholePlaylistIsOneTrack ? LanguageService.T("Track 01 (全編)") : $"Chapter {i + 1:00}",
+                Artist = chapter?.Artist ?? sacdTrack?.Artist ?? disc.Artist
             });
         }
         return tracks;

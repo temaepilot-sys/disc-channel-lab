@@ -318,6 +318,7 @@ public sealed partial class FfprobeService(ToolPaths paths, ProcessRunner runner
             Channels = Number(stream, "channels") ?? 0,
             ChannelLayout = String(stream, "channel_layout") is { Length: > 0 } layout ? layout : "unknown",
             BitDepth = depth is > 0 ? depth : null,
+            StartTimeTicks = ParseTicks(String(stream, "start_time")) ?? 0,
             SampleCount = long.TryParse(String(stream, "duration_ts"), out var count) ? count : null
         };
     }

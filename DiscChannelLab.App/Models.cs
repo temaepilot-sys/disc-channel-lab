@@ -4,13 +4,14 @@ using System.Runtime.CompilerServices;
 namespace Disc2Flac;
 
 public enum OutputQuality { Cd, HighResolution }
-public enum DiscFormat { BluRay, DvdAudio, DvdVideo }
+public enum DiscFormat { BluRay, DvdAudio, DvdVideo, Sacd }
 public enum AudioAvailability { Pending, Analyzing, Ready, Partial, NoAudio, Unsupported, Failed, Protected }
 
 public sealed record DvdAudioProgram(long StartSector, long EndSector, long StartTicks, long EndTicks);
 public sealed record DvdAudioTitle(int TitleSet, int TitleNumber, IReadOnlyList<DvdAudioProgram> Programs);
 
-public sealed record ClipInfo(string Id, long InTicks, long OutTicks, long PlaylistStartTicks);
+public sealed record ClipInfo(string Id, long InTicks, long OutTicks, long PlaylistStartTicks,
+    SacdTrackSource? Sacd = null);
 
 public sealed class PlaylistInfo : INotifyPropertyChanged
 {
@@ -18,6 +19,7 @@ public sealed class PlaylistInfo : INotifyPropertyChanged
     public DiscFormat Format { get; init; } = DiscFormat.BluRay;
     public DvdAudioTitle? DvdAudio { get; init; }
     public int DvdVideoTitle { get; init; }
+    public SacdArea? SacdArea { get; init; }
     private int _displayOrder;
     private string? _titleName;
     private IReadOnlyList<string?> _chapterTitles = [];
@@ -37,7 +39,7 @@ public sealed class PlaylistInfo : INotifyPropertyChanged
     public required IReadOnlyList<long> ChapterStarts { get; set; }
     internal int InspectionVersion { get; set; }
     public bool MergeShortTail { get; set; } = true;
-    public bool HasShortTail => ChapterStarts.Count > 1 && DurationTicks - ChapterStarts[^1] < 45000;
+    public bool HasShortTail => Format != DiscFormat.Sacd && ChapterStarts.Count > 1 && DurationTicks - ChapterStarts[^1] < 45000;
     public IReadOnlyList<long> EffectiveChapterStarts => MergeShortTail && HasShortTail
         ? ChapterStarts.Take(ChapterStarts.Count - 1).ToArray() : ChapterStarts;
     private AudioAvailability _availability;
@@ -77,7 +79,8 @@ public sealed class PlaylistInfo : INotifyPropertyChanged
     public required long DurationTicks { get; set; }
     public TimeSpan Duration => TimeSpan.FromSeconds(DurationTicks / 45000d);
     public string DisplayNumber => DisplayOrder.ToString("00");
-    public string TitleLabel => Format == DiscFormat.DvdAudio ? $"A {DvdAudio?.TitleSet:00}/{DvdAudio?.TitleNumber:00}"
+    public string TitleLabel => Format == DiscFormat.Sacd ? (SacdArea?.Channels == 2 ? "SACD 2ch" : "SACD Mch")
+        : Format == DiscFormat.DvdAudio ? $"A {DvdAudio?.TitleSet:00}/{DvdAudio?.TitleNumber:00}"
         : Format == DiscFormat.DvdVideo ? $"V {DvdVideoTitle:00}" : $"BD {DisplayNumber}";
     public string TitleName
     {
@@ -94,7 +97,7 @@ public sealed class PlaylistInfo : INotifyPropertyChanged
         }
     }
     public string DurationLabel => Duration.ToString(@"hh\:mm\:ss");
-    public string ChapterCountLabel => LanguageService.T($"{ChapterStarts.Count}チャプター");
+    public string ChapterCountLabel => Format == DiscFormat.Sacd ? $"{ChapterStarts.Count} tracks" : LanguageService.T($"{ChapterStarts.Count}チャプター");
     public bool IsRepeatedShortClipLoop => Clips.Count >= 16 &&
         Clips.Count >= Clips.Select(clip => clip.Id).Distinct().Count() * 4 &&
         Clips.All(clip => clip.OutTicks - clip.InTicks <= 125L * 45000);
@@ -171,6 +174,7 @@ public sealed class AudioStreamInfo : INotifyPropertyChanged
     private string CodecLabel => LanguageService.T(Codec switch
     {
         "pcm_bluray" or "pcm_dvd" or "pcm_dvda" => "LPCM",
+        "flac" => "FLAC / PCM",
         "mlp" => "可逆圧縮音声",
         "dts" when Profile == "DTS-HD MA" => "可逆圧縮音声",
         _ => "圧縮音声"

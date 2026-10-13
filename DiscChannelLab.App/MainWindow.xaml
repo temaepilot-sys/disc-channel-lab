@@ -55,6 +55,9 @@
                         <Button Content="{local:Loc Key='フォルダーを開く'}" Click="Folder_Click"/>
                         <Button Content="{local:Loc Key='ISOを開く'}" Click="Iso_Click" Margin="0"/>
                     </WrapPanel>
+                    <Button Content="{local:Loc Key='SACD抽出ツール'}" Click="SacdTool_Click"
+                            HorizontalAlignment="Left" Margin="0,4,0,8"
+                            ToolTip="{local:Loc Key='sacd_extract.exe（EuFlo 0.3.9.x互換版）を指定します。別途用意してください。'}"/>
 
                     <TextBlock Text="{local:Loc Key='タイトル / チャプター'}" Margin="0,0,0,4"/>
                     <ComboBox x:Name="PlaylistCombo" ItemsSource="{Binding Playlists}" SelectedItem="{Binding SelectedPlaylist, Mode=TwoWay}"

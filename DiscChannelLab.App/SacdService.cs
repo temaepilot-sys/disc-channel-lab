@@ -25,13 +25,14 @@ public sealed class SacdService(ToolPaths paths, ProcessRunner runner, AppLog lo
     public IProgress<string>? Progress { get; set; }
     public static string ToolPreferencePath => AppDataPaths.Current.PreferencePath("sacd-tool.json");
 
-    public static string? FindTool()
+    public static string? FindTool(string? preferencePath = null)
     {
+        preferencePath ??= ToolPreferencePath;
         try
         {
-            if (File.Exists(ToolPreferencePath))
+            if (File.Exists(preferencePath))
             {
-                var saved = JsonSerializer.Deserialize<ToolPreference>(File.ReadAllText(ToolPreferencePath));
+                var saved = JsonSerializer.Deserialize<ToolPreference>(File.ReadAllText(preferencePath));
                 if (saved is not null && File.Exists(saved.Path)) return saved.Path;
             }
         }
@@ -47,17 +48,18 @@ public sealed class SacdService(ToolPaths paths, ProcessRunner runner, AppLog lo
         return null;
     }
 
-    public static void SaveTool(string path)
+    public static void SaveTool(string path, string? preferencePath = null)
     {
+        preferencePath = Path.GetFullPath(preferencePath ?? ToolPreferencePath);
         path = Path.GetFullPath(path);
         if (!File.Exists(path) || !Path.GetExtension(path).Equals(".exe", StringComparison.OrdinalIgnoreCase))
             throw new FileNotFoundException("sacd_extract.exe が見つかりません。", path);
-        Directory.CreateDirectory(Path.GetDirectoryName(ToolPreferencePath)!);
-        var temporary = ToolPreferencePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        Directory.CreateDirectory(Path.GetDirectoryName(preferencePath)!);
+        var temporary = preferencePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
             File.WriteAllText(temporary, JsonSerializer.Serialize(new ToolPreference(path)));
-            File.Move(temporary, ToolPreferencePath, overwrite: true);
+            File.Move(temporary, preferencePath, overwrite: true);
         }
         finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }

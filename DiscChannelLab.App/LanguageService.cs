@@ -58,7 +58,7 @@ public sealed class LanguageService : INotifyPropertyChanged
         ["Blu-ray / DVD / SACD ISOファイルを選択"] = "Select a Blu-ray, DVD or SACD ISO file",
         ["SACD抽出ツール"] = "SACD extraction tool",
         ["sacd_extract.exe（EuFlo 0.3.9.x互換版）を選択"] = "Select sacd_extract.exe (EuFlo 0.3.9.x compatible)",
-        ["sacd_extract.exe（EuFlo 0.3.9.x互換版）を指定します。別途用意してください。"] = "Choose a separately supplied sacd_extract.exe compatible with EuFlo 0.3.9.x.",
+        ["sacd_extract.exe（EuFlo 0.3.9.x互換版）を指定します。一度選ぶと次回から自動で使用します。"] = "Choose a separately supplied sacd_extract.exe compatible with EuFlo 0.3.9.x. Your selection is remembered and reused on subsequent launches.",
         ["SACDの曲情報を読み込んでいます"] = "Reading SACD track information",
         ["SACDの選択曲を準備しています"] = "Preparing the selected SACD track",
         ["SACD ISO の構造を確認できません。"] = "The SACD ISO structure could not be identified.",

@@ -10,6 +10,22 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Threading;
 
+if (args is ["sacd-tool-preference-save", var selectedTool, var toolPreference])
+{
+    SacdService.SaveTool(selectedTool, toolPreference);
+    return 0;
+}
+if (args is ["sacd-tool-preference-load", var savedToolPreference])
+{
+    Console.WriteLine(JsonSerializer.Serialize(SacdService.FindTool(savedToolPreference)));
+    return 0;
+}
+if (args is ["sacd-tool-preference-test", var toolPreferenceOutput])
+{
+    await SacdToolPreferenceTests.RunAsync(toolPreferenceOutput);
+    return 0;
+}
+
 if (args.Length >= 2 && args[0] == "sacd-tool-fixture")
 {
     await SacdTests.FixtureAsync(args[1], args.Skip(2).ToArray());

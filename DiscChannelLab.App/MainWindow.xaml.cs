@@ -26,6 +26,7 @@ public partial class MainWindow : Window
         ThemeToggle.IsChecked = ThemeService.IsDark;
         _model = new MainViewModel();
         DataContext = _model;
+        UpdateSacdToolPath();
         LanguageCombo.SelectedIndex = LanguageService.Instance.IsJapanese ? 1 : 0;
         _driveTimer.Tick += async (_, _) => await _model.DetectInsertedDiscAsync();
         _playTimer.Tick += (_, _) => _model.AdvancePlaybackClock();
@@ -166,15 +167,25 @@ public partial class MainWindow : Window
 
     private void SacdTool_Click(object sender, RoutedEventArgs e) => ChooseSacdTool();
 
+    private void UpdateSacdToolPath()
+    {
+        var path = SacdService.FindTool();
+        SacdToolPathText.Text = path ?? "";
+        SacdToolPathText.Visibility = path is null ? Visibility.Collapsed : Visibility.Visible;
+    }
+
     private bool ChooseSacdTool()
     {
+        var currentTool = SacdService.FindTool();
         var dialog = new OpenFileDialog
         {
             Title = LanguageService.T("sacd_extract.exe（EuFlo 0.3.9.x互換版）を選択"),
-            Filter = "sacd_extract.exe|sacd_extract.exe|Executable (*.exe)|*.exe", CheckFileExists = true
+            Filter = "sacd_extract.exe|sacd_extract.exe|Executable (*.exe)|*.exe", CheckFileExists = true,
+            InitialDirectory = currentTool is null ? "" : System.IO.Path.GetDirectoryName(currentTool) ?? "",
+            FileName = currentTool is null ? "sacd_extract.exe" : System.IO.Path.GetFileName(currentTool)
         };
         if (dialog.ShowDialog(this) != true) return false;
-        try { SacdService.SaveTool(dialog.FileName); return true; }
+        try { SacdService.SaveTool(dialog.FileName); UpdateSacdToolPath(); return true; }
         catch (Exception ex) { MessageBox.Show(this, LanguageService.T(ex.Message), "SACD tool", MessageBoxButton.OK, MessageBoxImage.Error); return false; }
     }
 

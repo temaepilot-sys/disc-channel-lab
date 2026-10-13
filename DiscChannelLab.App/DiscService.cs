@@ -80,10 +80,22 @@ public sealed class DiscService(FfprobeService probe, AppLog log, SacdService? s
         return full;
     }
 
-    public static bool HasSupportedSource(string root) =>
-        Directory.Exists(Path.Combine(root, "BDMV", "PLAYLIST")) ||
-        File.Exists(Path.Combine(root, "AUDIO_TS", "AUDIO_TS.IFO")) ||
-        File.Exists(Path.Combine(root, "VIDEO_TS", "VIDEO_TS.IFO")) || SacdService.IsSacdIso(root);
+    public static bool HasSupportedSource(string? root)
+    {
+        // A selector can briefly have no value while its items are refreshed or removed.
+        if (string.IsNullOrWhiteSpace(root)) return false;
+        try
+        {
+            return Directory.Exists(Path.Combine(root, "BDMV", "PLAYLIST")) ||
+                File.Exists(Path.Combine(root, "AUDIO_TS", "AUDIO_TS.IFO")) ||
+                File.Exists(Path.Combine(root, "VIDEO_TS", "VIDEO_TS.IFO")) || SacdService.IsSacdIso(root);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            // A removed drive, locked ISO or unavailable path is not a usable source.
+            return false;
+        }
+    }
 
     public async Task<(IReadOnlyList<AudioStreamInfo> Streams, IReadOnlyList<TrackRow> Tracks)> AnalyzePlaylistAsync(DiscAnalysis disc, PlaylistInfo playlist, CancellationToken token)
     {

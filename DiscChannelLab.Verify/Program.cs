@@ -10,6 +10,12 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Threading;
 
+if (args is ["source-selection-test", var sourceSelectionOutput])
+{
+    SourceSelectionTests.Run(sourceSelectionOutput);
+    return 0;
+}
+
 if (args is ["sacd-tool-preference-save", var selectedTool, var toolPreference])
 {
     SacdService.SaveTool(selectedTool, toolPreference);

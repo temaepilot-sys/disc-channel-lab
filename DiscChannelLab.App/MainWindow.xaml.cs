@@ -135,8 +135,10 @@ public partial class MainWindow : Window
     {
         if (!IsLoaded || _model is null || _model.IsBusy) return;
         CommitTrackEdits();
-        if (!DiscService.HasSupportedSource(_model.Source)) { _model.ClearCurrentDisc(); return; }
-        await _model.OpenSourceAsync(_model.Source);
+        // Use this selection, rather than a binding value that may still be updating.
+        var source = SourceCombo.SelectedItem as string ?? "";
+        if (!DiscService.HasSupportedSource(source)) { _model.ClearCurrentDisc(); return; }
+        await _model.OpenSourceAsync(source);
     }
 
     private async void Folder_Click(object sender, RoutedEventArgs e)

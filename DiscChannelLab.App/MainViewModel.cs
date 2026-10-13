@@ -35,7 +35,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
     private double _playClockBase;
     private int _transportVersion;
     private bool _isScrubbing;
-    private string _source = "";
+    private string? _source;
     private string _selectedIsoPath = "";
     private string? _isoRoot;
     private string _albumTitle = "ディスクを入れてください";
@@ -83,7 +83,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
     public ObservableCollection<ChannelChoice> PreviewChannels { get; } = [];
     public ObservableCollection<ChannelMeter> ChannelMeters { get; } = [];
     public IReadOnlyList<string?> ChapterTitles => _loadedPlaylist?.ChapterTitles ?? [];
-    public string Source { get => _source; set => Set(ref _source, value); }
+    public string? Source { get => _source; set => Set(ref _source, value); }
     public string SelectedIsoPath { get => _selectedIsoPath; private set => Set(ref _selectedIsoPath, value); }
     public string AlbumTitle { get => _disc is null ? LanguageService.T(_albumTitle) : _albumTitle; private set => Set(ref _albumTitle, value); }
     public string TitleName
@@ -460,7 +460,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
         }
     }
 
-    public async Task OpenSourceAsync(string path)
+    public async Task OpenSourceAsync(string? path)
     {
         if (IsBusy || string.IsNullOrWhiteSpace(path)) return;
         if (_isoRoot is not null && !Path.GetFullPath(path).Equals(_isoRoot, StringComparison.OrdinalIgnoreCase))

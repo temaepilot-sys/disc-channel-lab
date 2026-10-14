@@ -16,6 +16,7 @@ public partial class MainWindow : Window
     private readonly MainViewModel _model;
     private bool _switchingMixPreview;
     private MixerWindow? _mixerWindow;
+    private CacheWindow? _cacheWindow;
     private bool _mixerOpened;
     private readonly DispatcherTimer _driveTimer = new() { Interval = TimeSpan.FromSeconds(3) };
     private readonly DispatcherTimer _playTimer = new() { Interval = TimeSpan.FromMilliseconds(30) };
@@ -118,6 +119,7 @@ public partial class MainWindow : Window
 
     private void Window_Closing(object? sender, CancelEventArgs e)
     {
+        _cacheWindow?.Close();
         _mixerWindow?.Close();
         CommitTrackEdits();
         _driveTimer.Stop();
@@ -134,8 +136,18 @@ public partial class MainWindow : Window
         await _model.OpenSourceAsync(_model.Source);
     }
 
-    private async void ClearCache_Click(object sender, RoutedEventArgs e) => await _model.ClearCachesAsync();
-    private async void RefreshCache_Click(object sender, RoutedEventArgs e) => await _model.RefreshCacheSizeAsync();
+    private void OpenCacheControl_Click(object sender, RoutedEventArgs e)
+    {
+        if (_cacheWindow is not null)
+        {
+            if (_cacheWindow.WindowState == WindowState.Minimized) _cacheWindow.WindowState = WindowState.Normal;
+            _cacheWindow.Activate();
+            return;
+        }
+        _cacheWindow = new CacheWindow(_model) { Owner = this };
+        _cacheWindow.Closed += (_, _) => _cacheWindow = null;
+        _cacheWindow.Show();
+    }
 
     private async void Source_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {

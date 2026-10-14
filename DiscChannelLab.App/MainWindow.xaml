@@ -160,17 +160,8 @@
                                FontSize="12" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap"/>
                 </StackPanel>
             </ScrollViewer>
-                <StackPanel Grid.Row="1">
-                    <Separator Margin="0,12,0,8"/>
-                    <TextBlock Text="{local:Loc Key='キャッシュ'}" FontWeight="SemiBold"/>
-                    <TextBlock x:Name="CacheSizeLabel" Text="{Binding CacheSizeText}" FontSize="19" FontWeight="SemiBold" Margin="0,5,0,4"/>
-                    <TextBlock Text="{Binding CacheDetailsText}" FontSize="11" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap"/>
-                    <WrapPanel Margin="0,8,0,6">
-                        <Button x:Name="ClearCacheButton" Content="{local:Loc Key='キャッシュをクリア'}" Click="ClearCache_Click" IsEnabled="{Binding CanClearCache}"/>
-                        <Button Content="{local:Loc Key='容量を更新'}" Click="RefreshCache_Click"/>
-                    </WrapPanel>
-                    <TextBlock Text="{Binding CacheClearHint}" FontSize="11" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap"/>
-                </StackPanel>
+                <Button x:Name="CacheControlButton" Grid.Row="1" Content="{local:Loc Key='キャッシュ管理'}"
+                        Click="OpenCacheControl_Click" HorizontalAlignment="Left" Margin="0,12,0,0"/>
             </Grid>
         </Border>
 

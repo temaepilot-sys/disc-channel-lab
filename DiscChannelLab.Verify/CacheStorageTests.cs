@@ -70,12 +70,23 @@ internal static class CacheStorageTests
                 var app = new App(); app.InitializeComponent();
                 SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext());
                 var model = new MainViewModel(cacheStorage: store);
-                main = new MainWindow(model);
-                var content = (FrameworkElement)main.Content;
-                content.Measure(new Size(1140, 850)); content.Arrange(new Rect(0, 0, 1140, 850));
+                main = new MainWindow(model) { ShowActivated = false, ShowInTaskbar = false, Opacity = 0 };
+                // Show the owner for actual window/button events without scanning real discs.
+                var loaded = typeof(MainWindow).GetMethod("Window_Loaded", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                main.Loaded -= (RoutedEventHandler)Delegate.CreateDelegate(typeof(RoutedEventHandler), main, loaded);
+                main.Show(); Pump(Task.CompletedTask);
                 Pump(model.RefreshCacheSizeAsync());
-                var size = (TextBlock)main.FindName("CacheSizeLabel");
-                var clearButton = (Button)main.FindName("ClearCacheButton");
+                Check(main.FindName("CacheSizeLabel") is null && main.FindName("ClearCacheButton") is null,
+                    "Main GUI displays only the cache control button");
+                var openButton = (Button)main.FindName("CacheControlButton");
+                openButton.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent)); Pump(Task.CompletedTask);
+                var cacheWindow = main.OwnedWindows.OfType<CacheWindow>().Single();
+                cacheWindow.Opacity = 0;
+                openButton.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent)); Pump(Task.CompletedTask);
+                Check(main.IsEnabled && main.OwnedWindows.OfType<CacheWindow>().Single() == cacheWindow,
+                    "Cache window is nonmodal and reused by repeated button clicks");
+                var size = (TextBlock)cacheWindow.FindName("CacheSizeLabel");
+                var clearButton = (Button)cacheWindow.FindName("ClearCacheButton");
                 Check(size.Text == "100 B" && model.CanClearCache, "WPF cache size binding and available clear control");
                 typeof(MainViewModel).GetProperty(nameof(MainViewModel.IsPlaying))!.SetValue(model, true);
                 Check(!model.CanClearCache, "Playing disables clearing");
@@ -86,6 +97,15 @@ internal static class CacheStorageTests
                 var wait = Stopwatch.StartNew();
                 while ((model.IsBusy || size.Text != "0 B") && wait.Elapsed < TimeSpan.FromSeconds(10)) Pump(Task.CompletedTask);
                 Check(size.Text == "0 B" && !Directory.Exists(store.AudioPath), "The actual clear button deletes cache and updates the on-screen size");
+                cacheWindow.Close(); Pump(Task.CompletedTask);
+                Write(audio, 55);
+                openButton.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent)); Pump(Task.CompletedTask);
+                var reopened = main.OwnedWindows.OfType<CacheWindow>().Single(); reopened.Opacity = 0;
+                var reopenedSize = (TextBlock)reopened.FindName("CacheSizeLabel");
+                wait.Restart();
+                while (reopenedSize.Text != "55 B" && wait.Elapsed < TimeSpan.FromSeconds(10)) Pump(Task.CompletedTask);
+                Check(reopened != cacheWindow && reopenedSize.Text == "55 B", "Reopening cache control refreshes its size");
+                reopened.Close(); Pump(Task.CompletedTask);
                 model.SelectedStream = new() { Index = 0, Codec = "pcm_bluray", SampleRate = 48000, BitDepth = 16, Channels = 6, ChannelLayout = "5.1" };
                 var multichannel = (CheckBox)main.FindName("MultichannelFlacCheck");
                 multichannel.SetCurrentValue(ToggleButton.IsCheckedProperty, true);

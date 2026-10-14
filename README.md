@@ -139,7 +139,7 @@ The check simulates the external tool's ISO/TOC interface and generates real mul
 
 ## Cache size and cleanup
 
-The bottom of the left panel shows the combined size of **SACD audio caches** and the linked **viewer cache** at startup. Use **Refresh size** to measure it again and **Clear cache** to remove these generated files. Clearing is available after playback, conversion and title inspection finish, and after other players and the viewer close. Inaccessible files are reported. A cleared SACD track is extracted and decoded again when needed.
+Use **Cache control** at the bottom of the left panel to open a separate window showing the combined size of **SACD audio caches** and the linked **viewer cache**. Size is measured at startup and again when the window opens. Use **Refresh size** to measure it again and **Clear cache** to remove these generated files. The window leaves the player controls available. Clearing is available after playback, conversion and title inspection finish, and after other players and the viewer close. Inaccessible files are reported. A cleared SACD track is extracted and decoded again when needed.
 
 Track/album edits, mixer presets, viewer settings, exported FLAC files, logs and the required FFmpeg tools are kept. Tool storage is shown separately from the clearable total. Cache traversal refuses filesystem links. There is no automatic expiry or size limit.
 

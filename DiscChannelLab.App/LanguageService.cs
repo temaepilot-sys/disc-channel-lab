@@ -56,6 +56,7 @@ public sealed class LanguageService : INotifyPropertyChanged
     private static readonly Dictionary<string, string> English = new(StringComparer.Ordinal)
     {
         ["キャッシュ"] = "Cache",
+        ["キャッシュ管理"] = "Cache control",
         ["キャッシュをクリア"] = "Clear cache",
         ["容量を更新"] = "Refresh size",
         ["容量を確認しています…"] = "Checking size…",

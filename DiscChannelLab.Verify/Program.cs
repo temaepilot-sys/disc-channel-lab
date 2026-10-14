@@ -10,6 +10,17 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Threading;
 
+if (args is ["multichannel-export-tests", var multichannelOutput])
+{
+    await MultichannelExportTests.RunAsync(multichannelOutput);
+    return 0;
+}
+if (args is ["cache-tests", var cacheOutput])
+{
+    await CacheStorageTests.RunAsync(cacheOutput);
+    return 0;
+}
+
 if (args is ["source-selection-test", var sourceSelectionOutput])
 {
     SourceSelectionTests.Run(sourceSelectionOutput);

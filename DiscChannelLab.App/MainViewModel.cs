@@ -122,6 +122,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
         {
             var enabled = value && CanDownmixStereo;
             if (!Set(ref _saveStereoDownmix, enabled)) return;
+            if (enabled) SaveMultichannelFlac = false;
             if (enabled) SaveMixerDownmix = false;
             if (enabled && _saveIndividualChannels)
             {
@@ -138,6 +139,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
         {
             var enabled = value && CanDownmixStereo;
             if (!Set(ref _saveIndividualChannels, enabled)) return;
+            if (enabled) SaveMultichannelFlac = false;
             if (enabled) SaveMixerDownmix = false;
             if (enabled && _saveStereoDownmix)
             {
@@ -284,6 +286,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
             StopPlayback();
             SaveStereoDownmix = false;
             SaveIndividualChannels = false;
+            SaveMultichannelFlac = false;
             PreviewChannels.Clear();
             PreviewChannels.Add(new ChannelChoice(null, "ステレオミックス"));
             if (value is not null)
@@ -310,14 +313,17 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
             UpdateActions();
         }
     }
-    public bool CanChooseHighRes => SelectedStream?.CanMakeHighResolution == true && !IsBusy;
+    public bool CanChooseHighRes => !IsBusy && (SaveMultichannelFlac ? SelectedStream?.CanMakeOriginalPcm == true : SelectedStream?.CanMakeHighResolution == true);
     public string SelectedStreamNote => LanguageService.T(SelectedStream is { } available && _loadedPlaylist is { } loaded &&
         Tracks.Any(track => track.IsSelected && !available.Covers(loaded, track))
         ? "選択中の曲に、この音声が存在しない区間があります。保存する曲または音声を変更してください。"
         : SelectedStream is { HasSupportedChannels: false }
         ? "この音声のチャンネル数または配置には対応していません。"
         : SelectedStream is { Channels: > 2 } stream && StereoMixSettings.Supports(stream)
-        ? SaveIndividualChannels
+        ? SaveMultichannelFlac
+            ? LanguageService.T("チャンネル数・配置を維持したFLACを保存します。") + " " +
+                (_quality == OutputQuality.Cd ? "16bit / 44.1kHz" : $"{stream.BitDepth}bit / {stream.SampleRate / 1000d:0.0}kHz")
+            : SaveIndividualChannels
             ? $"{stream.Channels}ch をチャンネルごとのモノラル FLAC に保存します。"
             : SaveStereoDownmix
             ? $"{stream.Channels}ch を設定した比率で2chに変換して FLAC に保存します。"
@@ -329,11 +335,11 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
         : SelectedStream is { Channels: 1 }
             ? "モノラルのまま FLAC に保存します。試聴時は左右に同じ音を出します。"
             : "");
-    public bool IsCdSelected { get => _quality == OutputQuality.Cd; set { if (value) { _quality = OutputQuality.Cd; Changed(); Changed(nameof(IsHighResSelected)); Changed(nameof(CanConvert)); Changed(nameof(CanExportMixer)); } } }
-    public bool IsHighResSelected { get => _quality == OutputQuality.HighResolution; set { if (value && CanChooseHighRes) { _quality = OutputQuality.HighResolution; Changed(); Changed(nameof(IsCdSelected)); Changed(nameof(CanConvert)); Changed(nameof(CanExportMixer)); } } }
+    public bool IsCdSelected { get => _quality == OutputQuality.Cd; set { if (value) { _quality = OutputQuality.Cd; Changed(); Changed(nameof(IsHighResSelected)); Changed(nameof(CanConvert)); Changed(nameof(CanExportMixer)); Changed(nameof(SelectedStreamNote)); } } }
+    public bool IsHighResSelected { get => _quality is OutputQuality.HighResolution or OutputQuality.OriginalPcm; set { if (value && CanChooseHighRes) { _quality = SaveMultichannelFlac ? OutputQuality.OriginalPcm : OutputQuality.HighResolution; Changed(); Changed(nameof(IsCdSelected)); Changed(nameof(CanConvert)); Changed(nameof(CanExportMixer)); Changed(nameof(SelectedStreamNote)); } } }
     private bool HasVerifiedAudio => _loadedPlaylist?.Availability is AudioAvailability.Ready or AudioAvailability.Partial;
     public bool CanConvert => !IsPlaying && CanPrepareConversion;
-    private bool CanPrepareConversion => !IsBusy && HasVerifiedAudio && _disc is not null && _loadedPlaylist is not null && SelectedStream is not null && !string.IsNullOrWhiteSpace(OutputFolder) && Tracks.Any(x => x.IsSelected) && Tracks.Where(x => x.IsSelected).All(x => SelectedStream.Covers(_loadedPlaylist, x)) && (_quality == OutputQuality.Cd ? SelectedStream.CanMakeCd : SelectedStream.CanMakeHighResolution);
+    private bool CanPrepareConversion => !IsBusy && HasVerifiedAudio && _disc is not null && _loadedPlaylist is not null && SelectedStream is not null && !string.IsNullOrWhiteSpace(OutputFolder) && Tracks.Any(x => x.IsSelected) && Tracks.Where(x => x.IsSelected).All(x => SelectedStream.Covers(_loadedPlaylist, x)) && QualityAvailable(SelectedStream);
     public bool CanEditTracks => !IsBusy && !IsPlaying && Tracks.Count > 0;
     public bool CanPlay => !IsBusy && HasVerifiedAudio && SelectedTrack is not null && SelectedStream is not null && _disc is not null && _loadedPlaylist is not null && SelectedStream.Covers(_loadedPlaylist, SelectedTrack) && _navigation.CanPlay;
     public bool CanSeek => !IsBusy && SelectedTrack is not null;
@@ -361,8 +367,10 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
     public string LogPath => _log.FilePath;
     public event PropertyChangedEventHandler? PropertyChanged;
 
-    public MainViewModel(TrackEditsStore? editStore = null)
+    public MainViewModel(TrackEditsStore? editStore = null, CacheStorage? cacheStorage = null)
     {
+        _cache = cacheStorage ?? new CacheStorage(AppDataPaths.Current, Path.Combine(AppContext.BaseDirectory, "SpaceSketch"),
+            () => Visualization.IsConnected || Visualization.IsViewerRunning || CacheStorage.RuntimeInUse());
         var paths = new ToolPaths();
         var runner = new ProcessRunner(_log);
         var probe = new FfprobeService(paths, runner);
@@ -397,7 +405,8 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
             if (_disc is not null) RefreshMetadata();
             foreach (var name in new[] { nameof(AlbumTitle), nameof(TitleName), nameof(Status), nameof(PlayPauseText),
                 nameof(SelectedTrackTitle), nameof(SelectedChapterText), nameof(SelectedStreamNote),
-                nameof(VolumeDetails), nameof(ChapterCorrectionNote) }) Changed(name);
+                nameof(VolumeDetails), nameof(ChapterCorrectionNote), nameof(CacheSizeText), nameof(CacheDetailsText),
+                nameof(CacheClearHint), nameof(HighResOptionText), nameof(HighResHelpText) }) Changed(name);
         }
         finally { IsRefreshingLanguage = false; }
     }
@@ -513,6 +522,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
         catch (Exception ex) { HandleError(ex); }
         finally { EndWork(); }
         if (opened) StartBackgroundInspection();
+        if (_disc?.Format == DiscFormat.Sacd) await RefreshCacheSizeAsync();
     }
 
     public async Task OpenIsoAsync(string isoPath)
@@ -585,6 +595,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
         }
         catch (Exception ex) { HandleError(ex); }
         finally { EndWork(); }
+        if (playlist.Format == DiscFormat.Sacd) await RefreshCacheSizeAsync();
     }
 
     private async Task LoadPlaylistCoreAsync(PlaylistInfo playlist, CancellationToken token)
@@ -891,6 +902,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
                 IsPlaying = false;
             }
             session.Dispose();
+            if (_disc?.Format == DiscFormat.Sacd) _ = RefreshCacheSizeAsync();
             if (advance)
             {
                 // The finished task is the task we are in; clear it before starting the next track.
@@ -1056,7 +1068,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
             var progress = new Progress<ConversionProgress>(value => { Progress = value.Fraction; Status = value.Message; });
             SavedFolder = await _conversion.ConvertAsync(_disc, _loadedPlaylist, SelectedStream, chosen, _quality,
                 OutputFolder, progress, _work!.Token, GroupByChapter, SaveStereoDownmix || channelMix is not null, CurrentMix,
-                SaveIndividualChannels, channelMix);
+                SaveIndividualChannels, channelMix, SaveMultichannelFlac);
         }
         catch (Exception ex) { HandleError(ex); }
         finally { EndWork(); }
@@ -1137,6 +1149,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 
     private void UpdateActions()
     {
+        RefreshCacheControls();
         Changed(nameof(SelectedStreamNote));
         Changed(nameof(CanInspect));
         Changed(nameof(CanToggleTail));
@@ -1154,6 +1167,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
         Changed(nameof(CanMerge));
         Changed(nameof(CanDownmixStereo));
         Changed(nameof(CanChoosePreviewChannel));
+        Changed(nameof(CanSaveMultichannel));
     }
 
     private bool Set<T>(ref T target, T value, [CallerMemberName] string? name = null)

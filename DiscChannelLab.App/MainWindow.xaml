@@ -41,7 +41,9 @@
         </DockPanel>
 
         <Border Grid.Row="1" Grid.Column="0" Background="{DynamicResource SurfaceBrush}" CornerRadius="8" Padding="14">
-            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <Grid>
+            <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+            <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                 <StackPanel>
                     <TextBlock Text="{local:Loc Key='ディスク'}" FontSize="17" FontWeight="SemiBold" Margin="0,0,0,10"/>
                     <TextBlock Text="{local:Loc Key='ドライブ'}" Margin="0,0,0,4"/>
@@ -151,13 +153,25 @@
                     <TextBlock Text="{local:Loc Key='保存する音質'}" FontWeight="SemiBold" Margin="0,0,0,9"/>
                     <RadioButton Content="{local:Loc Key='CD音質相当 · 16bit / 44.1kHz'}" GroupName="Quality"
                                  IsChecked="{Binding IsCdSelected, Mode=TwoWay}" Margin="0,0,0,10"/>
-                    <RadioButton Content="{local:Loc Key='ハイレゾ · 元の形式'}" GroupName="Quality"
+                    <RadioButton Content="{Binding HighResOptionText}" GroupName="Quality"
                                  IsEnabled="{Binding CanChooseHighRes}"
                                  IsChecked="{Binding IsHighResSelected, Mode=TwoWay}" Margin="0,0,0,9"/>
-                    <TextBlock Text="{local:Loc Key='ハイレゾは元音源が24bit / 88.2kHz以上のときに選べます。'}"
+                    <TextBlock Text="{Binding HighResHelpText}"
                                FontSize="12" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap"/>
                 </StackPanel>
             </ScrollViewer>
+                <StackPanel Grid.Row="1">
+                    <Separator Margin="0,12,0,8"/>
+                    <TextBlock Text="{local:Loc Key='キャッシュ'}" FontWeight="SemiBold"/>
+                    <TextBlock x:Name="CacheSizeLabel" Text="{Binding CacheSizeText}" FontSize="19" FontWeight="SemiBold" Margin="0,5,0,4"/>
+                    <TextBlock Text="{Binding CacheDetailsText}" FontSize="11" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap"/>
+                    <WrapPanel Margin="0,8,0,6">
+                        <Button x:Name="ClearCacheButton" Content="{local:Loc Key='キャッシュをクリア'}" Click="ClearCache_Click" IsEnabled="{Binding CanClearCache}"/>
+                        <Button Content="{local:Loc Key='容量を更新'}" Click="RefreshCache_Click"/>
+                    </WrapPanel>
+                    <TextBlock Text="{Binding CacheClearHint}" FontSize="11" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap"/>
+                </StackPanel>
+            </Grid>
         </Border>
 
         <Grid Grid.Row="1" Grid.Column="2">
@@ -329,6 +343,8 @@
                     <CheckBox Content="{local:Loc Key='チャンネル別のモノラルFLACを曲ごとに保存'}"
                               IsChecked="{Binding SaveIndividualChannels, Mode=TwoWay}"
                               IsEnabled="{Binding CanDownmixStereo}" Margin="0,0,0,5"/>
+                    <CheckBox x:Name="MultichannelFlacCheck" Content="{local:Loc Key='マルチチャンネルのままFLAC保存'}"
+                              IsChecked="{Binding SaveMultichannelFlac, Mode=TwoWay}" IsEnabled="{Binding CanSaveMultichannel}" Margin="0,0,0,5"/>
                     <CheckBox Content="{local:Loc Key='チャンネルミキサーの設定で2ch FLACを保存'}"
                               IsChecked="{Binding SaveMixerDownmix}" IsEnabled="{Binding CanDownmixStereo}" Margin="0,0,0,5"/>
                     <WrapPanel Margin="0,0,0,7">

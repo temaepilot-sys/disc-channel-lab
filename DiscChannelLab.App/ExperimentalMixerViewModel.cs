@@ -24,7 +24,7 @@ public sealed partial class MainViewModel
         set
         {
             if (!Set(ref _saveMixerDownmix, value && CanDownmixStereo)) return;
-            if (_saveMixerDownmix) { SaveStereoDownmix = false; SaveIndividualChannels = false; }
+            if (_saveMixerDownmix) { SaveStereoDownmix = false; SaveIndividualChannels = false; SaveMultichannelFlac = false; }
         }
     }
     private ChannelMixExport CaptureMixerExport() => new(SelectedStream!, MixerStrips.Select(x => x.Snapshot()),

@@ -37,6 +37,14 @@ public sealed class VisualizerBridge : IDisposable
     private Process? _viewer;
     public string PipeName { get; } = $"DiscChannelLab.SpaceSketch.v1.{Environment.ProcessId}.{Guid.NewGuid():N}";
     public bool IsConnected => _connected;
+    public bool IsViewerRunning
+    {
+        get
+        {
+            try { return _viewer is { HasExited: false }; }
+            catch (InvalidOperationException) { return false; }
+        }
+    }
     public string? LastError { get; private set; }
     public void Start() => _worker ??= Task.Run(RunAsync);
 

@@ -3,7 +3,7 @@ using System.Runtime.CompilerServices;
 
 namespace Disc2Flac;
 
-public enum OutputQuality { Cd, HighResolution }
+public enum OutputQuality { Cd, HighResolution, OriginalPcm }
 public enum DiscFormat { BluRay, DvdAudio, DvdVideo, Sacd }
 public enum AudioAvailability { Pending, Analyzing, Ready, Partial, NoAudio, Unsupported, Failed, Protected }
 
@@ -168,6 +168,7 @@ public sealed class AudioStreamInfo : INotifyPropertyChanged
     public bool HasSupportedChannels => Channels is >= 1 and <= 8 && (Channels <= 2 || ChannelLayout != "unknown");
     public bool CanMakeCd => HasSupportedChannels && BitDepth >= 16 && SampleRate >= 44100;
     public bool CanMakeHighResolution => HasSupportedChannels && BitDepth >= 24 && SampleRate >= 88200;
+    public bool CanMakeOriginalPcm => HasSupportedChannels && BitDepth is 16 or 24 && SampleRate >= 44100;
     public string DisplayName => $"{CodecLabel} · {(Channels == 1 ? "Mono" : IsStereo ? "Stereo" : $"{Channels}ch ({ChannelLayout})")} · {SampleRate / 1000d:0.0}kHz / {(BitDepth is null ? LanguageService.T("深度不明") : $"{BitDepth}bit")}" +
         (HasPartialCoverage ? $" · {LanguageService.T("一部区間のみ")} #{Index}" : "") +
         (SilentTailClipId is not null ? $" · {LanguageService.T("末尾の映像区間は無音")}" : "");

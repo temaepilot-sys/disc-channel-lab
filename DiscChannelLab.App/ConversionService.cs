@@ -12,8 +12,12 @@ public sealed class ConversionService(ToolPaths paths, ProcessRunner runner, Ffp
         DiscAnalysis disc, PlaylistInfo playlist, AudioStreamInfo stream, IReadOnlyList<TrackRow> selected,
         OutputQuality quality, string outputRoot, IProgress<ConversionProgress> progress, CancellationToken token,
         bool groupByChapter = false, bool saveStereoDownmix = false, StereoMixSettings? mix = null,
-        bool saveIndividualChannels = false, ChannelMixExport? channelMix = null)
+        bool saveIndividualChannels = false, ChannelMixExport? channelMix = null, bool saveMultichannelFlac = false)
     {
+        if (saveMultichannelFlac && (saveStereoDownmix || saveIndividualChannels || channelMix is not null || stream.Channels <= 2))
+            throw new InvalidOperationException("マルチチャンネル保存と2chミックス・個別保存は同時に選べません。");
+        if (quality == OutputQuality.OriginalPcm && (!saveMultichannelFlac || !stream.CanMakeOriginalPcm))
+            throw new InvalidOperationException("この音声は元のPCM音質で保存できません。");
         if (channelMix is not null)
         {
             channelMix.Validate(stream);
@@ -29,7 +33,7 @@ public sealed class ConversionService(ToolPaths paths, ProcessRunner runner, Ffp
         if (playlist.Format is not (DiscFormat.BluRay or DiscFormat.Sacd))
             return await new DvdConversionService(paths, runner, probe, log).ConvertAsync(
                 disc, playlist, stream, selected, quality, outputRoot, progress, token, groupByChapter,
-                saveStereoDownmix, mix, saveIndividualChannels, channelMix);
+                saveStereoDownmix, mix, saveIndividualChannels, channelMix, saveMultichannelFlac);
         if (selected.Count == 0) throw new InvalidOperationException("保存する曲またはチャプターを選択してください。");
         if (quality == OutputQuality.Cd && !stream.CanMakeCd) throw new InvalidOperationException("この音声はCD音質への変換条件を満たしていません。");
         if (quality == OutputQuality.HighResolution && !stream.CanMakeHighResolution) throw new InvalidOperationException("この音声はハイレゾで保存できません。");
@@ -76,7 +80,7 @@ public sealed class ConversionService(ToolPaths paths, ProcessRunner runner, Ffp
                         source = AudioStreamMatcher.Resolve(stream, segment.Clip.Sacd is null
                             ? await probe.ProbeClipAsync(sourcePath, token) : [await probe.ProbeFileAsync(sourcePath, token)]);
                         if (quality == OutputQuality.Cd ? !source.CanMakeCd :
-                            !source.CanMakeHighResolution || source.SampleRate != expectedRate || source.BitDepth != expectedDepth)
+                            !(quality == OutputQuality.OriginalPcm ? source.CanMakeOriginalPcm : source.CanMakeHighResolution) || source.SampleRate != expectedRate || source.BitDepth != expectedDepth)
                             throw new InvalidDataException($"クリップ {segment.Clip.Id} は選択した保存音質の条件を満たしていません。");
                         if (source.StartTimeTicks is null)
                             throw new InvalidDataException($"クリップ {segment.Clip.Id} の音声開始時刻が不明です。");
@@ -109,11 +113,13 @@ public sealed class ConversionService(ToolPaths paths, ProcessRunner runner, Ffp
                     // The concat demuxer shares the first part's STREAMINFO with later parts.
                     arguments.AddRange([
                         "-map", $"0:{(silent ? 0 : source.Index)}", "-vn", "-sn", "-dn", "-af", filter,
-                        "-c:a", "flac", "-frame_size", "4096", "-sample_fmt", quality == OutputQuality.Cd ? "s16" : "s32",
+                        "-c:a", "flac", "-frame_size", "4096", "-sample_fmt", expectedDepth <= 16 ? "s16" : "s32",
                         "-metadata", $"title={title}", "-metadata", $"track={track.Number}",
                         "-metadata", $"album={flacAlbum}"
                     ]);
                     AddDiscTags(arguments, disc, playlist, track, chapterRange, chapterTitle ?? title);
+                    if (quality != OutputQuality.Cd) arguments.AddRange(["-bits_per_raw_sample", expectedDepth!.Value.ToString(CultureInfo.InvariantCulture)]);
+                    if (saveMultichannelFlac) arguments.AddRange(["-metadata", "OUTPUT_MODE=multichannel PCM without mixer"]);
                     if (channelMix is not null) channelMix.AddTags(arguments);
                     else if (saveStereoDownmix) AddDownmixTags(arguments, mix);
                     if (channel is not null) AddChannelTags(arguments, stream, channel);
@@ -161,10 +167,12 @@ public sealed class ConversionService(ToolPaths paths, ProcessRunner runner, Ffp
                         string.Join("", parts.Select(x => $"file '{Path.GetFileName(x)}'\n")), Encoding.ASCII);
                     var joinArguments = new List<string>
                     { "-hide_banner", "-nostdin", "-v", "error", "-xerror", "-f", "concat", "-safe", "0", "-i", listPath,
-                         "-map", "0:a:0", "-c:a", "flac", "-frame_size", "4096", "-sample_fmt", quality == OutputQuality.Cd ? "s16" : "s32",
+                         "-map", "0:a:0", "-c:a", "flac", "-frame_size", "4096", "-sample_fmt", expectedDepth <= 16 ? "s16" : "s32",
                          "-metadata", $"title={title}", "-metadata", $"track={track.Number}",
                          "-metadata", $"album={flacAlbum}" };
                     AddDiscTags(joinArguments, disc, playlist, track, chapterRange, chapterTitle ?? title);
+                    if (quality != OutputQuality.Cd) joinArguments.AddRange(["-bits_per_raw_sample", expectedDepth!.Value.ToString(CultureInfo.InvariantCulture)]);
+                    if (saveMultichannelFlac) joinArguments.AddRange(["-metadata", "OUTPUT_MODE=multichannel PCM without mixer"]);
                     if (channelMix is not null) channelMix.AddTags(joinArguments);
                     else if (saveStereoDownmix) AddDownmixTags(joinArguments, mix);
                     if (channel is not null) AddChannelTags(joinArguments, stream, channel);

@@ -137,6 +137,21 @@ dotnet run --project DiscChannelLab.Verify -c Release -- sacd-tests verification
 
 The check simulates the external tool's ISO/TOC interface and generates real multichannel DSF data, decoded through FFmpeg and the existing mixer/export paths; preview uses a dummy audio device. An actual SACD ISO and compatible extractor are still needed to verify image-specific compatibility and listening quality.
 
+## Cache size and cleanup
+
+The bottom of the left panel shows the combined size of **SACD audio caches** and the linked **viewer cache** at startup. Use **Refresh size** to measure it again and **Clear cache** to remove these generated files. Clearing is available after playback, conversion and title inspection finish, and after other players and the viewer close. Inaccessible files are reported. A cleared SACD track is extracted and decoded again when needed.
+
+Track/album edits, mixer presets, viewer settings, exported FLAC files, logs and the required FFmpeg tools are kept. Tool storage is shown separately from the clearable total. Cache traversal refuses filesystem links. There is no automatic expiry or size limit.
+
+## Multichannel FLAC export
+
+Select **Save as Multichannel FLAC**, then choose the quality on the left:
+
+- **CD quality**: 16-bit / 44.1 kHz per channel, keeping the channel count and layout. This is a multichannel FLAC, not an audio CD.
+- **Original PCM quality**: retain the sample rate and 16-bit or 24-bit PCM precision without applying the stereo mixer or master volume. For SACD, this means the already decoded **24-bit / 88.2 kHz PCM**, with audio samples matching the cache. It does not represent a native DSD bitstream.
+
+Existing selected-track export, edited boundaries, tags and disc/title folder organization apply. This mode excludes stereo-mixer export and separate mono-channel export; existing files are not overwritten.
+
 ## Requirements
 
 - Windows x64.

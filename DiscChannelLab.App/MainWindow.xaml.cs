@@ -20,15 +20,17 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _driveTimer = new() { Interval = TimeSpan.FromSeconds(3) };
     private readonly DispatcherTimer _playTimer = new() { Interval = TimeSpan.FromMilliseconds(30) };
 
-    public MainWindow()
+    public MainWindow() : this(null) { }
+
+    public MainWindow(MainViewModel? model)
     {
         InitializeComponent();
         ThemeToggle.IsChecked = ThemeService.IsDark;
-        _model = new MainViewModel();
+        _model = model ?? new MainViewModel();
         DataContext = _model;
         UpdateSacdToolPath();
         LanguageCombo.SelectedIndex = LanguageService.Instance.IsJapanese ? 1 : 0;
-        _driveTimer.Tick += async (_, _) => await _model.DetectInsertedDiscAsync();
+        _driveTimer.Tick += async (_, _) => { await _model.DetectInsertedDiscAsync(); _model.RefreshCacheControls(); };
         _playTimer.Tick += (_, _) => _model.AdvancePlaybackClock();
         AddHandler(PreviewMouseLeftButtonDownEvent, new MouseButtonEventHandler(Tracks_PreviewMouseLeftButtonDown), true);
         PlayerSeekSlider.AddHandler(PreviewMouseLeftButtonDownEvent, new MouseButtonEventHandler(SeekSlider_MouseDown), true);
@@ -60,6 +62,7 @@ public partial class MainWindow : Window
 
     private void OpenVisualizer_Click(object sender, RoutedEventArgs e)
     {
+        if (_model.IsClearingCache) return;
         try
         {
             string? executable = null;
@@ -99,7 +102,7 @@ public partial class MainWindow : Window
     {
         _driveTimer.Start();
         _playTimer.Start();
-        await _model.DetectInsertedDiscAsync();
+        await Task.WhenAll(_model.RefreshCacheSizeAsync(), _model.DetectInsertedDiscAsync());
     }
 
     private void ThemeToggle_Changed(object sender, RoutedEventArgs e)
@@ -130,6 +133,9 @@ public partial class MainWindow : Window
         _model.RefreshDrives();
         await _model.OpenSourceAsync(_model.Source);
     }
+
+    private async void ClearCache_Click(object sender, RoutedEventArgs e) => await _model.ClearCachesAsync();
+    private async void RefreshCache_Click(object sender, RoutedEventArgs e) => await _model.RefreshCacheSizeAsync();
 
     private async void Source_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {

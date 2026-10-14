@@ -66,7 +66,8 @@ internal static class SacdTests
         var prefix = new List<string>();
         if (Path.GetFileNameWithoutExtension(host).Equals("dotnet", StringComparison.OrdinalIgnoreCase)) prefix.Add(Assembly.GetExecutingAssembly().Location);
         prefix.AddRange(["sacd-tool-fixture", fixture]);
-        var cache = Path.Combine(output, "cache");
+        var cachePaths = new AppDataPaths(Path.Combine(output, "cache-appdata"));
+        var cache = Path.Combine(cachePaths.Root, "sacd-cache");
         var reader = new SacdService(paths, runner, log, cache, host, prefix);
         var service = new DiscService(probe, log, reader);
         var checks = new List<string>();
@@ -119,6 +120,41 @@ internal static class SacdTests
         Check(editStore.Load(disc, multi)![0].Title == "曲名 One" && editStore.Load(disc, stereo) is null, "Area-specific edits not isolated");
         Passed("Disc and area-specific metadata edits preserved");
         var converter = new ConversionService(paths, runner, probe, log, reader);
+        var multiOutput = Path.Combine(output, "multichannel-exports");
+        var originalFolder = await converter.ConvertAsync(disc, multi, audio, [result.Tracks[0]], OutputQuality.OriginalPcm,
+            multiOutput, new Progress<ConversionProgress>(), CancellationToken.None, saveMultichannelFlac: true);
+        var originalFile = Directory.GetFiles(originalFolder, "*.flac").Single();
+        var originalFormat = await probe.ProbeFileAsync(originalFile, CancellationToken.None);
+        Check(originalFormat.Channels == 6 && originalFormat.ChannelLayout == audio.ChannelLayout && originalFormat.BitDepth == 24 &&
+              originalFormat.SampleRate == 88200 && originalFormat.SampleCount == audio.SampleCount, "Original multichannel format changed");
+        async Task<byte[]> DecodeMulti(string file, string stem, bool cdReference = false)
+        {
+            var path = Path.Combine(output, stem + ".pcm");
+            var args = new List<string> { "-v", "error", "-i", file };
+            if (cdReference) args.AddRange(["-af", "aresample=44100:osf=s16:dither_method=triangular"]);
+            args.AddRange(["-c:a", cdReference ? "pcm_s16le" : "pcm_s32le", "-f", cdReference ? "s16le" : "s32le", "-y", path]);
+            await runner.RunAsync(paths.Ffmpeg, args, CancellationToken.None);
+            return File.ReadAllBytes(path);
+        }
+        var cachedPcm = await DecodeMulti(multi.Clips[0].Sacd!.PcmPath, "cached-multichannel");
+        var exportedPcm = await DecodeMulti(originalFile, "original-multichannel");
+        Check(cachedPcm.SequenceEqual(exportedPcm), "Original export is not sample-identical to cached PCM");
+        Passed("Original 6-channel FLAC matches every cached SACD PCM sample at 24-bit/88.2kHz");
+        await converter.ConvertAsync(disc, multi, audio, [result.Tracks[0]], OutputQuality.Cd,
+            multiOutput, new Progress<ConversionProgress>(), CancellationToken.None, saveMultichannelFlac: true);
+        var multichannelCd = Directory.GetFiles(originalFolder, "*.flac").Single(f => f != originalFile);
+        var multichannelCdFormat = await probe.ProbeFileAsync(multichannelCd, CancellationToken.None);
+        Check(multichannelCdFormat.Channels == 6 && multichannelCdFormat.ChannelLayout == audio.ChannelLayout &&
+              multichannelCdFormat.SampleRate == 44100 && multichannelCdFormat.BitDepth == 16 &&
+              multichannelCdFormat.SampleCount == ConversionService.ToSample(result.Tracks[0].EndTicks, 44100), "Multichannel CD format mismatch");
+        var cdActualPath = Path.Combine(output, "multichannel-cd.pcm");
+        await runner.RunAsync(paths.Ffmpeg, ["-v", "error", "-i", multichannelCd, "-c:a", "pcm_s16le", "-f", "s16le", "-y", cdActualPath], CancellationToken.None);
+        var cdActual = File.ReadAllBytes(cdActualPath); var cdReference = await DecodeMulti(multi.Clips[0].Sacd!.PcmPath, "cd-reference", cdReference: true);
+        Check(cdActual.Length == cdReference.Length, "Multichannel CD duration mismatch");
+        for (int i = 0; i < cdActual.Length; i += 2)
+            Check(Math.Abs(BinaryPrimitives.ReadInt16LittleEndian(cdActual.AsSpan(i, 2)) - BinaryPrimitives.ReadInt16LittleEndian(cdReference.AsSpan(i, 2))) <= 2,
+                "CD multichannel samples differ from independently resampled input");
+        Passed("CD 6-channel FLAC retains channel order with correct 16-bit/44.1kHz PCM and sample count");
         var selected = new[] { new TrackRow { Number = 1, Title = "Across boundary", StartTicks = 9000, EndTicks = 45000, IsChapter = false, Artist = "Track artist" } };
         var outputRoot = Path.Combine(output, "exports");
         var channels = StereoMixSettings.ChannelNames(audio).Select(c => new ExperimentalChannel(c, c == "FC" ? 1 : 0, -1, false)).ToArray();
@@ -149,6 +185,14 @@ internal static class SacdTests
         Check(mono.Length == 6, "Individual channel file count mismatch");
         foreach (var file in mono) Check((await probe.ProbeFileAsync(file, CancellationToken.None)).Channels == 1, "Individual channel was not mono");
         Passed("Six individual FLAC channels in a per-track multichannel folder");
+        var cacheStorage = new CacheStorage(cachePaths, Path.Combine(output, "viewer-home"), () => false);
+        var clearedCache = await cacheStorage.ClearAsync();
+        Check(clearedCache.Errors.Count == 0 && clearedCache.Usage.AudioBytes == 0 && !File.Exists(multi.Clips[0].Sacd!.PcmPath) &&
+              editStore.Load(disc, multi)![0].Title == "曲名 One", "Cache clearing damaged metadata or left audio behind");
+        await reader.PrepareAsync(multi.Clips[0].Sacd!, CancellationToken.None);
+        var regenerated = await DecodeMulti(multi.Clips[0].Sacd!.PcmPath, "regenerated-cache");
+        Check(cachedPcm.SequenceEqual(regenerated), "Recreated cache PCM differs from the original");
+        Passed("Clearing SACD cache preserves edits and regenerates identical multichannel PCM from the ISO");
         File.WriteAllText(Path.Combine(fixture, "five.flag"), "");
         var fiveReader = new SacdService(paths, runner, log, Path.Combine(output, "five-cache"), host, prefix);
         var fiveDisc = await fiveReader.AnalyzeAsync(iso, CancellationToken.None);

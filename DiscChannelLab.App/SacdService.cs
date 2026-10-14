@@ -169,7 +169,10 @@ public sealed class SacdService(ToolPaths paths, ProcessRunner runner, AppLog lo
             }
             var directory = Path.GetDirectoryName(source.PcmPath)!;
             Directory.CreateDirectory(directory);
-            var job = Path.Combine(directory, ".extract-" + Guid.NewGuid().ToString("N"));
+            // Keep the external process working directory short. The disc hash and
+            // PCM version already make the destination deep; adding artist/title
+            // folders there can exceed Windows native working-directory limits.
+            var job = Path.Combine(_cacheRoot, ".extract-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(job);
             try
             {

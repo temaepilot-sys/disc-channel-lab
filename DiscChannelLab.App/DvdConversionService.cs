@@ -7,8 +7,12 @@ public sealed class DvdConversionService(ToolPaths paths, ProcessRunner runner, 
     public async Task<string> ConvertAsync(DiscAnalysis disc, PlaylistInfo playlist, AudioStreamInfo stream,
         IReadOnlyList<TrackRow> selected, OutputQuality quality, string outputRoot,
         IProgress<ConversionProgress> progress, CancellationToken token, bool groupByChapter,
-        bool saveStereoDownmix, StereoMixSettings mix, bool saveIndividualChannels, ChannelMixExport? channelMix = null)
+        bool saveStereoDownmix, StereoMixSettings mix, bool saveIndividualChannels, ChannelMixExport? channelMix = null, bool saveMultichannelFlac = false)
     {
+        if (saveMultichannelFlac && (saveStereoDownmix || saveIndividualChannels || channelMix is not null || stream.Channels <= 2))
+            throw new InvalidOperationException("マルチチャンネル保存と2chミックス・個別保存は同時に選べません。");
+        if (quality == OutputQuality.OriginalPcm && (!saveMultichannelFlac || !stream.CanMakeOriginalPcm))
+            throw new InvalidOperationException("この音声は元のPCM音質で保存できません。");
         if (channelMix is not null)
         {
             channelMix.Validate(stream);
@@ -72,7 +76,7 @@ public sealed class DvdConversionService(ToolPaths paths, ProcessRunner runner, 
                 if (channel is not null) filter = StereoMixSettings.SoloFilter(stream, channel, stereo: false) + "," + filter;
                 else if (saveStereoDownmix) filter = (channelMix?.Filter(stream) ?? mix.PanFilter(stream)) + "," + filter;
                 arguments.AddRange(["-map", $"0:{stream.Index}", "-vn", "-sn", "-dn", "-af", filter,
-                    "-c:a", "flac", "-sample_fmt", quality == OutputQuality.Cd ? "s16" : "s32",
+                    "-c:a", "flac", "-sample_fmt", bitDepth <= 16 ? "s16" : "s32",
                     "-metadata", $"title={title}", "-metadata", $"track={track.Number}",
                     "-metadata", $"album={playlist.TitleName}"]);
                 arguments.AddRange(["-metadata", $"SOURCE_FORMAT={(playlist.Format == DiscFormat.DvdAudio ? "DVD-Audio" : "DVD-Video")}",
@@ -80,6 +84,8 @@ public sealed class DvdConversionService(ToolPaths paths, ProcessRunner runner, 
                 if (playlist.Format == DiscFormat.DvdAudio)
                     arguments.AddRange(["-metadata", $"DVD_TITLE_SET={playlist.DvdAudio!.TitleSet}"]);
                 ConversionService.AddDiscTags(arguments, disc, playlist, track, chapterRange, chapterTitle ?? title);
+                if (quality != OutputQuality.Cd) arguments.AddRange(["-bits_per_raw_sample", bitDepth!.Value.ToString(CultureInfo.InvariantCulture)]);
+                if (saveMultichannelFlac) arguments.AddRange(["-metadata", "OUTPUT_MODE=multichannel PCM without mixer"]);
                 if (channelMix is not null) channelMix.AddTags(arguments);
                 else if (saveStereoDownmix) ConversionService.AddDownmixTags(arguments, mix);
                 if (channel is not null) ConversionService.AddChannelTags(arguments, stream, channel);

@@ -265,12 +265,14 @@ public sealed partial class FfprobeService(ToolPaths paths, ProcessRunner runner
         DiscFormat format = DiscFormat.BluRay, long? formatStartTicks = null)
     {
         var streams = new List<AudioStreamInfo>();
+        var audioOrdinal = 0;
         if (root.TryGetProperty("streams", out var streamElements))
         {
             foreach (var stream in streamElements.EnumerateArray())
             {
                 if (String(stream, "codec_type") != "audio") continue;
                 var codec = String(stream, "codec_name");
+                var ordinal = audioOrdinal++;
                 var profile = String(stream, "profile");
                 // These compressed streams already use the external decoder on DVD.
                 // Blu-ray playlist and direct-clip probes must accept them too.
@@ -285,18 +287,30 @@ public sealed partial class FfprobeService(ToolPaths paths, ProcessRunner runner
                     depth = String(stream, "sample_fmt") switch { "s16" => 16, "s32" => 24, _ => Number(stream, "bits_per_sample") };
                 }
                 if (depth is null or 0 && codec is ("ac3" or "eac3" or "mp2")) depth = 16;
+                var decodedDepth = false;
+                if (format == DiscFormat.AudioFile)
+                {
+                    // Floating point decoding has no original integer PCM bit depth.
+                    // Retain processing precision without advertising original PCM export.
+                    if (codec.StartsWith("dsd", StringComparison.Ordinal)) continue;
+                    depth = Number(stream, "bits_per_raw_sample") is > 0 and var raw ? raw : Number(stream, "bits_per_sample");
+                    decodedDepth = depth is null or 0 || codec.StartsWith("pcm_f", StringComparison.Ordinal);
+                    if (decodedDepth) depth = 24;
+                }
                 streams.Add(new AudioStreamInfo
                 {
                     Index = Number(stream, "index") ?? -1,
                     Codec = codec,
                     Profile = profile,
-                    TransportId = String(stream, "id"),
+                    TransportId = format == DiscFormat.AudioFile ? $"file:{ordinal}" : String(stream, "id"),
                     Language = stream.TryGetProperty("tags", out var streamTags) ? String(streamTags, "language") : "",
                     SampleRate = Number(stream, "sample_rate") ?? 0,
                     Channels = Number(stream, "channels") ?? 0,
                     ChannelLayout = String(stream, "channel_layout") is { Length: > 0 } layout ? layout : "unknown",
                     BitDepth = depth is > 0 ? depth : null,
-                    StartTimeTicks = formatStartTicks ?? ParseTicks(String(stream, "start_time"))
+                    UsesDecodedPcmDepth = decodedDepth,
+                    SampleCount = format == DiscFormat.AudioFile ? AudioFileSamples(root, stream, Number(stream, "sample_rate") ?? 0) : null,
+                    StartTimeTicks = format == DiscFormat.AudioFile ? 0 : formatStartTicks ?? ParseTicks(String(stream, "start_time"))
                 });
             }
         }

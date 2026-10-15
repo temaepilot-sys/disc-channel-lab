@@ -10,6 +10,16 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Threading;
 
+if (args is ["flac-sample-tests", var flacFixtures, var flacSampleOutput])
+{
+    await FlacSampleTests.RunAsync(flacFixtures, flacSampleOutput);
+    return 0;
+}
+if (args is ["audio-file-tests", var audioFileOutput])
+{
+    await AudioFileTests.RunAsync(audioFileOutput);
+    return 0;
+}
 if (args is ["multichannel-export-tests", var multichannelOutput])
 {
     await MultichannelExportTests.RunAsync(multichannelOutput);

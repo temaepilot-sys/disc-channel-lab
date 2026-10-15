@@ -319,6 +319,8 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
         ? "選択中の曲に、この音声が存在しない区間があります。保存する曲または音声を変更してください。"
         : SelectedStream is { HasSupportedChannels: false }
         ? "この音声のチャンネル数または配置には対応していません。"
+        : SelectedStream is { UsesDecodedPcmDepth: true }
+        ? "PCM表示はデコード精度で、元の整数ビット深度ではありません。FLAC保存はCD音質で行います。"
         : SelectedStream is { Channels: > 2 } stream && StereoMixSettings.Supports(stream)
         ? SaveMultichannelFlac
             ? LanguageService.T("チャンネル数・配置を維持したFLACを保存します。") + " " +
@@ -341,7 +343,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
     public bool CanConvert => !IsPlaying && CanPrepareConversion;
     private bool CanPrepareConversion => !IsBusy && HasVerifiedAudio && _disc is not null && _loadedPlaylist is not null && SelectedStream is not null && !string.IsNullOrWhiteSpace(OutputFolder) && Tracks.Any(x => x.IsSelected) && Tracks.Where(x => x.IsSelected).All(x => SelectedStream.Covers(_loadedPlaylist, x)) && QualityAvailable(SelectedStream);
     public bool CanEditTracks => !IsBusy && !IsPlaying && Tracks.Count > 0;
-    public bool CanPlay => !IsBusy && HasVerifiedAudio && SelectedTrack is not null && SelectedStream is not null && _disc is not null && _loadedPlaylist is not null && SelectedStream.Covers(_loadedPlaylist, SelectedTrack) && _navigation.CanPlay;
+    public bool CanPlay => !IsBusy && HasVerifiedAudio && SelectedTrack is not null && SelectedStream is not null && _disc is not null && _loadedPlaylist is not null && (_loadedPlaylist.Format != DiscFormat.AudioFile || AudioFileReader.IsUsable(SelectedStream)) && SelectedStream.Covers(_loadedPlaylist, SelectedTrack) && _navigation.CanPlay;
     public bool CanSeek => !IsBusy && SelectedTrack is not null;
     public bool CanPreviousTrack => CanSeek && Tracks.IndexOf(SelectedTrack!) > 0;
     public bool CanNextTrack
@@ -423,6 +425,12 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
     {
         if (IsBusy) return;
         RefreshDrives();
+        // Keep an explicitly opened audio collection selected while optical discs are present.
+        if (_disc?.Format == DiscFormat.AudioFile && Source == _disc.Root)
+        {
+            if (File.Exists(_disc.Root)) return;
+            ClearCurrentDisc();
+        }
         if (_isoRoot is not null)
         {
             if (DiscService.HasSupportedSource(_isoRoot)) return;
@@ -482,7 +490,11 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
             AlbumTitle = "ディスクを解析しています";
             Status = "ディスクを解析しています";
             Source = path;
-            _disc = await _discService.AnalyzeAsync(path, _work!.Token);
+            _disc = _audioCollections.TryGetValue(Path.GetFullPath(path), out var files)
+                ? await _discService.AnalyzeAudioFilesAsync(files, _work!.Token)
+                : await _discService.AnalyzeAsync(path, _work!.Token);
+            if (_disc.Format == DiscFormat.AudioFile) SelectedIsoPath = _disc.Root;
+            else if (_isoRoot is null) SelectedIsoPath = "";
             _disc.AlbumTitle = _editStore.LoadAlbumTitle(_disc) ?? _disc.AlbumTitle;
             RefreshMetadata();
             Playlists.Clear();
@@ -650,11 +662,13 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
     {
         if (_disc is null) return;
         AlbumTitle = _disc.AlbumTitle;
+        string? Metadata(string key, string? fallback) => _disc.Format == DiscFormat.AudioFile
+            ? _loadedPlaylist?.FileAnalysis?.Tags.TryGetValue(key, out var value) == true ? value : null : fallback;
         MetadataDetails = string.Join(Environment.NewLine, new[]
         {
-            MetadataLine("アーティスト", _disc.Artist), MetadataLine("日付", _disc.Date),
-            MetadataLine("ジャンル", _disc.Genre), MetadataLine("発売元", _disc.Publisher),
-            MetadataLine("説明", _disc.Description)
+            MetadataLine("アーティスト", Metadata("album_artist", _disc.Artist) ?? Metadata("artist", null)), MetadataLine("日付", Metadata("date", _disc.Date)),
+            MetadataLine("ジャンル", Metadata("genre", _disc.Genre)), MetadataLine("発売元", Metadata("publisher", _disc.Publisher)),
+            MetadataLine("説明", Metadata("description", _disc.Description) ?? Metadata("comment", null))
         }.Where(x => x is not null));
     }
 

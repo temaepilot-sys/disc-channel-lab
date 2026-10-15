@@ -167,6 +167,19 @@ public partial class MainWindow : Window
         await _model.OpenSourceAsync(dialog.FolderName);
     }
 
+    private async void AudioFiles_Click(object sender, RoutedEventArgs e)
+    {
+        if (_model.IsBusy) return;
+        var dialog = new OpenFileDialog
+        {
+            Title = LanguageService.T("音声ファイルを開く"), Multiselect = true, CheckFileExists = true,
+            Filter = $"{LanguageService.T("音声ファイル")}|{AudioFileReader.Extensions}"
+        };
+        if (dialog.ShowDialog(this) != true) return;
+        CommitTrackEdits();
+        await _model.OpenAudioFilesAsync(dialog.FileNames);
+    }
+
     private async void Iso_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new OpenFileDialog

@@ -34,7 +34,7 @@
                 </ComboBox>
                 <CheckBox x:Name="ThemeToggle" Content="{local:Loc Key='ダークモード'}" VerticalAlignment="Center"
                           Checked="ThemeToggle_Changed" Unchecked="ThemeToggle_Changed" Margin="0,0,16,0"/>
-                <TextBlock Text="Blu-ray / DVD-Audio / DVD-Video → FLAC"
+                <TextBlock Text="{local:Loc Key='ディスク・音声ファイル → FLAC'}"
                            Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center"/>
             </StackPanel>
             <TextBlock Text="DiscChannelLab" FontSize="23" FontWeight="SemiBold"/>
@@ -45,8 +45,8 @@
             <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
             <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                 <StackPanel>
-                    <TextBlock Text="{local:Loc Key='ディスク'}" FontSize="17" FontWeight="SemiBold" Margin="0,0,0,10"/>
-                    <TextBlock Text="{local:Loc Key='ドライブ'}" Margin="0,0,0,4"/>
+                    <TextBlock Text="{local:Loc Key='ディスク / 音声ファイル'}" FontSize="17" FontWeight="SemiBold" Margin="0,0,0,10"/>
+                    <TextBlock Text="{local:Loc Key='ドライブ / ファイル'}" Margin="0,0,0,4"/>
                     <ComboBox x:Name="SourceCombo" ItemsSource="{Binding Sources}" SelectedItem="{Binding Source, Mode=TwoWay}"
                               SelectionChanged="Source_SelectionChanged" MinHeight="32" Margin="0,0,0,7"/>
                     <TextBlock Text="{Binding SelectedIsoPath}" ToolTip="{Binding SelectedIsoPath}"
@@ -57,6 +57,8 @@
                         <Button Content="{local:Loc Key='フォルダーを開く'}" Click="Folder_Click"/>
                         <Button Content="{local:Loc Key='ISOを開く'}" Click="Iso_Click" Margin="0"/>
                     </WrapPanel>
+                    <Button x:Name="OpenAudioFilesButton" Content="{local:Loc Key='音声ファイルを開く'}"
+                            Click="AudioFiles_Click" HorizontalAlignment="Left" Margin="0,0,0,8"/>
                     <Button Content="{local:Loc Key='SACD抽出ツール'}" Click="SacdTool_Click"
                             HorizontalAlignment="Left" Margin="0,4,0,8">
                         <Button.ToolTip>

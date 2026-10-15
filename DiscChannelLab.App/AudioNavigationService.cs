@@ -34,7 +34,7 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
         if (liveMix is not null && mixedLevels is not null && StereoMixSettings.Supports(stream))
             channelLevels = null;
         if (channelLevels is not null && !await MeterFiltersAvailableAsync(token)) channelLevels = null;
-        if (playlist.Format is not (DiscFormat.BluRay or DiscFormat.Sacd))
+        if (playlist.Format is not (DiscFormat.BluRay or DiscFormat.Sacd or DiscFormat.AudioFile))
         {
             await PlayDvdAsync(ffplay, disc, playlist, stream, startTicks, endTicks,
                 token, segmentStarted, volume ?? (() => 1), mix, soloChannel, channelLevels, playbackPosition, liveMix, mixedLevels, visualization);
@@ -399,7 +399,7 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
     public async Task<IReadOnlyList<SplitCandidate>> FindSilenceAsync(DiscAnalysis disc, PlaylistInfo playlist,
         AudioStreamInfo stream, TrackRow track, CancellationToken token)
     {
-        if (playlist.Format is not (DiscFormat.BluRay or DiscFormat.Sacd))
+        if (playlist.Format is not (DiscFormat.BluRay or DiscFormat.Sacd or DiscFormat.AudioFile))
             return await FindDvdSilenceAsync(disc, playlist, stream, track, token);
         var positions = new List<long>();
         foreach (var segment in PlaylistSegments.ForRange(playlist, track.StartTicks, track.EndTicks))
@@ -490,8 +490,9 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
         var cacheKey = $"{path}|{AudioStreamMatcher.Identity(stream)}";
         if (!_clipCache.TryGetValue(cacheKey, out var source))
         {
-            source = AudioStreamMatcher.Resolve(stream, segment.Clip.Sacd is null
-                ? await probe.ProbeClipAsync(path, token) : [await probe.ProbeFileAsync(path, token)]);
+            source = AudioStreamMatcher.Resolve(stream, segment.Clip.File is not null
+                ? (await probe.ProbeAudioFileAsync(path, token)).Analysis.Streams
+                : segment.Clip.Sacd is null ? await probe.ProbeClipAsync(path, token) : [await probe.ProbeFileAsync(path, token)]);
             _clipCache[cacheKey] = source;
         }
         if (source.StartTimeTicks is null) throw new InvalidDataException($"クリップ {segment.Clip.Id} の音声開始時刻が不明です。");

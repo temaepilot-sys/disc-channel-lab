@@ -4,14 +4,14 @@ using System.Runtime.CompilerServices;
 namespace Disc2Flac;
 
 public enum OutputQuality { Cd, HighResolution, OriginalPcm }
-public enum DiscFormat { BluRay, DvdAudio, DvdVideo, Sacd }
+public enum DiscFormat { BluRay, DvdAudio, DvdVideo, Sacd, AudioFile }
 public enum AudioAvailability { Pending, Analyzing, Ready, Partial, NoAudio, Unsupported, Failed, Protected }
 
 public sealed record DvdAudioProgram(long StartSector, long EndSector, long StartTicks, long EndTicks);
 public sealed record DvdAudioTitle(int TitleSet, int TitleNumber, IReadOnlyList<DvdAudioProgram> Programs);
 
 public sealed record ClipInfo(string Id, long InTicks, long OutTicks, long PlaylistStartTicks,
-    SacdTrackSource? Sacd = null);
+    SacdTrackSource? Sacd = null, AudioFileSource? File = null);
 
 public sealed class PlaylistInfo : INotifyPropertyChanged
 {
@@ -20,6 +20,7 @@ public sealed class PlaylistInfo : INotifyPropertyChanged
     public DvdAudioTitle? DvdAudio { get; init; }
     public int DvdVideoTitle { get; init; }
     public SacdArea? SacdArea { get; init; }
+    public PlaylistProbeResult? FileAnalysis { get; init; }
     private int _displayOrder;
     private string? _titleName;
     private IReadOnlyList<string?> _chapterTitles = [];
@@ -39,7 +40,7 @@ public sealed class PlaylistInfo : INotifyPropertyChanged
     public required IReadOnlyList<long> ChapterStarts { get; set; }
     internal int InspectionVersion { get; set; }
     public bool MergeShortTail { get; set; } = true;
-    public bool HasShortTail => Format != DiscFormat.Sacd && ChapterStarts.Count > 1 && DurationTicks - ChapterStarts[^1] < 45000;
+    public bool HasShortTail => Format is not (DiscFormat.Sacd or DiscFormat.AudioFile) && ChapterStarts.Count > 1 && DurationTicks - ChapterStarts[^1] < 45000;
     public IReadOnlyList<long> EffectiveChapterStarts => MergeShortTail && HasShortTail
         ? ChapterStarts.Take(ChapterStarts.Count - 1).ToArray() : ChapterStarts;
     private AudioAvailability _availability;
@@ -81,7 +82,7 @@ public sealed class PlaylistInfo : INotifyPropertyChanged
     public string DisplayNumber => DisplayOrder.ToString("00");
     public string TitleLabel => Format == DiscFormat.Sacd ? (SacdArea?.Channels == 2 ? "SACD 2ch" : "SACD Mch")
         : Format == DiscFormat.DvdAudio ? $"A {DvdAudio?.TitleSet:00}/{DvdAudio?.TitleNumber:00}"
-        : Format == DiscFormat.DvdVideo ? $"V {DvdVideoTitle:00}" : $"BD {DisplayNumber}";
+        : Format == DiscFormat.DvdVideo ? $"V {DvdVideoTitle:00}" : Format == DiscFormat.AudioFile ? $"File {DisplayNumber}" : $"BD {DisplayNumber}";
     public string TitleName
     {
         get => _titleName ?? (Format == DiscFormat.DvdAudio
@@ -97,7 +98,7 @@ public sealed class PlaylistInfo : INotifyPropertyChanged
         }
     }
     public string DurationLabel => Duration.ToString(@"hh\:mm\:ss");
-    public string ChapterCountLabel => Format == DiscFormat.Sacd ? $"{ChapterStarts.Count} tracks" : LanguageService.T($"{ChapterStarts.Count}チャプター");
+    public string ChapterCountLabel => Format is DiscFormat.Sacd or DiscFormat.AudioFile ? $"{ChapterStarts.Count} tracks" : LanguageService.T($"{ChapterStarts.Count}チャプター");
     public bool IsRepeatedShortClipLoop => Clips.Count >= 16 &&
         Clips.Count >= Clips.Select(clip => clip.Id).Distinct().Count() * 4 &&
         Clips.All(clip => clip.OutTicks - clip.InTicks <= 125L * 45000);
@@ -147,7 +148,7 @@ public sealed class AudioStreamInfo : INotifyPropertyChanged
     {
         Index = Index, Codec = Codec, Profile = Profile, TransportId = TransportId, Language = Language,
         SampleRate = SampleRate, Channels = Channels, ChannelLayout = ChannelLayout, BitDepth = BitDepth,
-        StartTimeTicks = StartTimeTicks, SampleCount = SampleCount, CoveredClipIds = covered,
+        StartTimeTicks = StartTimeTicks, SampleCount = SampleCount, UsesDecodedPcmDepth = UsesDecodedPcmDepth, CoveredClipIds = covered,
         InspectedClipIds = inspected, TotalClips = total, SilentTailClipId = silentTailClipId
     };
     public bool Covers(PlaylistInfo playlist, TrackRow track) => playlist.Clips
@@ -162,20 +163,26 @@ public sealed class AudioStreamInfo : INotifyPropertyChanged
     public required int Channels { get; init; }
     public required string ChannelLayout { get; init; }
     public int? BitDepth { get; init; }
+    public bool UsesDecodedPcmDepth { get; init; }
     public long? StartTimeTicks { get; init; }
     public long? SampleCount { get; init; }
     public bool IsStereo => Channels == 2;
     public bool HasSupportedChannels => Channels is >= 1 and <= 8 && (Channels <= 2 || ChannelLayout != "unknown");
     public bool CanMakeCd => HasSupportedChannels && BitDepth >= 16 && SampleRate >= 44100;
-    public bool CanMakeHighResolution => HasSupportedChannels && BitDepth >= 24 && SampleRate >= 88200;
-    public bool CanMakeOriginalPcm => HasSupportedChannels && BitDepth is 16 or 24 && SampleRate >= 44100;
-    public string DisplayName => $"{CodecLabel} · {(Channels == 1 ? "Mono" : IsStereo ? "Stereo" : $"{Channels}ch ({ChannelLayout})")} · {SampleRate / 1000d:0.0}kHz / {(BitDepth is null ? LanguageService.T("深度不明") : $"{BitDepth}bit")}" +
+    public bool CanMakeHighResolution => HasSupportedChannels && !UsesDecodedPcmDepth && BitDepth == 24 && SampleRate >= 88200;
+    public bool CanMakeOriginalPcm => HasSupportedChannels && !UsesDecodedPcmDepth && BitDepth is 16 or 24 && SampleRate >= 44100;
+    public string DisplayName => $"{CodecLabel} · {(Channels == 1 ? "Mono" : IsStereo ? "Stereo" : $"{Channels}ch ({ChannelLayout})")} · {SampleRate / 1000d:0.0}kHz / {(BitDepth is null ? LanguageService.T("深度不明") : $"{BitDepth}bit{(UsesDecodedPcmDepth ? " PCM" : "")}")}" +
         (HasPartialCoverage ? $" · {LanguageService.T("一部区間のみ")} #{Index}" : "") +
         (SilentTailClipId is not null ? $" · {LanguageService.T("末尾の映像区間は無音")}" : "");
     private string CodecLabel => LanguageService.T(Codec switch
     {
         "pcm_bluray" or "pcm_dvd" or "pcm_dvda" => "LPCM",
         "flac" => "FLAC / PCM",
+        "alac" => "ALAC",
+        "wavpack" => "WavPack",
+        "ape" => "APE",
+        _ when Codec.StartsWith("pcm_", StringComparison.Ordinal) => "PCM",
+        "aac" => "AAC", "opus" => "Opus", "vorbis" => "Vorbis", "mp3" => "MP3",
         "mlp" => "可逆圧縮音声",
         "dts" when Profile == "DTS-HD MA" => "可逆圧縮音声",
         _ => "圧縮音声"

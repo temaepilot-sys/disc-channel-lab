@@ -30,7 +30,7 @@ public sealed class ConversionService(ToolPaths paths, ProcessRunner runner, Ffp
         if (saveStereoDownmix && !StereoMixSettings.Supports(stream))
             throw new InvalidOperationException("この音声のチャンネル配置は2ch変換に対応していません。");
         mix ??= StereoMixSettings.Default;
-        if (playlist.Format is not (DiscFormat.BluRay or DiscFormat.Sacd))
+        if (playlist.Format is not (DiscFormat.BluRay or DiscFormat.Sacd or DiscFormat.AudioFile))
             return await new DvdConversionService(paths, runner, probe, log).ConvertAsync(
                 disc, playlist, stream, selected, quality, outputRoot, progress, token, groupByChapter,
                 saveStereoDownmix, mix, saveIndividualChannels, channelMix, saveMultichannelFlac);
@@ -67,6 +67,7 @@ public sealed class ConversionService(ToolPaths paths, ProcessRunner runner, Ffp
                 {
                 var channel = channels[channelIndex];
                 var parts = new List<string>();
+                long totalSamples = 0;
                 for (var partIndex = 0; partIndex < segments.Count; partIndex++)
                 {
                     var segment = segments[partIndex];
@@ -77,8 +78,9 @@ public sealed class ConversionService(ToolPaths paths, ProcessRunner runner, Ffp
                     var source = stream;
                     if (!silent && !checkedClips.TryGetValue(segment.Clip.Id, out source))
                     {
-                        source = AudioStreamMatcher.Resolve(stream, segment.Clip.Sacd is null
-                            ? await probe.ProbeClipAsync(sourcePath, token) : [await probe.ProbeFileAsync(sourcePath, token)]);
+                        source = AudioStreamMatcher.Resolve(stream, segment.Clip.File is not null
+                            ? (await probe.ProbeAudioFileAsync(sourcePath, token)).Analysis.Streams
+                            : segment.Clip.Sacd is null ? await probe.ProbeClipAsync(sourcePath, token) : [await probe.ProbeFileAsync(sourcePath, token)]);
                         if (quality == OutputQuality.Cd ? !source.CanMakeCd :
                             !(quality == OutputQuality.OriginalPcm ? source.CanMakeOriginalPcm : source.CanMakeHighResolution) || source.SampleRate != expectedRate || source.BitDepth != expectedDepth)
                             throw new InvalidDataException($"クリップ {segment.Clip.Id} は選択した保存音質の条件を満たしていません。");
@@ -92,11 +94,20 @@ public sealed class ConversionService(ToolPaths paths, ProcessRunner runner, Ffp
                     if (seekTicks < 0) throw new InvalidDataException($"クリップ {segment.Clip.Id} の音声開始位置が不正です。");
                     var durationTicks = segment.EndTicks - segment.StartTicks;
                     var sampleCount = ToSample(segment.EndTicks, expectedRate) - ToSample(segment.StartTicks, expectedRate);
+                    var wholeFile = segment.Clip.File is not null && segment.StartTicks == segment.Clip.PlaylistStartTicks &&
+                        segment.EndTicks == segment.Clip.PlaylistStartTicks + segment.Clip.OutTicks - segment.Clip.InTicks;
+                    // Whole-file PCM length can be more precise than 1/45000-second disc ticks.
+                    if (wholeFile && source.SampleCount is > 0)
+                        sampleCount = checked((long)Math.Round(source.SampleCount.Value * (decimal)expectedRate / source.SampleRate, MidpointRounding.AwayFromZero));
+                    // Some containers expose only millisecond duration. Decode the complete stream
+                    // rather than trimming real samples to that rounded timestamp.
+                    var readToEnd = wholeFile && source.SampleCount is null;
                     if (sampleCount <= 0) throw new InvalidDataException($"{title} の再生区間が短すぎます。");
                     var part = Path.Combine(stage, $"{i + 1:000}-{channelIndex + 1:00}-part-{partIndex + 1:00}.flac");
+                    var trim = readToEnd ? "" : $"atrim=end_sample={sampleCount},";
                     var filter = quality == OutputQuality.Cd
-                        ? $"aresample=44100:osf=s16:dither_method=triangular,atrim=end_sample={sampleCount},asetpts=PTS-STARTPTS"
-                        : $"aresample={expectedRate},atrim=end_sample={sampleCount},asetpts=PTS-STARTPTS";
+                        ? $"aresample=44100:osf=s16:dither_method=triangular,{trim}asetpts=PTS-STARTPTS"
+                        : $"aresample={expectedRate},{trim}asetpts=PTS-STARTPTS";
                     if (channel is not null) filter = StereoMixSettings.SoloFilter(stream, channel, stereo: false) + "," + filter;
                     else if (saveStereoDownmix) filter = (channelMix?.Filter(stream) ?? mix.PanFilter(stream)) + "," + filter;
                     var arguments = new List<string>
@@ -108,6 +119,7 @@ public sealed class ConversionService(ToolPaths paths, ProcessRunner runner, Ffp
                         arguments.AddRange(["-f", "lavfi", "-t", Seconds(durationTicks + 4500), "-i", stream.SilenceInput]);
                         log.Write($"SILENT TAIL export clip={segment.Clip.Id} duration={durationTicks} samples={sampleCount}");
                     }
+                    else if (readToEnd) arguments.AddRange(["-i", sourcePath]);
                     else arguments.AddRange(["-ss", Seconds(seekTicks), "-t", Seconds(durationTicks + 4500), "-i", sourcePath]);
                     // Keep FLAC block sizes consistent across real audio and generated silence.
                     // The concat demuxer shares the first part's STREAMINFO with later parts.
@@ -135,18 +147,20 @@ public sealed class ConversionService(ToolPaths paths, ProcessRunner runner, Ffp
                     });
                     var partInfo = await probe.ProbeFileAsync(part, token);
                     ValidateFormat(partInfo, expectedRate, expectedDepth, stream, saveStereoDownmix, channel is not null);
+                    if (readToEnd) sampleCount = partInfo.SampleCount is > 0 ? partInfo.SampleCount.Value
+                        : throw new InvalidDataException("音声ファイルのサンプル数を確認できません。");
                     if (partInfo.SampleCount != sampleCount)
                     {
                         var missing = partInfo.SampleCount is { } actualCount ? sampleCount - actualCount : -1;
                         var clipEnd = segment.Clip.PlaylistStartTicks + segment.Clip.OutTicks - segment.Clip.InTicks;
-                        if (segment.EndTicks != clipEnd || missing <= 0 || missing > expectedRate / 50)
+                        if (segment.Clip.File is not null || segment.EndTicks != clipEnd || missing <= 0 || missing > expectedRate / 50)
                             throw new InvalidDataException($"{title} の音声区間を正確に読み取れませんでした。");
                         var padded = part + ".padded.flac";
                         await runner.RunAsync(paths.Ffmpeg,
                             ["-hide_banner", "-nostdin", "-v", "error", "-i", part,
                              "-map", "0:a:0", "-map_metadata", "0",
                              "-af", $"apad=whole_len={sampleCount},atrim=end_sample={sampleCount}",
-                             "-c:a", "flac", "-frame_size", "4096", "-sample_fmt", quality == OutputQuality.Cd ? "s16" : "s32",
+                             "-c:a", "flac", "-frame_size", "4096", "-sample_fmt", expectedDepth <= 16 ? "s16" : "s32",
                              "-y", padded], token);
                         var paddedInfo = await probe.ProbeFileAsync(padded, token);
                         ValidateFormat(paddedInfo, expectedRate, expectedDepth, stream, saveStereoDownmix, channel is not null);
@@ -155,6 +169,7 @@ public sealed class ConversionService(ToolPaths paths, ProcessRunner runner, Ffp
                         File.Move(padded, part, overwrite: true);
                         log.Write($"PADDED {missing} trailing samples at clip end for {title}");
                     }
+                    totalSamples = checked(totalSamples + sampleCount);
                     parts.Add(part);
                 }
 
@@ -180,7 +195,7 @@ public sealed class ConversionService(ToolPaths paths, ProcessRunner runner, Ffp
                     await runner.RunAsync(paths.Ffmpeg, joinArguments, token);
                     var joined = await probe.ProbeFileAsync(staged, token);
                     ValidateFormat(joined, expectedRate, expectedDepth, stream, saveStereoDownmix, channel is not null);
-                    if (joined.SampleCount != ToSample(track.EndTicks, expectedRate) - ToSample(track.StartTicks, expectedRate))
+                    if (joined.SampleCount != totalSamples)
                         throw new InvalidDataException($"{title} の結合後のサンプル数が一致しません。");
                 }
                 var channelSuffix = channelMix is not null ? channelMix.FileSuffix : saveStereoDownmix ? " [Stereo mix]" : stream.Channels == 2 ? "" : stream.Channels == 1 ? " [Mono]" : $" [{SafeName(stream.ChannelLayout)}]";
@@ -261,12 +276,15 @@ public sealed class ConversionService(ToolPaths paths, ProcessRunner runner, Ffp
             Add("SACD_AREA", playlist.SacdArea?.Channels == 2 ? "Stereo" : "Multichannel");
             Add("DSD_TO_PCM", "24-bit / 88.2 kHz PCM intermediate");
         }
+        if (playlist.Format == DiscFormat.AudioFile) Add("SOURCE_FORMAT", "Audio file");
         Add("artist", track.Artist ?? disc.Artist);
-        Add("album_artist", disc.Artist);
-        Add("date", disc.Date);
-        Add("genre", disc.Genre);
-        Add("publisher", disc.Publisher);
-        Add("description", disc.Description);
+        Add("album_artist", Metadata("album_artist", disc.Artist));
+        Add("date", Metadata("date", disc.Date));
+        Add("genre", Metadata("genre", disc.Genre));
+        Add("publisher", Metadata("publisher", disc.Publisher));
+        Add("description", Metadata("description", disc.Description) ?? Metadata("comment", null));
+        string? Metadata(string key, string? fallback) => playlist.Format == DiscFormat.AudioFile
+            ? playlist.FileAnalysis?.Tags.TryGetValue(key, out var value) == true ? value : null : fallback;
         void Add(string name, string? value)
         {
             if (!string.IsNullOrWhiteSpace(value)) arguments.AddRange(["-metadata", $"{name}={value.Trim()}"]);

@@ -25,7 +25,8 @@ public sealed partial class MainViewModel
     }
     public string HighResOptionText => LanguageService.T(SaveMultichannelFlac ? "元のPCM音質" : "ハイレゾ · 元の形式");
     public string HighResHelpText => LanguageService.T(SaveMultichannelFlac
-        ? "チャンネル数と配置を維持。SACDの元のPCMは24bit / 88.2kHzです。"
+        ? _disc?.Format == DiscFormat.Sacd ? "チャンネル数と配置を維持。SACDの元のPCMは24bit / 88.2kHzです。"
+            : "元のPCM音質では、入力のサンプリング周波数・16/24bit・チャンネル配置を維持します。"
         : "ハイレゾは元音源が24bit / 88.2kHz以上のときに選べます。");
     private bool QualityAvailable(AudioStreamInfo stream) => _quality switch
     {

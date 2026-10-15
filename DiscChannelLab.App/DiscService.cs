@@ -10,10 +10,13 @@ public sealed class DiscService(FfprobeService probe, AppLog log, SacdService? s
 {
     public async Task<DiscAnalysis> AnalyzeAsync(string path, CancellationToken token)
     {
+        if (AudioFileReader.CanOpen(path)) return await AnalyzeAudioFilesAsync([path], token);
         if (SacdService.IsSacdIso(path))
             return await (sacd ?? throw new InvalidOperationException("SACD reader is not configured.")).AnalyzeAsync(path, token);
         return await Task.Run(() => Analyze(path, token), token);
     }
+    public Task<DiscAnalysis> AnalyzeAudioFilesAsync(IReadOnlyList<string> paths, CancellationToken token) =>
+        new AudioFileReader(probe, log).AnalyzeAsync(paths, token);
     private readonly ConcurrentDictionary<(string Disc, int Title), PlaylistProbeResult> _inspections = new();
     public void ClearCache() { _inspections.Clear(); probe.ClearCache(); }
     public DiscAnalysis Analyze(string path, CancellationToken token = default)
@@ -88,7 +91,7 @@ public sealed class DiscService(FfprobeService probe, AppLog log, SacdService? s
         {
             return Directory.Exists(Path.Combine(root, "BDMV", "PLAYLIST")) ||
                 File.Exists(Path.Combine(root, "AUDIO_TS", "AUDIO_TS.IFO")) ||
-                File.Exists(Path.Combine(root, "VIDEO_TS", "VIDEO_TS.IFO")) || SacdService.IsSacdIso(root);
+                File.Exists(Path.Combine(root, "VIDEO_TS", "VIDEO_TS.IFO")) || AudioFileReader.CanOpen(root) || SacdService.IsSacdIso(root);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
         {
@@ -141,7 +144,8 @@ public sealed class DiscService(FfprobeService probe, AppLog log, SacdService? s
                 playlist.ChapterTitles = Enumerable.Repeat<string?>(null, structure.Chapters.Count).ToArray();
                 playlist.RefreshLanguage();
             }
-            result = playlist.Format == DiscFormat.Sacd
+            result = playlist.Format == DiscFormat.AudioFile ? await new AudioFileReader(probe, log).InspectAsync(playlist, token)
+                : playlist.Format == DiscFormat.Sacd
                 ? await (sacd ?? throw new InvalidOperationException("SACD reader is not configured.")).InspectAsync(playlist, token)
                 : await probe.ProbePlaylistAsync(disc.Root, playlist, token, force);
         }
@@ -180,16 +184,17 @@ public sealed class DiscService(FfprobeService probe, AppLog log, SacdService? s
             var sacdTrack = playlist.SacdArea?.Tracks.ElementAtOrDefault(i);
             var title = chapter?.Title ?? sacdTrack?.Title;
             var hasTitle = !string.IsNullOrWhiteSpace(title) &&
-                (playlist.Format == DiscFormat.Sacd || !title.StartsWith("Chapter", StringComparison.OrdinalIgnoreCase));
+                (playlist.Format is DiscFormat.Sacd or DiscFormat.AudioFile || !title.StartsWith("Chapter", StringComparison.OrdinalIgnoreCase));
             tracks.Add(new TrackRow
             {
                 Number = i + 1,
                 StartTicks = start,
                 EndTicks = end,
-                IsChapter = playlist.Format is not (DiscFormat.DvdAudio or DiscFormat.Sacd) && !hasTitle && !wholePlaylistIsOneTrack,
+                IsChapter = playlist.Format is not (DiscFormat.DvdAudio or DiscFormat.Sacd or DiscFormat.AudioFile) && !hasTitle && !wholePlaylistIsOneTrack,
                 IsSelected = playlist.Format != DiscFormat.DvdAudio || end - start >= 2 * 45000,
                 Title = hasTitle ? title!.Trim() : playlist.Format is DiscFormat.DvdAudio or DiscFormat.Sacd ? $"Track {i + 1:00}" : wholePlaylistIsOneTrack ? LanguageService.T("Track 01 (全編)") : $"Chapter {i + 1:00}",
-                Artist = chapter?.Artist ?? sacdTrack?.Artist ?? disc.Artist
+                Artist = chapter?.Artist ?? sacdTrack?.Artist ?? (playlist.Format == DiscFormat.AudioFile
+                    ? playlist.FileAnalysis?.Tags.GetValueOrDefault("artist") ?? playlist.FileAnalysis?.Tags.GetValueOrDefault("album_artist") : disc.Artist)
             });
         }
         return tracks;

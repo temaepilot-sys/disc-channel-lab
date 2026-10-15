@@ -137,6 +137,38 @@ dotnet run --project DiscChannelLab.Verify -c Release -- sacd-tests verification
 
 The check simulates the external tool's ISO/TOC interface and generates real multichannel DSF data, decoded through FFmpeg and the existing mixer/export paths; preview uses a dummy audio device. An actual SACD ISO and compatible extractor are still needed to verify image-specific compatibility and listening quality.
 
+## Open audio files
+
+Use **Open audio files** in the left panel to select one or more local files. Supported file types include FLAC, WAV/Wave64, AIFF, WavPack, APE, ALAC/M4A, AAC, Ogg/Vorbis, Opus, MP3, WMA, CAF and Matroska audio, subject to the external FFmpeg build's decoders. File input uses the existing player, channel mixer, meters, 3D visualizer, stereo mix export, individual-channel export and multichannel FLAC export.
+
+Compatible files in the same folder and album are grouped into one track list, ordered by embedded disc/track numbers when present. Different codecs, rates, depths or speaker layouts form separate titles. Embedded titles, artists and chapter markers are read; containers with multiple audio streams expose a stream selector. Saved edits belong to the selected file collection. Optical-drive polling leaves the selected files in place.
+
+Mono and stereo are supported alongside the existing recognized multichannel layouts up to eight channels. A multichannel file must identify its speaker layout: no channel order is inferred from its channel count. Opening files and editing track information do not modify the originals or create an intermediate full-album audio cache. Files changed or moved after opening must be reopened.
+
+CD-quality FLAC uses 16-bit/44.1 kHz. **Save as Multichannel FLAC** also offers **Original PCM quality** for integer 16/24-bit input at 44.1 kHz or higher, preserving the channel count, speaker layout and complete-file PCM samples. Lossy or floating-point decoding precision is marked `PCM` and is not advertised as original integer bit depth; CD-quality export remains available for these sources at 44.1 kHz or higher. Direct DSD files and layouts beyond the supported set are outside this input path.
+
+### FLAC sample compatibility
+
+All seven files in [sfiera/flac-test-files](https://github.com/sfiera/flac-test-files/tree/9f9caf867883aa7066b74f64c82185364fd070ef) passed input, playback through a dummy audio device, visualizer PCM delivery and CD-quality stereo export checks:
+
+| File | Channels | Detected layout |
+| --- | ---: | --- |
+| stereo.flac | 2 | stereo |
+| center.flac | 3 | 3.0 |
+| quad.flac | 4 | quad |
+| surround50.flac | 5 | 5.0(side) |
+| surround51.flac | 6 | 5.1(side) |
+| surround61.flac | 7 | 6.1 |
+| surround71.flac | 8 | 7.1 |
+
+For the six multichannel samples, original 16-bit/48 kHz export preserves every PCM sample. Every individually exported channel matches an independent CD-quality reference within two 16-bit LSBs of dither. The 5.0/5.1 pair called rear in the sample README is labeled SL/SR by FFmpeg; [FLAC's channel definition](https://www.rfc-editor.org/rfc/rfc9639.html#section-9.1.3) calls this pair back/surround. Channel slots are preserved. This checks the software signal path, not physical speaker wiring or subjective listening. The external GPLv2 sample recordings are not bundled with the app.
+
+To repeat the check with a separate checkout of the samples:
+
+```powershell
+dotnet run --project DiscChannelLab.Verify -- flac-sample-tests C:\test\flac-test-files C:\test\results
+```
+
 ## Cache size and cleanup
 
 Use **Cache control** at the bottom of the left panel to open a separate window showing the combined size of **SACD audio caches** and the linked **viewer cache**. Size is measured at startup and again when the window opens. Use **Refresh size** to measure it again and **Clear cache** to remove these generated files. The window leaves the player controls available. Clearing is available after playback, conversion and title inspection finish, and after other players and the viewer close. Inaccessible files are reported. A cleared SACD track is extracted and decoded again when needed.

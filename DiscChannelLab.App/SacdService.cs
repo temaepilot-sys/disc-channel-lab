@@ -324,8 +324,11 @@ public sealed class SacdService(ToolPaths paths, ProcessRunner runner, AppLog lo
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { log.Write($"SACD TEMP CLEANUP: {ex.Message}"); }
     }
 
-    public static string ClipPath(DiscAnalysis disc, ClipInfo clip) => clip.Sacd?.PcmPath ??
-        Path.Combine(disc.Root, "BDMV", "STREAM", clip.Id + ".m2ts");
+    public static string ClipPath(DiscAnalysis disc, ClipInfo clip)
+    {
+        if (clip.File is { } file) { AudioFileReader.RequireUnchanged(file); return file.Path; }
+        return clip.Sacd?.PcmPath ?? Path.Combine(disc.Root, "BDMV", "STREAM", clip.Id + ".m2ts");
+    }
 
     private sealed record ToolPreference(string Path);
 

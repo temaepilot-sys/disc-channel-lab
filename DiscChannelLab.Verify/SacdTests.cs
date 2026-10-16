@@ -201,6 +201,32 @@ internal static class SacdTests
             !StereoMixSettings.ChannelNames(fiveResult.Streams.Single()).Contains("LFE"), "5.0 input fabricated an LFE channel");
         File.Delete(Path.Combine(fixture, "five.flag"));
         Passed("5.0 SACD layout remains five channels without invented LFE");
+        var coldReader = new SacdService(paths, runner, log, Path.Combine(output, "headphone-cold-cache"), host, prefix);
+        var coldDisc = await coldReader.AnalyzeAsync(iso, CancellationToken.None);
+        var coldTitle = coldDisc.Playlists[1];
+        var coldAudio = (await coldReader.InspectAsync(coldTitle, CancellationToken.None)).Streams.Single();
+        var coldTrack = coldTitle.Clips[1].Sacd!;
+        Check(!File.Exists(coldTrack.PcmPath), "Headphone cold-track fixture unexpectedly cached");
+        var headphoneFactory = AudioNavigationService.HeadphoneOutputFactory;
+        var headphoneOptions = HeadphoneSession.Current.Options;
+        bool openedAfterCache = false; RecordingHeadphoneOutput? headphoneOutput = null;
+        try
+        {
+            HeadphoneSession.Current.SetOptions(new HeadphoneOptions { Enabled = true, Method = HeadphoneMethod.SteamAudio });
+            AudioNavigationService.HeadphoneOutputFactory = () =>
+            {
+                openedAfterCache = File.Exists(coldTrack.PcmPath);
+                return headphoneOutput = new RecordingHeadphoneOutput();
+            };
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            await new AudioNavigationService(paths, runner, probe, log, coldReader).PlayAsync(coldDisc, coldTitle, coldAudio,
+                coldTitle.ChapterStarts[1], coldTitle.DurationTicks, timeout.Token);
+            Check(openedAfterCache && headphoneOutput is { Disposed: true, SubmittedFrames: > 38000 },
+                "Headphone output opened before cold SACD extraction/PCM preparation finished");
+            Passed("Cold SACD next track finishes PCM preparation and prebuffering before headphone output opens");
+        }
+        finally { AudioNavigationService.HeadphoneOutputFactory = headphoneFactory; HeadphoneSession.Current.SetOptions(headphoneOptions); }
+
         var navigation = new AudioNavigationService(paths, runner, probe, log, reader);
         var levels = 0; var chunks = new List<PreviewPcmChunk>();
         var priorDriver = Environment.GetEnvironmentVariable("SDL_AUDIODRIVER");
@@ -239,6 +265,18 @@ internal static class SacdTests
 
     private static string SHA(string path) => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(path)));
     private static void Check(bool value, string message) { if (!value) throw new InvalidDataException(message); }
+
+    private sealed class RecordingHeadphoneOutput : IHeadphoneOutput
+    {
+        public long SubmittedFrames { get; private set; }
+        public long PlayedFrames => SubmittedFrames;
+        public double BufferMilliseconds => 0;
+        public bool Disposed { get; private set; }
+        public void WaitForSpace(int frames, CancellationToken token) => token.ThrowIfCancellationRequested();
+        public void Write(float[] samples, int frames) => SubmittedFrames += frames;
+        public void Drain(CancellationToken token) => token.ThrowIfCancellationRequested();
+        public void Dispose() => Disposed = true;
+    }
 
     private static void WriteDsf(string path, int channels, bool unknownLayout = false)
     {

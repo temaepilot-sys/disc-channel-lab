@@ -58,7 +58,7 @@ opentrackの出力を**UDP over network**、宛先**127.0.0.1**、ポート**424
 
 比較するには**比較位置を記録**し、一時停止して方式を変え、**比較位置から再生**します。マークは現在の曲で使います。Direct／HRTF比較トリムで聴感上の音量を合わせてください。自動音量合わせは行いません。
 
-48kHz float・256サンプル単位で処理し、Windowsの既定の共有モード出力へ送ります。出力バッファーが空くのを待った後に頭の向きを読み、向きの平滑化は初期8msです。表示するデバイスバッファー容量は、総遅延の実測値ではありません。自動正規化・リミッターはなく、最終段で有限値保護と±1への制限を行います。クリップ数が増える場合はMasterを下げるかヘッドルームを増やしてください。
+48kHz float・256サンプル単位で処理し、Windowsの既定の共有モード出力へ送ります。未加工PCMを約171〜341msの上限付きキューへ先読みし、SACDの抽出と初期バッファリングが完了してから出力デバイスを開きます。DSPとWindows出力は同じ専用MMCSS音声スレッドで動かし、約30msのデバイスバッファーを満たしてから再生を開始します。頭の向き・フェーダー・音量は先読み時には処理せず、出力直前に適用します。診断表示のempty buffer eventsはクリッピングとは別の、バッファー不足を調べるためのカウンターです。出力バッファーが空くのを待った後に頭の向きを読み、向きの平滑化は初期8msです。表示するデバイスバッファー容量は、総遅延の実測値ではありません。自動正規化・リミッターはなく、最終段で有限値保護と±1への制限を行います。クリップ数が増える場合はMasterを下げるかヘッドルームを増やしてください。
 
 ## 3D表示
 
@@ -84,7 +84,7 @@ HRTFはSteam Audioの[バイノーラル処理](https://valvesoftware.github.io/
 
 公開用・個人用は同じソースです。公開用にFFmpeg・sacd_extractは含めません。個人用は手元のFFmpegと.NETを同梱します。tools・SpaceSketchを含め、出力フォルダー全体を保持してください。
 
-開発用チェックは`headphone-tests`、`headphone-ui-tests`、`settings-migration-test`です。DSP・実HRTF呼び出し・デコード・キャンセル・UDP・Windows無音出力・言語切り替え・通常／ヘッドフォンのフェーダー切り替えを確認します。`DISCCHANNEL_DATA_HOME`でテスト用の保存先の親フォルダーを指定できます。
+開発用チェックは`headphone-tests`、`headphone-ui-tests`、`headphone-buffer-tests`、`settings-migration-test`です。DSP・実HRTF呼び出し・デコード・キャンセル・UDP・Windows無音出力・言語切り替え・通常／ヘッドフォンのフェーダー切り替えを確認します。`DISCCHANNEL_DATA_HOME`でテスト用の保存先の親フォルダーを指定できます。
 
 外部sfieraサンプル7個を`verification-output/flac-fixtures-sfiera`へ別途用意し、リポジトリのルートで次の順に実行します。GUIの検証はDSP検証が生成した6ch音声を使用します。
 
@@ -92,3 +92,5 @@ HRTFはSteam Audioの[バイノーラル処理](https://valvesoftware.github.io/
 dotnet run --project DiscChannelLab.Verify -c Release -- headphone-tests verification-output/headphones/dsp-final
 dotnet run --project DiscChannelLab.Verify -c Release -- headphone-ui-tests verification-output/headphones/ui
 ```
+
+`headphone-buffer-tests`は起動時のバッファリング、メモリー上限、キャンセル、出力デバイスのエラーを確認し、両方式でFLACを処理しながら実際のWindows出力バッファーの連続性を測定します。テストのデバイス出力は無音です。任意の既存音声ファイルも、書き換えずに検証できます。

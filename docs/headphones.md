@@ -58,7 +58,7 @@ Headphone left/right routing comes from speaker direction. The mixer's Pan contr
 
 For an A/B comparison, use **Mark position**, pause, change renderer, then **Play from mark**. The mark belongs to the current track. Match perceived loudness with the two comparison trims; there is no automatic loudness matching.
 
-Audio is decoded to 48 kHz float PCM and rendered in 256-sample blocks to Windows' default shared-mode output device. Pose is sampled after waiting for device space; orientation smoothing defaults to 8 ms. The reported device buffer is not total measured end-to-end latency. No automatic normalization or limiter is added. Final finite-value protection and clipping to ±1 are applied, and clipped samples are counted. Reduce Master or increase headroom if the count rises.
+Audio is decoded to 48 kHz float PCM and rendered in 256-sample blocks to Windows' default shared-mode output device. A bounded queue holds roughly 171–341 ms of unprocessed PCM. SACD extraction and startup prebuffering complete before the output device opens. DSP and Windows output run together on one dedicated MMCSS audio thread, and the approximately 30 ms device buffer is primed before playback starts. Read-ahead does not pre-render head direction, faders or volume; they remain applied immediately before output. The diagnostic **empty buffer events** counter is separate from clipping and helps identify scheduling/underrun problems. Pose is sampled after waiting for device space; orientation smoothing defaults to 8 ms. The reported device buffer is not total measured end-to-end latency. No automatic normalization or limiter is added. Final finite-value protection and clipping to ±1 are applied, and clipped samples are counted. Reduce Master or increase headroom if the count rises.
 
 ## Viewer synchronization
 
@@ -82,7 +82,7 @@ Run `python fetch-steamaudio.py` before the public or personal build script. It 
 
 Both build scripts use the same source. Public output excludes FFmpeg and sacd_extract; the personal output includes the local FFmpeg bundle and .NET runtime. Keep the complete output folder, including `tools` and `SpaceSketch`.
 
-Developer checks: `headphone-tests`, `headphone-ui-tests`, and `settings-migration-test` in `DiscChannelLab.Verify`. They cover DSP, actual HRTF calls, decoding and cancellation, UDP, silent Windows audio output, language switching and the normal/headphone fader banks. Set `DISCCHANNEL_DATA_HOME` to a temporary parent directory for isolated tests.
+Developer checks: `headphone-tests`, `headphone-ui-tests`, `headphone-buffer-tests`, and `settings-migration-test` in `DiscChannelLab.Verify`. They cover DSP, actual HRTF calls, decoding and cancellation, UDP, silent Windows audio output, language switching and the normal/headphone fader banks. Set `DISCCHANNEL_DATA_HOME` to a temporary parent directory for isolated tests.
 
 Run from the repository root after supplying the seven external sfiera samples under `verification-output/flac-fixtures-sfiera`. Run the DSP check before the UI check, which uses its generated six-channel fixture:
 
@@ -90,3 +90,5 @@ Run from the repository root after supplying the seven external sfiera samples u
 dotnet run --project DiscChannelLab.Verify -c Release -- headphone-tests verification-output/headphones/dsp-final
 dotnet run --project DiscChannelLab.Verify -c Release -- headphone-ui-tests verification-output/headphones/ui
 ```
+
+`headphone-buffer-tests` checks bounded startup buffering, cancellation and a failed output device, and measures actual Windows buffer continuity while processing multichannel FLAC through both renderers. Its Windows output receives silence; it can optionally analyze an existing audio file without modifying it.

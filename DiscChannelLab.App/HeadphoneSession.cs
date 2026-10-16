@@ -59,9 +59,9 @@ public sealed class HeadphoneSession : INotifyPropertyChanged, IDisposable
     private string? _error;
     private string _audioStatus = HeadphoneText.T("Output opens when playback starts.");
     public string AudioStatus => Volatile.Read(ref _audioStatus);
-    internal void ReportOutput(double bufferMs, long clips)
+    internal void ReportOutput(double bufferMs, long clips, long emptyBuffers = 0)
     {
-        Volatile.Write(ref _audioStatus, $"48 kHz float → stereo · device buffer {bufferMs:0.0} ms · clipped samples {clips:N0}");
+        Volatile.Write(ref _audioStatus, $"48 kHz float → stereo · device buffer {bufferMs:0.0} ms · clipped samples {clips:N0} · empty buffer events {emptyBuffers:N0}");
     }
     public event PropertyChangedEventHandler? PropertyChanged;
     public HeadphoneOptions Options => Volatile.Read(ref _options);

@@ -14,6 +14,9 @@ public sealed class WasapiHeadphoneOutput : IHeadphoneOutput
     private bool _disposed;
     public uint BufferFrames { get; }
     public long SubmittedFrames { get; private set; }
+    public bool HasStarted => _started;
+    public long EmptyBufferCount { get; private set; }
+    public uint StartupFrames => Math.Max((uint)HeadphoneRenderer.BlockSize, BufferFrames - (uint)HeadphoneRenderer.BlockSize + 1);
     public long PlayedFrames => Math.Max(0, SubmittedFrames - Padding);
     public uint Padding { get { Marshal.ThrowExceptionForHR(_client.GetCurrentPadding(out var padding)); return padding; } }
     public double BufferMilliseconds => BufferFrames * 1000d / HeadphoneRenderer.SampleRate;
@@ -27,8 +30,8 @@ public sealed class WasapiHeadphoneOutput : IHeadphoneOutput
         Marshal.ThrowExceptionForHR(_device.Activate(ref iid, 23, IntPtr.Zero, out var client));
         _client = (IAudioClient)client;
         var format = new WaveFormat { Tag = 3, Channels = 2, Rate = 48000, AverageBytes = 384000, BlockAlign = 8, Bits = 32 };
-        // 20 ms device buffer, raw floating point stereo. Windows performs any necessary endpoint conversion.
-        Marshal.ThrowExceptionForHR(_client.Initialize(0, 0x00040000 | 0x80000000 | 0x08000000, 200000, 0, ref format, IntPtr.Zero));
+        // A small scheduling margin for shared-mode device periods, without queuing rendered audio far ahead.
+        Marshal.ThrowExceptionForHR(_client.Initialize(0, 0x00040000 | 0x80000000 | 0x08000000, 300000, 0, ref format, IntPtr.Zero));
         Marshal.ThrowExceptionForHR(_client.GetBufferSize(out var size)); BufferFrames = size;
         if (size < HeadphoneRenderer.BlockSize) throw new InvalidOperationException("Audio endpoint buffer is too small.");
         Marshal.ThrowExceptionForHR(_client.SetEventHandle(_event.SafeWaitHandle.DangerousGetHandle()));
@@ -39,6 +42,7 @@ public sealed class WasapiHeadphoneOutput : IHeadphoneOutput
     }
     public void WaitForSpace(int frames, CancellationToken token)
     {
+        if (!_started && BufferFrames - Padding < frames) Start();
         while (BufferFrames - Padding < frames)
         {
             token.ThrowIfCancellationRequested();
@@ -47,14 +51,18 @@ public sealed class WasapiHeadphoneOutput : IHeadphoneOutput
     }
     public void Write(float[] interleaved, int frames)
     {
+        if (_started && Padding == 0) EmptyBufferCount++;
         Marshal.ThrowExceptionForHR(_render.GetBuffer((uint)frames, out var data));
         try { Marshal.Copy(interleaved, 0, data, frames * 2); }
         finally { Marshal.ThrowExceptionForHR(_render.ReleaseBuffer((uint)frames, 0)); }
         SubmittedFrames += frames;
-        if (!_started) { Marshal.ThrowExceptionForHR(_client.Start()); _started = true; }
+        // Fill almost the entire device buffer before starting, rather than starting on 5.3 ms of audio.
+        if (!_started && Padding >= StartupFrames) Start();
     }
+    private void Start() { Marshal.ThrowExceptionForHR(_client.Start()); _started = true; }
     public void Drain(CancellationToken token)
     {
+        if (!_started && SubmittedFrames > 0) Start();
         while (Padding > 0) { token.ThrowIfCancellationRequested(); _event.WaitOne(10); }
     }
     public void Dispose()

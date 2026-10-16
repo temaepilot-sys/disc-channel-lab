@@ -83,3 +83,10 @@ Run `python fetch-steamaudio.py` before the public or personal build script. It 
 Both build scripts use the same source. Public output excludes FFmpeg and sacd_extract; the personal output includes the local FFmpeg bundle and .NET runtime. Keep the complete output folder, including `tools` and `SpaceSketch`.
 
 Developer checks: `headphone-tests`, `headphone-ui-tests`, and `settings-migration-test` in `DiscChannelLab.Verify`. They cover DSP, actual HRTF calls, decoding and cancellation, UDP, silent Windows audio output, language switching and the normal/headphone fader banks. Set `DISCCHANNEL_DATA_HOME` to a temporary parent directory for isolated tests.
+
+Run from the repository root after supplying the seven external sfiera samples under `verification-output/flac-fixtures-sfiera`. Run the DSP check before the UI check, which uses its generated six-channel fixture:
+
+```powershell
+dotnet run --project DiscChannelLab.Verify -c Release -- headphone-tests verification-output/headphones/dsp-final
+dotnet run --project DiscChannelLab.Verify -c Release -- headphone-ui-tests verification-output/headphones/ui
+```

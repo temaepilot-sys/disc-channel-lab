@@ -85,3 +85,10 @@ HRTFはSteam Audioの[バイノーラル処理](https://valvesoftware.github.io/
 公開用・個人用は同じソースです。公開用にFFmpeg・sacd_extractは含めません。個人用は手元のFFmpegと.NETを同梱します。tools・SpaceSketchを含め、出力フォルダー全体を保持してください。
 
 開発用チェックは`headphone-tests`、`headphone-ui-tests`、`settings-migration-test`です。DSP・実HRTF呼び出し・デコード・キャンセル・UDP・Windows無音出力・言語切り替え・通常／ヘッドフォンのフェーダー切り替えを確認します。`DISCCHANNEL_DATA_HOME`でテスト用の保存先の親フォルダーを指定できます。
+
+外部sfieraサンプル7個を`verification-output/flac-fixtures-sfiera`へ別途用意し、リポジトリのルートで次の順に実行します。GUIの検証はDSP検証が生成した6ch音声を使用します。
+
+```powershell
+dotnet run --project DiscChannelLab.Verify -c Release -- headphone-tests verification-output/headphones/dsp-final
+dotnet run --project DiscChannelLab.Verify -c Release -- headphone-ui-tests verification-output/headphones/ui
+```

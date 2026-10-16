@@ -172,7 +172,7 @@ internal static class HeadphoneTests
                 Check(canceled && sink.Disposed, method + " cancels playback and releases output resources");
                 foreach (var name in new[] { "stereo", "center", "quad", "surround50", "surround51", "surround61", "surround71" })
                 {
-                    var sample = Path.GetFullPath(Path.Combine("..", "DiscChannelLab", "verification-output", "flac-fixtures-sfiera", name + ".flac"));
+                    var sample = Path.GetFullPath(Path.Combine("verification-output", "flac-fixtures-sfiera", name + ".flac"));
                     var sampleDisc = await service.AnalyzeAudioFilesAsync([sample], CancellationToken.None); var sampleTitle = sampleDisc.Playlists.Single();
                     var (sampleStreams, _) = await service.AnalyzePlaylistAsync(sampleDisc, sampleTitle, CancellationToken.None);
                     var sampleStream = sampleStreams.Single();

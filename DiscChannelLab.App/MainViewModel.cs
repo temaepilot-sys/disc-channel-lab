@@ -400,6 +400,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
         IsRefreshingLanguage = true;
         try
         {
+            foreach (var mode in PreviewModes) mode.RefreshLanguage();
             foreach (var choice in PreviewChannels) choice.RefreshLanguage();
             foreach (var meter in ChannelMeters) meter.RefreshLanguage();
             foreach (var playlist in Playlists) playlist.RefreshLanguage();
@@ -1182,6 +1183,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
         Changed(nameof(CanMerge));
         Changed(nameof(CanDownmixStereo));
         Changed(nameof(CanChoosePreviewChannel));
+        Changed(nameof(CanChoosePreviewMode));
         Changed(nameof(CanSaveMultichannel));
     }
 

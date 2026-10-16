@@ -68,7 +68,7 @@ public partial class HeadphonesWindow : Window
     private void Enable_Changed(object sender, RoutedEventArgs e)
     {
         if (_updating) return;
-        if (_model.IsPlaying)
+        if (!_model.CanChoosePreviewMode)
         {
             _updating = true; EnableHeadphones.IsChecked = _session.Options.Enabled; _updating = false;
             return;
@@ -79,7 +79,7 @@ public partial class HeadphonesWindow : Window
     private void Method_Changed(object sender, SelectionChangedEventArgs e)
     {
         if (_updating || MethodCombo.SelectedIndex < 0) return;
-        if (_model.IsPlaying) { _updating = true; MethodCombo.SelectedIndex = (int)_session.Options.Method; _updating = false; return; }
+        if (!_model.CanChoosePreviewMode) { _updating = true; MethodCombo.SelectedIndex = (int)_session.Options.Method; _updating = false; return; }
         _session.SetOptions(_session.Options with { Method = (HeadphoneMethod)MethodCombo.SelectedIndex });
         SettingsTabs.SelectedIndex = MethodCombo.SelectedIndex;
         Refresh();
@@ -140,8 +140,16 @@ public partial class HeadphonesWindow : Window
     }
     private void Refresh()
     {
-        EnableHeadphones.IsEnabled = !_model.IsPlaying;
-        MethodCombo.IsEnabled = !_model.IsPlaying && _session.Options.Enabled;
+        _updating = true;
+        EnableHeadphones.IsChecked = _session.Options.Enabled;
+        if (MethodCombo.SelectedIndex != (int)_session.Options.Method)
+        {
+            MethodCombo.SelectedIndex = (int)_session.Options.Method;
+            SettingsTabs.SelectedIndex = MethodCombo.SelectedIndex;
+        }
+        _updating = false;
+        EnableHeadphones.IsEnabled = _model.CanChoosePreviewMode;
+        MethodCombo.IsEnabled = _model.CanChoosePreviewMode && _session.Options.Enabled;
         DirectControls.IsEnabled = _session.Options.Method == HeadphoneMethod.Direct;
         MethodHint.Text = !_session.Options.Enabled ? HeadphoneText.T("Headphones are disabled; standard playback is active.") : _model.IsPlaying ? HeadphoneText.T("Stop or pause before changing renderer.") : HeadphoneText.T("Renderer can be changed while stopped.");
         ManualControls.IsEnabled = !_session.Options.UseTracker;

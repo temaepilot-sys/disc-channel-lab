@@ -246,12 +246,19 @@
                                       ToolTip="{local:Loc Key='オン: 100%未満は小音量を細かく調整。オフ: 増幅率を線形で調整。どちらも100%は原音、200%は2倍。'}"
                                       VerticalAlignment="Center" Margin="8,0,0,0"/>
                             <TextBlock DockPanel.Dock="Left" Text="{local:Loc Key='試聴する音'}" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                            <ComboBox x:Name="PreviewChannelCombo" Width="205" HorizontalAlignment="Left"
-                                      ItemsSource="{Binding PreviewChannels}"
-                                      SelectedItem="{Binding SelectedPreviewChannel, Mode=TwoWay}"
-                                      DisplayMemberPath="Label" IsEnabled="{Binding CanChoosePreviewChannel}"
-                                      SelectionChanged="PreviewChannel_SelectionChanged"
-                                      ToolTip="{Binding PreviewChannelHint}"/>
+                            <WrapPanel>
+                                <ComboBox x:Name="PreviewModeCombo" Width="154" HorizontalAlignment="Left" Margin="0,0,8,0"
+                                          ItemsSource="{Binding PreviewModes}" DisplayMemberPath="Label" SelectedValuePath="Mode"
+                                          SelectedValue="{Binding SelectedPreviewMode, Mode=TwoWay}"
+                                          IsEnabled="{Binding CanChoosePreviewMode}"
+                                          ToolTip="{local:Loc Key='停止または一時停止して方式を変更してください。'}"/>
+                                <ComboBox x:Name="PreviewChannelCombo" Width="184" HorizontalAlignment="Left"
+                                          ItemsSource="{Binding PreviewChannels}"
+                                          SelectedItem="{Binding SelectedPreviewChannel, Mode=TwoWay}"
+                                          DisplayMemberPath="Label" IsEnabled="{Binding CanChoosePreviewChannel}"
+                                          SelectionChanged="PreviewChannel_SelectionChanged"
+                                          ToolTip="{Binding PreviewChannelHint}"/>
+                            </WrapPanel>
                         </DockPanel>
                         <WrapPanel Margin="0,0,0,6">
                             <Button x:Name="OpenMixerButton" Content="{local:Loc Key='ミキサーを開く'}" Click="OpenMixer_Click"/>

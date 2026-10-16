@@ -7,11 +7,11 @@ Turn toward a virtual speaker and hear its channel move with you. **Headphones**
 ## Getting started
 
 1. Open a disc, ISO or audio file in the main window and choose a track.
-2. Open **Headphones** and check **Enable headphone rendering**. Uncheck it to return to ordinary playback. Change this option or the renderer while stopped or paused.
+2. Under **Preview Audio**, select **2ch Stereo**, **Headphones · Direct** or **Headphones · HRTF**. Change renderer while stopped or paused. The adjacent selector still chooses all channels or an individual source channel. Open **Headphones** for tuning controls; its enable checkbox and renderer stay synchronized with Preview Audio.
 3. Choose **Direct** or **Steam Audio**, then play using headphones. Both use the same source and speaker geometry.
 4. Click the room diagram and use the keys below, or enable opentrack. Open **3D Viewer** to see the same orientation and placement.
 
-New installations use ordinary playback by default. If the personal Headphones Lab profile exists, its renderer and settings are imported once and headphone playback is enabled. The choice is remembered.
+Every launch starts in **2ch Stereo**, even when the previous session used headphones. The headphones window opens only when requested. Headphone tuning and the last Direct/HRTF choice are retained; an existing personal Headphones Lab profile is imported once without enabling headphone playback.
 
 | Renderer | Processing |
 | --- | --- |

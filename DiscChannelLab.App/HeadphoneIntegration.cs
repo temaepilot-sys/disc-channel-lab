@@ -2,8 +2,42 @@ using System.ComponentModel;
 
 namespace Disc2Flac;
 
+public enum PreviewAudioMode { Stereo, HeadphonesDirect, HeadphonesHrtf }
+
+public sealed class PreviewModeChoice(PreviewAudioMode mode, string label) : INotifyPropertyChanged
+{
+    public PreviewAudioMode Mode { get; } = mode;
+    public string Label => LanguageService.T(label);
+    public event PropertyChangedEventHandler? PropertyChanged;
+    public void RefreshLanguage() => PropertyChanged?.Invoke(this, new(nameof(Label)));
+}
+
 public sealed partial class MainViewModel
 {
+    public IReadOnlyList<PreviewModeChoice> PreviewModes { get; } =
+    [
+        new(PreviewAudioMode.Stereo, "2ch Stereo"),
+        new(PreviewAudioMode.HeadphonesDirect, "ヘッドフォン · Direct"),
+        new(PreviewAudioMode.HeadphonesHrtf, "ヘッドフォン · HRTF")
+    ];
+    public bool CanChoosePreviewMode => !IsBusy && !IsPlaying;
+    public PreviewAudioMode SelectedPreviewMode
+    {
+        get => !HeadphonesEnabled ? PreviewAudioMode.Stereo : HeadphoneSession.Current.Options.Method == HeadphoneMethod.Direct
+            ? PreviewAudioMode.HeadphonesDirect : PreviewAudioMode.HeadphonesHrtf;
+        set
+        {
+            if (value == SelectedPreviewMode) return;
+            if (!CanChoosePreviewMode || !Enum.IsDefined(value)) { Changed(); return; }
+            var session = HeadphoneSession.Current;
+            session.SetOptions(session.Options with
+            {
+                Enabled = value != PreviewAudioMode.Stereo,
+                Method = value == PreviewAudioMode.Stereo ? session.Options.Method : value == PreviewAudioMode.HeadphonesDirect
+                    ? HeadphoneMethod.Direct : HeadphoneMethod.SteamAudio
+            });
+        }
+    }
     public bool HeadphonesEnabled => HeadphoneSession.Current.Options.Enabled;
     public string PreviewChannelHint => HeadphonesEnabled
         ? (LanguageService.Instance.IsJapanese ? "個別チャンネルも仮想スピーカーの方向から聞こえます。" : "An isolated channel retains its virtual speaker direction.")
@@ -15,7 +49,8 @@ public sealed partial class MainViewModel
 
     private void HeadphoneOptionsChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (_mixerIsHeadphone == HeadphonesEnabled) return;
+        Changed(nameof(SelectedPreviewMode));
+        if (_mixerIsHeadphone == HeadphonesEnabled) { PublishVisualizationClock(); return; }
         // A format change is only made between playback sessions.
         if (IsPlaying) PausePlayback();
         PreviewChannels.Clear();

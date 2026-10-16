@@ -42,7 +42,7 @@ This companion window follows DiscChannelLab playback and lets you compare Input
 
 Explore multichannel audio through headphones with **Direct** angle-based mixing or **Steam Audio HRTF**. Turn with the keyboard or opentrack; hear the channels change direction and watch the same movement in the 3D viewer. Front L/R separation is adjustable. Ordinary playback remains available.
 
-Open **Headphones** in the player, enable headphone rendering and select a renderer while stopped or paused. Keyboard mode keeps the listener fixed and rotates the room; tracking mode keeps the room fixed and turns the head. Headphone processing affects playback; existing FLAC exports use their source or stereo-mixer settings.
+The player always starts in **2ch Stereo**. Under **Preview Audio**, select **2ch Stereo**, **Headphones · Direct** or **Headphones · HRTF** while stopped or paused. Open **Headphones** for tuning; it no longer opens automatically. Keyboard mode keeps the listener fixed and rotates the room; tracking mode keeps the room fixed and turns the head. Headphone processing affects playback; existing FLAC exports use their source or stereo-mixer settings.
 
 [Setup, controls, speaker placement, theory and limitations](docs/headphones.md).
 

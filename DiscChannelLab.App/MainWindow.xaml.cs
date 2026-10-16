@@ -117,7 +117,6 @@ public partial class MainWindow : Window
         _driveTimer.Start();
         _playTimer.Start();
         HeadphoneSession.Current.RestartTracker();
-        if (HeadphoneSession.Current.Options.Enabled) OpenHeadphones_Click(this, new RoutedEventArgs());
         await Task.WhenAll(_model.RefreshCacheSizeAsync(), _model.DetectInsertedDiscAsync());
     }
 

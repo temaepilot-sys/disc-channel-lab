@@ -123,6 +123,8 @@ public sealed class LanguageService : INotifyPropertyChanged
         ["キャッシュ"] = "Cache",
         ["ヘッドフォン"] = "Headphones",
         ["ヘッドフォン · 全チャンネル"] = "Headphones · all channels",
+        ["ヘッドフォン · Direct"] = "Headphones · Direct",
+        ["ヘッドフォン · HRTF"] = "Headphones · HRTF",
         ["ディスク / 音声ファイル"] = "Disc / audio files",
         ["ディスク・音声ファイル → FLAC"] = "Discs / audio files → FLAC",
         ["ドライブ / ファイル"] = "Drive / file",

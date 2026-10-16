@@ -72,7 +72,8 @@ public sealed class HeadphoneSession : INotifyPropertyChanged, IDisposable
     public HeadphoneSession()
     {
         AppDataPaths.Current.ImportHeadphoneSettings();
-        try { if (File.Exists(_path)) _options = (JsonSerializer.Deserialize<HeadphoneOptions>(File.ReadAllText(_path)) ?? new()).Validated(); }
+        // Keep tuning preferences, but always start a new session in ordinary stereo.
+        try { if (File.Exists(_path)) _options = (JsonSerializer.Deserialize<HeadphoneOptions>(File.ReadAllText(_path)) ?? new()).Validated() with { Enabled = false }; }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { _error = ex.Message; }
     }
     public void SetOptions(HeadphoneOptions options)
@@ -133,7 +134,7 @@ public sealed class HeadphoneSession : INotifyPropertyChanged, IDisposable
         {
             Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
             var temporary = _path + ".tmp";
-            File.WriteAllText(temporary, JsonSerializer.Serialize(Options, new JsonSerializerOptions { WriteIndented = true }));
+            File.WriteAllText(temporary, JsonSerializer.Serialize(Options with { Enabled = false }, new JsonSerializerOptions { WriteIndented = true }));
             File.Move(temporary, _path, overwrite: true);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { _error = ex.Message; }

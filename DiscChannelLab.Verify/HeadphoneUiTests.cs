@@ -16,6 +16,9 @@ internal static class HeadphoneUiTests
     {
         var root = Path.GetFullPath(folder); Directory.CreateDirectory(root);
         Environment.SetEnvironmentVariable("DISCCHANNEL_DATA_HOME", Path.Combine(root, "profile"));
+        var storedSettings = Path.Combine(root, "profile", "DiscChannelLab", "headphones.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(storedSettings)!);
+        File.WriteAllText(storedSettings, "{\"Enabled\":true,\"Method\":1,\"FrontAngle\":65}");
         var checks = new List<string>(); Exception? failure = null;
         void Check(bool ok, string label) { if (!ok) throw new InvalidDataException(label); checks.Add(label); Console.WriteLine("PASS " + label); }
         var thread = new Thread(() =>
@@ -29,24 +32,53 @@ internal static class HeadphoneUiTests
                 SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext());
                 var dispatcherErrors = new List<Exception>();
                 app.DispatcherUnhandledException += (_, e) => { dispatcherErrors.Add(e.Exception); e.Handled = true; };
-                HeadphoneSession.Current.SetOptions(new HeadphoneOptions { Enabled = true });
                 model = new MainViewModel(); main = new MainWindow(model) { ShowActivated = false, ShowInTaskbar = false, Opacity = 0 };
                 var loaded = typeof(MainWindow).GetMethod("Window_Loaded", BindingFlags.NonPublic | BindingFlags.Instance)!;
                 main.Loaded -= (RoutedEventHandler)Delegate.CreateDelegate(typeof(RoutedEventHandler), main, loaded);
                 main.Show();
+                var previewMode = (ComboBox)main.FindName("PreviewModeCombo");
+                Check(!model.HeadphonesEnabled && model.SelectedPreviewMode == PreviewAudioMode.Stereo &&
+                    Equals(previewMode.SelectedValue, PreviewAudioMode.Stereo) && model.PreviewModes[0].Label == "2ch Stereo",
+                    "Saved headphone-enabled preferences still start the main GUI in 2ch Stereo");
+                Check(HeadphoneSession.Current.Options.FrontAngle == 65 && HeadphoneSession.Current.Options.Method == HeadphoneMethod.SteamAudio,
+                    "Stereo startup retains the saved headphone renderer and speaker tuning");
                 var source = Path.GetFullPath(Path.Combine(root, "..", "dsp-final", "six-channels.flac"));
                 if (!File.Exists(source)) source = Path.GetFullPath(Path.Combine(root, "..", "dsp-initial", "six-channels.flac"));
                 Pump(model.OpenAudioFilesAsync([source]));
+                Check(model.CanPlay && !model.HeadphonesEnabled && Equals(previewMode.SelectedValue, PreviewAudioMode.Stereo),
+                    "Opening multichannel audio keeps 2ch Stereo selected");
+                main.Width = main.MinWidth; main.UpdateLayout();
+                var mainSurface = (FrameworkElement)main.Content;
+                var channelPicker = (ComboBox)main.FindName("PreviewChannelCombo");
+                var modeBounds = previewMode.TransformToAncestor(mainSurface).TransformBounds(new Rect(previewMode.RenderSize));
+                var channelBounds = channelPicker.TransformToAncestor(mainSurface).TransformBounds(new Rect(channelPicker.RenderSize));
+                Check(modeBounds.Right <= mainSurface.ActualWidth && channelBounds.Right <= mainSurface.ActualWidth &&
+                    !modeBounds.IntersectsWith(channelBounds),
+                    "Preview mode and channel selectors remain separate and visible at the minimum window width");
+                var mainBitmap = new RenderTargetBitmap((int)mainSurface.ActualWidth, (int)mainSurface.ActualHeight, 96, 96, PixelFormats.Pbgra32);
+                mainBitmap.Render(mainSurface); var mainPng = new PngBitmapEncoder(); mainPng.Frames.Add(BitmapFrame.Create(mainBitmap));
+                using (var imageFile = File.Create(Path.Combine(root, "stereo-preview-minimum-width.png"))) mainPng.Save(imageFile);
+                main.Width = 1140; main.UpdateLayout();
+                previewMode.SelectedValue = PreviewAudioMode.HeadphonesDirect;
                 Check(model.CanPlay && model.MixerStrips.Count == 6 && model.ExperimentalMixerEnabled && model.MixerStrips.All(s => s.Level == 100),
-                    "Real GUI loads six-channel FLAC with unity headphone faders enabled by default");
+                    "Preview Audio selects Direct with unity headphone faders for real six-channel FLAC");
                 lab = new HeadphonesWindow(model) { Owner = main, ShowActivated = false, ShowInTaskbar = false, Opacity = 0 };
                 lab.Show(); Pump(Task.Delay(100));
                 Check(lab.IsLoaded && lab.IsVisible, "Headphones comparison window opens with real application styles");
                 var enable = (CheckBox)lab.FindName("EnableHeadphones");
+                previewMode.SelectedValue = PreviewAudioMode.HeadphonesHrtf; Pump(Task.Delay(80));
+                Check(HeadphoneSession.Current.Options.Method == HeadphoneMethod.SteamAudio && enable.IsChecked == true &&
+                    ((ComboBox)lab.FindName("MethodCombo")).SelectedIndex == 1,
+                    "Preview Audio HRTF selection synchronizes the open headphones window");
+                previewMode.SelectedValue = PreviewAudioMode.HeadphonesDirect; Pump(Task.Delay(80));
+                Check(HeadphoneSession.Current.Options.Method == HeadphoneMethod.Direct && ((ComboBox)lab.FindName("MethodCombo")).SelectedIndex == 0,
+                    "Preview Audio Direct selection synchronizes both selectors");
                 model.MixerStrips[0].Level = 45;
-                enable.IsChecked = false;
+                previewMode.SelectedValue = PreviewAudioMode.Stereo; Pump(Task.Delay(80));
                 Check(!model.HeadphonesEnabled && !model.ExperimentalMixerEnabled && model.CanPlay,
-                    "Main-version toggle restores ordinary playback and its original mixer enable state");
+                    "Preview Audio 2ch Stereo restores ordinary playback and its original mixer enable state");
+                Check(enable.IsChecked == false && !((ComboBox)lab.FindName("MethodCombo")).IsEnabled,
+                    "Switching to 2ch Stereo also disables headphone rendering in the separate window");
                 var expected = StereoPreviewMixer.StandardChannels(model.SelectedStream!);
                 Check(model.MixerStrips.Zip(expected).All(p => Math.Abs(p.First.Level - p.Second.Gain * 100) < .0001),
                     "Normal playback retains the original standard downmix coefficients");
@@ -66,6 +98,8 @@ internal static class HeadphoneUiTests
                 var mode = (ComboBox)lab.FindName("MethodCombo");
                 mode.SelectedIndex = 1;
                 Check(HeadphoneSession.Current.Options.Method == HeadphoneMethod.SteamAudio, "Stopped renderer selector chooses Steam Audio");
+                Check(Equals(previewMode.SelectedValue, PreviewAudioMode.HeadphonesHrtf),
+                    "Changing renderer in the headphones window updates Preview Audio");
                 mode.SelectedIndex = 0;
                 ((Slider)lab.FindName("Rear")).Value = 9;
                 Check(HeadphoneSession.Current.Options.RearCutDb == 9, "Rear shelf slider updates live audio settings");
@@ -106,7 +140,7 @@ internal static class HeadphoneUiTests
                 model.ContinuousPlayback = false;
                 ((Button)lab.FindName("ReplayButton")).RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
                 Pump(Task.Delay(170));
-                Check(model.IsPlaying && model.PreviewSeconds >= .3 && !mode.IsEnabled && !enable.IsEnabled,
+                Check(model.IsPlaying && model.PreviewSeconds >= .3 && !mode.IsEnabled && !enable.IsEnabled && !previewMode.IsEnabled,
                     "Play from mark starts the chosen renderer at the saved position and locks mode selection during playback");
                 lab.Close(); lab = null;
                 Check(model.IsPlaying && main.IsVisible, "Comparison window remains modeless and can close during playback");
@@ -124,6 +158,9 @@ internal static class HeadphoneUiTests
                 using (var output = File.Create(Path.Combine(root, "headphones-window.png"))) png.Save(output);
                 Check(dispatcherErrors.Count == 0, "GUI interaction completes without dispatcher exceptions");
                 HeadphoneSession.Current.Save();
+                using (var saved = JsonDocument.Parse(File.ReadAllText(storedSettings)))
+                    Check(!saved.RootElement.GetProperty("Enabled").GetBoolean() && model.HeadphonesEnabled,
+                        "Saving tuning does not change live playback and stores stereo as the next startup mode");
                 Check(File.Exists(AppDataPaths.Current.PreferencePath("headphones.json")) && Path.GetFileName(AppDataPaths.Current.Root) == "DiscChannelLab",
                     "Headphone settings save in the main DiscChannelLab profile separately from disc metadata");
             }

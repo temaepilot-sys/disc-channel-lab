@@ -33,8 +33,8 @@ public static class SettingsMigrationTests
         File.WriteAllText(Path.Combine(headphonePaths.HeadphonesLabRoot, "cache", "large.wav"), "cache fixture");
         var promoted = headphonePaths.ImportHeadphoneSettings();
         var options = System.Text.Json.JsonSerializer.Deserialize<HeadphoneOptions>(File.ReadAllText(headphonePaths.PreferencePath("headphones.json")))!;
-        Check(promoted.Errors.Count == 0 && promoted.CopiedFiles == 3 && options.Enabled && options.Method == HeadphoneMethod.SteamAudio && options.FrontAngle == 65,
-            "Trial headphones import preserves the approved renderer and front width and enables it");
+        Check(promoted.Errors.Count == 0 && promoted.CopiedFiles == 3 && !options.Enabled && options.Method == HeadphoneMethod.SteamAudio && options.FrontAngle == 65,
+            "Trial headphones import preserves tuning while leaving normal stereo playback selected");
         Check(File.ReadAllText(Path.Combine(mainEdits, "album.json")) == "\"Trial album edit\"" && File.Exists(Path.Combine(mainEdits, "new-title.json")),
             "Newer trial metadata and missing title edits migrate to the main profile");
         Check(File.ReadAllText(Path.Combine(headphonePaths.Root, "imports", "headphones-lab-backup", "track-edits", editKey, "album.json")) == "\"Original album\"",

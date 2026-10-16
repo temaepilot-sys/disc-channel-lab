@@ -15,15 +15,15 @@ public sealed partial class AppDataPaths
         var marker = PreferencePath("headphones-import-v1.txt");
         var backup = Path.Combine(Root, "imports", "headphones-lab-backup");
         bool SafeDirectory(string p) => Directory.Exists(p) && (File.GetAttributes(p) & FileAttributes.ReparsePoint) == 0;
-        void CopyJson(string source, string target, bool enableHeadphones = false)
+        void CopyJson(string source, string target, bool headphonePreferences = false)
         {
             if (!File.Exists(source) || (File.GetAttributes(source) & FileAttributes.ReparsePoint) != 0) return;
             if (new FileInfo(source).Length > 16 * 1024 * 1024) return;
-            if (File.Exists(target) && (enableHeadphones || File.GetLastWriteTimeUtc(target) >= File.GetLastWriteTimeUtc(source))) return;
+            if (File.Exists(target) && (headphonePreferences || File.GetLastWriteTimeUtc(target) >= File.GetLastWriteTimeUtc(source))) return;
             var contents = File.ReadAllText(source);
             using var json = JsonDocument.Parse(contents);
-            if (enableHeadphones)
-                contents = JsonSerializer.Serialize((JsonSerializer.Deserialize<HeadphoneOptions>(contents) ?? new()).Validated() with { Enabled = true }, new JsonSerializerOptions { WriteIndented = true });
+            if (headphonePreferences)
+                contents = JsonSerializer.Serialize((JsonSerializer.Deserialize<HeadphoneOptions>(contents) ?? new()).Validated() with { Enabled = false }, new JsonSerializerOptions { WriteIndented = true });
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
             if (File.Exists(target))
             {

@@ -141,7 +141,8 @@ internal static class HeadphoneTests
             Check(session.PacketAgeSeconds > .5 && session.Pose.Yaw == 10, "Lost tracking holds the last valid pose");
         }
         session.SetOptions(options); session.SetKeyboard(0, 0, 0); session.Save();
-        using (var loaded = new HeadphoneSession()) Check(loaded.Options == options, "Headphone settings round-trip in an isolated JSON profile");
+        using (var loaded = new HeadphoneSession()) Check(loaded.Options == options with { Enabled = false },
+            "Headphone tuning round-trips, while every new session starts in ordinary stereo");
         var tools = new ToolPaths(); var log = new AppLog(Path.Combine(root, "logs")); var runner = new ProcessRunner(log);
         var probe = new FfprobeService(tools, runner); var service = new DiscService(probe, log);
         var file = Path.Combine(root, "six-channels.flac");

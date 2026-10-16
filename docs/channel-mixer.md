@@ -48,3 +48,7 @@ dotnet DiscChannelLab.Verify/bin/Release/net10.0-windows/DiscChannelLab.Verify.d
 dotnet DiscChannelLab.Verify/bin/Release/net10.0-windows/DiscChannelLab.Verify.dll meter-alignment-test
 dotnet DiscChannelLab.Verify/bin/Release/net10.0-windows/DiscChannelLab.Verify.dll mixer-export-test artifacts/mixer-export-checks
 ```
+
+## Headphone playback
+
+[Headphone mode](headphones.md) has a separate input-gain bank, initially 100%, followed by shared output headroom. Gain, Mute, Solo and polarity apply before direction rendering; Pan continues to control stereo FLAC export. Ordinary mode retains the standard downmix defaults.

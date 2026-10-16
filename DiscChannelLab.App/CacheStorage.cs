@@ -21,13 +21,13 @@ public sealed class CacheStorage(AppDataPaths paths, string viewerHome, Func<boo
 
     public static bool RuntimeInUse()
     {
-        foreach (var name in new[] { "DiscChannelLab", "DiscChannelLab.Visualizer" })
+        foreach (var name in new[] { "DiscChannelLab", "DiscChannelLab.Visualizer", "DiscChannelLab.Headphones", "DiscChannelLab.Headphones.Visualizer" })
         {
             var processes = Process.GetProcessesByName(name);
             try
             {
                 foreach (var process in processes)
-                    if (name == "DiscChannelLab.Visualizer" || process.Id != Environment.ProcessId) return true;
+                    if (name.EndsWith(".Visualizer", StringComparison.Ordinal) || process.Id != Environment.ProcessId) return true;
             }
             finally { foreach (var process in processes) process.Dispose(); }
         }

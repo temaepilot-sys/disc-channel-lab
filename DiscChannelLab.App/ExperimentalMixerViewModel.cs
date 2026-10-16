@@ -8,7 +8,13 @@ public sealed partial class MainViewModel
     public ObservableCollection<MixerFaderLink> MixerFaderLinks { get; } = [];
     public ChannelMeter MixerOutputLeft { get; } = new("L", "L");
     public ChannelMeter MixerOutputRight { get; } = new("R", "R");
-    private bool _experimentalMixerEnabled;
+    private bool _mixerIsHeadphone = HeadphoneSession.Current.Options.Enabled;
+    private bool _normalMixerEnabled;
+    private bool _headphoneMixerEnabled = true;
+    private bool _experimentalMixerEnabled = HeadphoneSession.Current.Options.Enabled;
+    private string MixerBankKey(IEnumerable<string> codes) => (_mixerIsHeadphone ? "Headphones:" : "Stereo:") + string.Join(' ', codes);
+    private ExperimentalChannel[] DefaultMixerChannels() => StereoPreviewMixer.StandardChannels(SelectedStream!)
+        .Select(c => HeadphonesEnabled ? c with { Gain = 1 } : c).ToArray();
     private bool _saveMixerDownmix;
     private bool _includeMixerMaster;
     private string _mixerVariantName = "Mix 1";
@@ -96,14 +102,22 @@ public sealed partial class MainViewModel
     {
         SaveMixerDownmix = false;
         if (MixerStrips.Count > 0)
-            _rememberedMixerLayouts[string.Join(' ', MixerStrips.Select(x => x.Code))] =
+            _rememberedMixerLayouts[MixerBankKey(MixerStrips.Select(x => x.Code))] =
                 (MixerStrips.Select(x => x.Snapshot()).ToArray(), CaptureFaderLinks());
+        if (_mixerIsHeadphone != HeadphonesEnabled)
+        {
+            if (_mixerIsHeadphone) _headphoneMixerEnabled = _experimentalMixerEnabled;
+            else _normalMixerEnabled = _experimentalMixerEnabled;
+            _mixerIsHeadphone = HeadphonesEnabled;
+            _experimentalMixerEnabled = _mixerIsHeadphone ? _headphoneMixerEnabled : _normalMixerEnabled;
+            Changed(nameof(ExperimentalMixerEnabled));
+        }
         MixerFaderLinks.Clear();
         MixerStrips.Clear();
         if (CanUseExperimentalMixer)
         {
-            var defaults = StereoPreviewMixer.StandardChannels(SelectedStream!);
-            var key = string.Join(' ', defaults.Select(x => x.Code));
+            var defaults = DefaultMixerChannels();
+            var key = MixerBankKey(defaults.Select(x => x.Code));
             var found = _rememberedMixerLayouts.TryGetValue(key, out var remembered);
             var settings = (found ? remembered.Channels : defaults)
                 .ToDictionary(x => x.Code, StringComparer.Ordinal);
@@ -133,7 +147,7 @@ public sealed partial class MainViewModel
     public void ResetExperimentalMixer()
     {
         if (!CanUseExperimentalMixer) return;
-        var defaults = StereoPreviewMixer.StandardChannels(SelectedStream!).ToDictionary(x => x.Code);
+        var defaults = DefaultMixerChannels().ToDictionary(x => x.Code);
         _applyingMixerPreset = true;
         try
         {

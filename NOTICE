@@ -1,0 +1,12 @@
+DiscChannelLab
+Copyright DiscChannelLab contributors
+
+The optional HRTF playback renderer uses Steam Audio 4.8.1 by Valve Corporation.
+Steam Audio is licensed under Apache License 2.0 and includes third-party components.
+Source notices: third_party/steam-audio/.
+Binary distributions retain tools/steamaudio/LICENSE.txt and THIRDPARTY.md.
+This application is not affiliated with or endorsed by Valve Corporation.
+
+FFmpeg and sacd_extract are separate tools with their own licenses. The public
+build does not include them. The application's Apache 2.0 license does not
+relicense external programs or third-party components.

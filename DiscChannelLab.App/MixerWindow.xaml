@@ -109,6 +109,7 @@
             <TextBlock Text="{Binding SelectedStream.DisplayName}" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource MutedBrush}" Margin="0,4,0,6"/>
             <CheckBox Content="{local:Loc Key='ミキサーを再生に適用'}"
                       IsChecked="{Binding ExperimentalMixerEnabled}" IsEnabled="{Binding CanUseExperimentalMixer}"/>
+            <TextBlock Text="{Binding HeadphoneMixerHint}" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" FontSize="12"/>
             <WrapPanel Margin="0,8,0,0">
                 <WrapPanel.Style><Style TargetType="WrapPanel">
                     <Style.Triggers><DataTrigger Binding="{Binding MixerFaderLinks.Count}" Value="0"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers>
@@ -123,7 +124,7 @@
                     </DataTemplate></ItemsControl.ItemTemplate>
                 </ItemsControl>
             </WrapPanel>
-            <TextBlock Text="{local:Loc Key='標準ミックスを使用：このフェーダーは再生に適用されていません。'}"
+            <TextBlock Text="{Binding MixerBypassHint}"
                        TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,5,0,0">
                 <TextBlock.Style><Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
                     <Setter Property="Visibility" Value="Collapsed"/>

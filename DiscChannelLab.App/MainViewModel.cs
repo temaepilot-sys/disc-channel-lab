@@ -288,7 +288,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
             SaveIndividualChannels = false;
             SaveMultichannelFlac = false;
             PreviewChannels.Clear();
-            PreviewChannels.Add(new ChannelChoice(null, "ステレオミックス"));
+            PreviewChannels.Add(new ChannelChoice(null, HeadphonesEnabled ? "ヘッドフォン · 全チャンネル" : "ステレオミックス"));
             if (value is not null)
                 foreach (var channel in StereoMixSettings.ChannelNames(value))
                     PreviewChannels.Add(new ChannelChoice(channel, ChannelChoice.DescribeRaw(channel)));
@@ -296,7 +296,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
             ChannelMeters.Clear();
             if (value is not null)
             {
-                var channelNames = StereoMixSettings.ChannelNames(value);
+                IReadOnlyList<string> channelNames = HeadphonesEnabled ? HeadphoneGeometry.Channels(value) : StereoMixSettings.ChannelNames(value);
                 for (var i = 0; i < value.Channels; i++)
                 {
                     var code = i < channelNames.Count ? channelNames[i] : value.Channels == 1
@@ -314,7 +314,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
         }
     }
     public bool CanChooseHighRes => !IsBusy && (SaveMultichannelFlac ? SelectedStream?.CanMakeOriginalPcm == true : SelectedStream?.CanMakeHighResolution == true);
-    public string SelectedStreamNote => LanguageService.T(SelectedStream is { } available && _loadedPlaylist is { } loaded &&
+    public string SelectedStreamNote => (HeadphonesEnabled ? HeadphoneText.T("Headphone rendering is for playback; FLAC export uses the source or stereo mixer.") + " " : "") + LanguageService.T(SelectedStream is { } available && _loadedPlaylist is { } loaded &&
         Tracks.Any(track => track.IsSelected && !available.Covers(loaded, track))
         ? "選択中の曲に、この音声が存在しない区間があります。保存する曲または音声を変更してください。"
         : SelectedStream is { HasSupportedChannels: false }
@@ -343,7 +343,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
     public bool CanConvert => !IsPlaying && CanPrepareConversion;
     private bool CanPrepareConversion => !IsBusy && HasVerifiedAudio && _disc is not null && _loadedPlaylist is not null && SelectedStream is not null && !string.IsNullOrWhiteSpace(OutputFolder) && Tracks.Any(x => x.IsSelected) && Tracks.Where(x => x.IsSelected).All(x => SelectedStream.Covers(_loadedPlaylist, x)) && QualityAvailable(SelectedStream);
     public bool CanEditTracks => !IsBusy && !IsPlaying && Tracks.Count > 0;
-    public bool CanPlay => !IsBusy && HasVerifiedAudio && SelectedTrack is not null && SelectedStream is not null && _disc is not null && _loadedPlaylist is not null && (_loadedPlaylist.Format != DiscFormat.AudioFile || AudioFileReader.IsUsable(SelectedStream)) && SelectedStream.Covers(_loadedPlaylist, SelectedTrack) && _navigation.CanPlay;
+    public bool CanPlay => (!HeadphonesEnabled || SelectedStream is { } headphoneStream && HeadphoneGeometry.Channels(headphoneStream).Length == headphoneStream.Channels) && !IsBusy && HasVerifiedAudio && SelectedTrack is not null && SelectedStream is not null && _disc is not null && _loadedPlaylist is not null && (_loadedPlaylist.Format != DiscFormat.AudioFile || AudioFileReader.IsUsable(SelectedStream)) && SelectedStream.Covers(_loadedPlaylist, SelectedTrack) && _navigation.CanPlay;
     public bool CanSeek => !IsBusy && SelectedTrack is not null;
     public bool CanPreviousTrack => CanSeek && Tracks.IndexOf(SelectedTrack!) > 0;
     public bool CanNextTrack
@@ -386,13 +386,14 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
         if (string.IsNullOrWhiteSpace(_outputFolder)) _outputFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Music");
         _log.Write("Application Start");
         LanguageService.Instance.LanguageChanged += LanguageChanged;
+        HeadphoneSession.Current.PropertyChanged += HeadphoneOptionsChanged;
         RefreshDrives();
     }
 
     public bool IsRefreshingLanguage { get; private set; }
 
     public void DetachLanguage()
-    { StopInspection(); LanguageService.Instance.LanguageChanged -= LanguageChanged; }
+    { StopInspection(); LanguageService.Instance.LanguageChanged -= LanguageChanged; HeadphoneSession.Current.PropertyChanged -= HeadphoneOptionsChanged; }
 
     private void LanguageChanged(object? sender, EventArgs e)
     {
@@ -407,7 +408,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
             if (_disc is not null) RefreshMetadata();
             foreach (var name in new[] { nameof(AlbumTitle), nameof(TitleName), nameof(Status), nameof(PlayPauseText),
                 nameof(SelectedTrackTitle), nameof(SelectedChapterText), nameof(SelectedStreamNote),
-                nameof(VolumeDetails), nameof(ChapterCorrectionNote), nameof(CacheSizeText), nameof(CacheDetailsText),
+                nameof(PreviewChannelHint), nameof(HeadphoneMixerHint), nameof(MixerBypassHint), nameof(VolumeDetails), nameof(ChapterCorrectionNote), nameof(CacheSizeText), nameof(CacheDetailsText),
                 nameof(CacheClearHint), nameof(HighResOptionText), nameof(HighResHelpText) }) Changed(name);
         }
         finally { IsRefreshingLanguage = false; }

@@ -1,0 +1,152 @@
+<Window x:Class="Disc2Flac.HeadphonesWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:Disc2Flac"
+        Title="Headphones — Direct / HRTF" Width="990" Height="810" MinWidth="860" MinHeight="660"
+        Background="{DynamicResource AppBackgroundBrush}" WindowStartupLocation="CenterOwner">
+    <Window.Resources>
+        <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}"><Setter Property="TextWrapping" Value="Wrap"/></Style>
+        <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="Padding" Value="10,5"/><Setter Property="Margin" Value="0,0,6,6"/></Style>
+        <Style TargetType="CheckBox" BasedOn="{StaticResource {x:Type CheckBox}}"><Setter Property="Margin" Value="0,6,0,6"/></Style>
+        <Style TargetType="Slider" BasedOn="{StaticResource {x:Type Slider}}"><Setter Property="Margin" Value="0,3,0,8"/></Style>
+        <Style TargetType="TabItem">
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+            <Setter Property="Background" Value="{DynamicResource InputBrush}"/>
+            <Setter Property="Padding" Value="12,6"/>
+            <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="TabItem">
+                <Border Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}" CornerRadius="3,3,0,0" Margin="0,0,3,0">
+                    <ContentPresenter ContentSource="Header" TextElement.Foreground="{TemplateBinding Foreground}"/>
+                </Border>
+            </ControlTemplate></Setter.Value></Setter>
+            <Style.Triggers><Trigger Property="IsSelected" Value="True">
+                <Setter Property="Background" Value="{DynamicResource AccentBrush}"/>
+                <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}"/>
+            </Trigger></Style.Triggers>
+        </Style>
+    </Window.Resources>
+    <Grid Margin="16">
+        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+        <StackPanel Grid.Row="0" Margin="0,0,0,12">
+            <TextBlock Text="{local:Loc Key='ヘッドフォン'}" FontSize="23" FontWeight="SemiBold"/>
+            <CheckBox x:Name="EnableHeadphones" Content="{local:Loc Key='ヘッドフォン再生を有効にする'}" Checked="Enable_Changed" Unchecked="Enable_Changed"/>
+            <DockPanel Margin="0,8,0,4">
+                <TextBlock Text="{local:Loc Key='再生方式'}" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                <ComboBox x:Name="MethodCombo" MinHeight="32" Width="300" HorizontalAlignment="Left" SelectionChanged="Method_Changed">
+                    <ComboBoxItem Content="{local:Loc Key='Direct — 角度・パン・緩やかなフィルター'}"/>
+                    <ComboBoxItem Content="{local:Loc Key='Steam Audio — バイノーラルHRTF'}"/>
+                </ComboBox>
+                <TextBlock x:Name="MethodHint" Margin="12,0,0,0" VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}"/>
+            </DockPanel>
+            <TextBlock Text="{local:Loc Key='ヘッドフォンでお聴きください。キー操作ではリスナーを固定して周囲が回転します。opentrackでは部屋を固定して頭が回転します。'}"
+                       Foreground="{DynamicResource MutedBrush}"/>
+        </StackPanel>
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="14"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+            <Grid Grid.Column="0">
+                <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                <Grid>
+                    <Border Background="#0B111B" CornerRadius="8"/>
+                    <Canvas x:Name="Room" Focusable="True" Background="Transparent" ClipToBounds="True" PreviewKeyDown="Room_KeyDown" MouseLeftButtonDown="Room_MouseDown"/>
+                    <TextBlock x:Name="RoomModeText" Text="{local:Loc Key='リスナーを固定 / 周囲が回転'}" Margin="12" VerticalAlignment="Top" Foreground="#8DA6BD" IsHitTestVisible="False"/>
+                    <TextBlock x:Name="PoseText" Margin="12" VerticalAlignment="Bottom" Foreground="#C7E7FB" IsHitTestVisible="False"/>
+                </Grid>
+                <StackPanel Grid.Row="1" Margin="0,10,0,0">
+                    <WrapPanel>
+                        <Button Content="{local:Loc Key='キー操作'}" Click="Keyboard_Click"/>
+                        <Button Content="{local:Loc Key='正面へ / Home'}" Click="Center_Click"/>
+                    </WrapPanel>
+                    <TextBlock Text="{local:Loc Key='部屋の図をクリック：← → 左右・↑ ↓ 上下・Q / E 傾き。Shiftで微調整。Homeで正面へ。'}"
+                               FontSize="12" Foreground="{DynamicResource MutedBrush}"/>
+                    <TextBlock x:Name="TrackingStatus" Margin="0,5,0,0"/>
+                    <TextBlock Text="{local:Loc Key='ミキサーのレベル・Mute・Solo・極性反転を使用します。ヘッドフォンの左右配分は各スピーカーの方向で決まります。'}"
+                               FontSize="12" Margin="0,8,0,0" Foreground="{DynamicResource MutedBrush}"/>
+                </StackPanel>
+            </Grid>
+            <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel Margin="0,0,5,0">
+                    <TextBlock Text="{local:Loc Key='スピーカー配置 / L・Rの分離'}" FontSize="15" FontWeight="SemiBold"/>
+                    <TextBlock x:Name="FrontAngleLabel" Margin="0,6,0,0"/>
+                    <Slider x:Name="FrontAngle" Minimum="15" Maximum="90" SmallChange="1" LargeChange="5" TickFrequency="1" IsSnapToTickEnabled="True" IsMoveToPointEnabled="True" ValueChanged="Options_Changed"/>
+                    <WrapPanel>
+                        <Button x:Name="ResetPlacementButton" Content="{local:Loc Key='標準 ±30°'}" Click="ResetPlacement_Click"/>
+                        <TextBlock Text="{local:Loc Key='広げるとL・Rを聞き分けやすくなります'}" FontSize="12" VerticalAlignment="Center" Margin="0,0,0,6"/>
+                    </WrapPanel>
+                    <TextBlock Text="{local:Loc Key='両方式と3D表示の仮想FL・FR位置を変更します。標準はL・Rの間隔60°です。'}"
+                               FontSize="12" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,12"/>
+                    <TabControl x:Name="SettingsTabs" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}">
+                        <TabItem Header="Direct">
+                            <StackPanel x:Name="DirectControls" Margin="10">
+                                <TextBlock Text="{local:Loc Key='角度に基づく試聴'}" FontWeight="SemiBold"/>
+                                <TextBlock Text="{local:Loc Key='等電力パンと球形頭部フィルターを使用します。背面の高域カットは聴感に合わせる近似で、耳の実測値ではありません。'}"
+                                           Margin="0,6,0,10" FontSize="12" Foreground="{DynamicResource MutedBrush}"/>
+                                <TextBlock x:Name="ShadowLabel"/><Slider x:Name="Shadow" Minimum="0" Maximum="100" ValueChanged="Options_Changed"/>
+                                <TextBlock x:Name="RearLabel"/><Slider x:Name="Rear" Minimum="0" Maximum="18" ValueChanged="Options_Changed"/>
+                                <TextBlock x:Name="CornerLabel"/><Slider x:Name="Corner" Minimum="500" Maximum="12000" TickFrequency="500" ValueChanged="Options_Changed"/>
+                                <TextBlock x:Name="RadiusLabel"/><Slider x:Name="Radius" Minimum="6" Maximum="12" ValueChanged="Options_Changed"/>
+                                <CheckBox x:Name="Delay" Content="{local:Loc Key='近似した耳間時間差を加える'}" Checked="Option_Checked" Unchecked="Option_Checked"/>
+                                <Button Content="{local:Loc Key='Directの設定を戻す'}" Click="ResetDirect_Click" HorizontalAlignment="Left"/>
+                            </StackPanel>
+                        </TabItem>
+                        <TabItem Header="HRTF">
+                            <StackPanel Margin="10">
+                                <TextBlock Text="Steam Audio 4.8.1" FontWeight="SemiBold"/>
+                                <TextBlock Text="{local:Loc Key='各スピーカーに組み込みHRTFと頭の向きを適用します。部屋の残響は追加しません。'}"
+                                           Margin="0,8,0,8"/>
+                                <TextBlock Text="{local:Loc Key='Directのフィルターと遅延は使用しません。同じ音源・入力レベル・ヘッドルーム・頭の向きで比較できます。'}"
+                                           Margin="0,0,0,8"/>
+                                <TextBlock Text="{local:Loc Key='前後・上下の感じ方には個人差があります。組み込みHRTFは個人の耳に最適化されたものではありません。'}"
+                                           FontSize="12" Foreground="{DynamicResource MutedBrush}"/>
+                            </StackPanel>
+                        </TabItem>
+                        <TabItem Header="{local:Loc Key='トラッキング'}">
+                            <StackPanel Margin="10">
+                                <CheckBox x:Name="UseTracker" Content="{local:Loc Key='opentrack UDPを受信'}" Checked="Tracker_Changed" Unchecked="Tracker_Changed"/>
+                                <WrapPanel Margin="0,0,0,5">
+                                    <TextBlock Text="{local:Loc Key='ポート'}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                    <TextBox x:Name="Port" Width="74" VerticalContentAlignment="Center" Margin="0,0,8,6"/>
+                                    <Button Content="{local:Loc Key='適用 / 再接続'}" Click="Reconnect_Click"/>
+                                </WrapPanel>
+                                <TextBlock Text="{local:Loc Key='opentrack出力：UDP over network → 127.0.0.1。Yaw / Pitch / Rollは1:1に設定してください。位置情報は使用しません。'}"
+                                           FontSize="12" Foreground="{DynamicResource MutedBrush}"/>
+                                <WrapPanel>
+                                    <CheckBox x:Name="InvertYaw" Content="{local:Loc Key='左右を反転'}" Margin="0,6,12,6" Checked="Tracker_Changed" Unchecked="Tracker_Changed"/>
+                                    <CheckBox x:Name="InvertPitch" Content="{local:Loc Key='上下を反転'}" Margin="0,6,12,6" Checked="Tracker_Changed" Unchecked="Tracker_Changed"/>
+                                    <CheckBox x:Name="InvertRoll" Content="{local:Loc Key='傾きを反転'}" Checked="Tracker_Changed" Unchecked="Tracker_Changed"/>
+                                </WrapPanel>
+                                <TextBlock x:Name="SmoothLabel"/><Slider x:Name="Smooth" Minimum="0" Maximum="100" ValueChanged="Options_Changed"/>
+                                <StackPanel x:Name="ManualControls">
+                                    <TextBlock Text="{local:Loc Key='手動：左右'}"/><Slider x:Name="Yaw" Minimum="-180" Maximum="180" ValueChanged="Pose_Changed"/>
+                                    <TextBlock Text="{local:Loc Key='手動：上下'}"/><Slider x:Name="Pitch" Minimum="-89" Maximum="89" ValueChanged="Pose_Changed"/>
+                                    <TextBlock Text="{local:Loc Key='手動：傾き'}"/><Slider x:Name="Roll" Minimum="-180" Maximum="180" ValueChanged="Pose_Changed"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </TabItem>
+                    </TabControl>
+                    <TextBlock Text="{local:Loc Key='共通出力 / 比較'}" FontSize="15" FontWeight="SemiBold" Margin="0,14,0,8"/>
+                    <TextBlock x:Name="HeadroomLabel"/><Slider x:Name="Headroom" Minimum="-30" Maximum="0" ValueChanged="Options_Changed"/>
+                    <TextBlock x:Name="LfeLabel"/><Slider x:Name="Lfe" Minimum="0" Maximum="100" ValueChanged="Options_Changed"/>
+                    <TextBlock x:Name="DirectTrimLabel"/><Slider x:Name="DirectTrim" Minimum="-12" Maximum="12" ValueChanged="Options_Changed"/>
+                    <TextBlock x:Name="SteamTrimLabel"/><Slider x:Name="SteamTrim" Minimum="-12" Maximum="12" ValueChanged="Options_Changed"/>
+                    <TextBlock Text="{local:Loc Key='比較前に2つのトリムで聴感上の音量を合わせてください。LFEは方向を付けず両耳へ等量で出力します。'}"
+                               FontSize="12" Foreground="{DynamicResource MutedBrush}"/>
+                </StackPanel>
+            </ScrollViewer>
+        </Grid>
+        <StackPanel Grid.Row="2" Margin="0,12,0,0">
+            <Separator Margin="0,0,0,10"/>
+            <TextBlock x:Name="TrackText" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" FontWeight="SemiBold"/>
+            <WrapPanel Margin="0,8,0,0">
+                <Button x:Name="PlayButton" Content="{local:Loc Key='再生 / 一時停止'}" Click="Play_Click"/>
+                <Button x:Name="StopButton" Content="{local:Loc Key='停止'}" Click="Stop_Click"/>
+                <Button x:Name="MarkButton" Content="{local:Loc Key='比較位置を記録'}" Click="Mark_Click"/>
+                <Button x:Name="ReplayButton" Content="{local:Loc Key='比較位置から再生'}" Click="Replay_Click"/>
+                <Button Content="{local:Loc Key='設定を保存'}" Click="Save_Click"/>
+                <TextBlock x:Name="MarkText" Margin="4,0,0,6" VerticalAlignment="Center"/>
+            </WrapPanel>
+            <TextBlock x:Name="NoteText" Foreground="{DynamicResource MutedBrush}" FontSize="12"/>
+            <TextBlock x:Name="OutputStatusText" Foreground="{DynamicResource MutedBrush}" FontSize="12" Margin="0,3,0,0"/>
+            <TextBlock Text="{local:Loc Key='ヘッドフォン処理は再生に適用します。FLAC保存は元音源・ステレオミキサーの設定を使用します。出力先：Windowsの既定のデバイス。'}"
+                       Foreground="{DynamicResource MutedBrush}" FontSize="12" Margin="0,4,0,0"/>
+        </StackPanel>
+    </Grid>
+</Window>

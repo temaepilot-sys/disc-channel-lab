@@ -1,0 +1,42 @@
+using System.ComponentModel;
+
+namespace Disc2Flac;
+
+public sealed partial class MainViewModel
+{
+    public bool HeadphonesEnabled => HeadphoneSession.Current.Options.Enabled;
+    public string PreviewChannelHint => HeadphonesEnabled
+        ? (LanguageService.Instance.IsJapanese ? "個別チャンネルも仮想スピーカーの方向から聞こえます。" : "An isolated channel retains its virtual speaker direction.")
+        : LanguageService.T("個別チャンネルは左右のスピーカーに同じ音を出します");
+    public string HeadphoneMixerHint => HeadphonesEnabled ? HeadphoneText.T("Gain, Mute, Solo and polarity apply before headphone rendering. Pan applies to stereo FLAC export.") : "";
+    public string MixerBypassHint => HeadphonesEnabled
+        ? HeadphoneText.T("Source unity gain is used; these faders are bypassed.")
+        : LanguageService.T("標準ミックスを使用：このフェーダーは再生に適用されていません。");
+
+    private void HeadphoneOptionsChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (_mixerIsHeadphone == HeadphonesEnabled) return;
+        // A format change is only made between playback sessions.
+        if (IsPlaying) PausePlayback();
+        PreviewChannels.Clear();
+        PreviewChannels.Add(new ChannelChoice(null, HeadphonesEnabled ? "ヘッドフォン · 全チャンネル" : "ステレオミックス"));
+        if (SelectedStream is { } stream)
+            foreach (var code in StereoMixSettings.ChannelNames(stream))
+                PreviewChannels.Add(new ChannelChoice(code, ChannelChoice.DescribeRaw(code)));
+        SelectedPreviewChannel = PreviewChannels[0];
+        ChannelMeters.Clear();
+        if (SelectedStream is { } source)
+        {
+            IReadOnlyList<string> codes = HeadphonesEnabled ? HeadphoneGeometry.Channels(source) : StereoMixSettings.ChannelNames(source);
+            for (var i = 0; i < source.Channels; i++)
+            {
+                var code = i < codes.Count ? codes[i] : source.Channels == 1 ? "Mono" : source.Channels == 2 ? (i == 0 ? "L" : "R") : $"Ch{i + 1}";
+                ChannelMeters.Add(new ChannelMeter(code, ChannelChoice.DescribeRaw(code)));
+            }
+        }
+        RebuildMixerStrips();
+        foreach (var name in new[] { nameof(HeadphonesEnabled), nameof(PreviewChannelHint), nameof(HeadphoneMixerHint), nameof(MixerBypassHint), nameof(SelectedStreamNote) }) Changed(name);
+        UpdateActions();
+        PublishVisualizationClock();
+    }
+}

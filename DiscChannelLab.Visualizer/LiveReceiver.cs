@@ -6,7 +6,10 @@ using System.Text.Json;
 namespace DiscChannelLab.Visualizer;
 
 public sealed record PlayerClock(int Version, int Epoch, string Name, string Codec, int SourceSampleRate,
-    double Position, double Duration, bool Playing, long ClockMilliseconds);
+    double Position, double Duration, bool Playing, long ClockMilliseconds, HeadPoseValue? Head = null, string? HeadphoneRenderer = null, HeadphoneSceneValue? Scene = null);
+public sealed record HeadPoseValue(double Yaw, double Pitch, double Roll);
+public sealed record HeadphoneSpeakerValue(string Code, double X, double Y, double Z);
+public sealed record HeadphoneSceneValue(bool RotateWorld, double FrontAngle, HeadphoneSpeakerValue[] Speakers);
 
 /// <summary>Receives PCM on its own worker; never decodes or plays audio in linked mode.</summary>
 public sealed class LiveReceiver(string? pipeName, VisualizationSettings settings, Action<string> log) : IDisposable
@@ -73,6 +76,12 @@ public sealed class LiveReceiver(string? pipeName, VisualizationSettings setting
             var next = JsonSerializer.Deserialize<PlayerClock>(payload.AsSpan(1)) ?? throw new InvalidDataException("Clock is missing.");
             if (next.Version != 1 || !double.IsFinite(next.Position) || !double.IsFinite(next.Duration) || next.Position < 0 || next.Duration < 0)
                 throw new InvalidDataException("Unsupported link protocol or invalid playback position.");
+            if (next.Head is { } head && (!double.IsFinite(head.Yaw) || !double.IsFinite(head.Pitch) || !double.IsFinite(head.Roll)))
+                throw new InvalidDataException("Invalid head orientation.");
+            if (next.Scene is { } scene && (scene.Speakers is null || scene.Speakers.Length > 8 || !double.IsFinite(scene.FrontAngle) ||
+                scene.FrontAngle is < 15 or > 90 || scene.Speakers.Any(p => !double.IsFinite(p.X) || !double.IsFinite(p.Y) || !double.IsFinite(p.Z) ||
+                    p.X * p.X + p.Y * p.Y + p.Z * p.Z is < .99 or > 1.01)))
+                throw new InvalidDataException("Invalid headphone speaker positions.");
             lock (gate)
             {
                 if (clock?.Epoch != next.Epoch) { Reset(); ResetForecast(); }
@@ -185,6 +194,7 @@ public sealed class LiveReceiver(string? pipeName, VisualizationSettings setting
                 configured = Configured, connected = fresh, playing, hasData, revision, epoch = clock?.Epoch ?? -1,
                 position, duration = clock?.Duration ?? 0, name = clock?.Name ?? "DiscChannelLab", codec = clock?.Codec ?? "",
                 sourceSampleRate = clock?.SourceSampleRate ?? 48000, sampleRate = 48000, channels,
+                head = clock?.Head, headphoneRenderer = clock?.HeadphoneRenderer, scene = clock?.Scene,
                 bandCount = settings.BandCount, centers = settings.Centers, dispersion = settings.Centers.Select(DispersionAngleMapper.Map).ToArray(),
                 input = values.Take(width).ToArray(), post = values.Skip(width).Take(width).ToArray(), output = values.Skip(width * 2).Take(settings.BandCount * 2).ToArray(),
                 fastInput = fastValues.Take(width).ToArray(), fastPost = fastValues.Skip(width).Take(width).ToArray(),

@@ -17,6 +17,31 @@ public static class SettingsMigrationTests
         }
         Check(Path.GetFileName(paths.Root) == "DiscChannelLab" && paths.ImportLegacySettings().CopiedFiles == 0,
             "Fresh install uses DiscChannelLab and does not require legacy settings");
+        Check(!new HeadphoneOptions().Enabled, "Fresh installs preserve normal playback by default");
+        var headphonePaths = new AppDataPaths(Path.Combine(root, "headphones-promotion"));
+        Directory.CreateDirectory(headphonePaths.HeadphonesLabRoot);
+        File.WriteAllText(Path.Combine(headphonePaths.HeadphonesLabRoot, "headphones.json"), "{\"Method\":1,\"FrontAngle\":65}");
+        var editKey = new string('B', 64);
+        var labEdits = Path.Combine(headphonePaths.HeadphonesLabRoot, "track-edits", editKey);
+        var mainEdits = Path.Combine(headphonePaths.TrackEdits, editKey);
+        Directory.CreateDirectory(labEdits); Directory.CreateDirectory(mainEdits);
+        File.WriteAllText(Path.Combine(mainEdits, "album.json"), "\"Original album\"");
+        File.SetLastWriteTimeUtc(Path.Combine(mainEdits, "album.json"), DateTime.UtcNow.AddDays(-1));
+        File.WriteAllText(Path.Combine(labEdits, "album.json"), "\"Trial album edit\"");
+        File.WriteAllText(Path.Combine(labEdits, "new-title.json"), "\"Trial title\"");
+        Directory.CreateDirectory(Path.Combine(headphonePaths.HeadphonesLabRoot, "cache"));
+        File.WriteAllText(Path.Combine(headphonePaths.HeadphonesLabRoot, "cache", "large.wav"), "cache fixture");
+        var promoted = headphonePaths.ImportHeadphoneSettings();
+        var options = System.Text.Json.JsonSerializer.Deserialize<HeadphoneOptions>(File.ReadAllText(headphonePaths.PreferencePath("headphones.json")))!;
+        Check(promoted.Errors.Count == 0 && promoted.CopiedFiles == 3 && options.Enabled && options.Method == HeadphoneMethod.SteamAudio && options.FrontAngle == 65,
+            "Trial headphones import preserves the approved renderer and front width and enables it");
+        Check(File.ReadAllText(Path.Combine(mainEdits, "album.json")) == "\"Trial album edit\"" && File.Exists(Path.Combine(mainEdits, "new-title.json")),
+            "Newer trial metadata and missing title edits migrate to the main profile");
+        Check(File.ReadAllText(Path.Combine(headphonePaths.Root, "imports", "headphones-lab-backup", "track-edits", editKey, "album.json")) == "\"Original album\"",
+            "Metadata replaced during promotion is backed up");
+        File.WriteAllText(Path.Combine(mainEdits, "album.json"), "\"Later main edit\"");
+        Check(headphonePaths.ImportHeadphoneSettings().CopiedFiles == 0 && File.ReadAllText(Path.Combine(mainEdits, "album.json")) == "\"Later main edit\"" &&
+            !Directory.Exists(Path.Combine(headphonePaths.Root, "cache")), "Promotion is one-time, protects later edits and does not copy audio caches");
         Directory.CreateDirectory(paths.LegacyRoot);
         File.WriteAllText(Path.Combine(paths.LegacyRoot, "language.txt"), "ja");
         File.WriteAllText(Path.Combine(paths.LegacyRoot, "theme-v2.txt"), "light");

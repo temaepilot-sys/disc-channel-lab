@@ -10,6 +10,22 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Threading;
 
+if (args is ["headphone-tests", var headphoneOutput])
+{
+    try { await HeadphoneTests.RunAsync(headphoneOutput); return 0; }
+    catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
+}
+if (args is ["headphone-ui-tests", var headphoneUiOutput])
+{
+    try { HeadphoneUiTests.Run(headphoneUiOutput); return 0; }
+    catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
+}
+if (args is ["headphone-viewer-feed", var headViewer, var headViewerOutput])
+{
+    try { await HeadphoneViewerFeed.RunAsync(headViewer, headViewerOutput); return 0; }
+    catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
+}
+
 if (args is ["flac-sample-tests", var flacFixtures, var flacSampleOutput])
 {
     await FlacSampleTests.RunAsync(flacFixtures, flacSampleOutput);

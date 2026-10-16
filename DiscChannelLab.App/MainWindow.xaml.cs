@@ -16,6 +16,7 @@ public partial class MainWindow : Window
     private readonly MainViewModel _model;
     private bool _switchingMixPreview;
     private MixerWindow? _mixerWindow;
+    private HeadphonesWindow? _headphonesWindow;
     private CacheWindow? _cacheWindow;
     private bool _mixerOpened;
     private readonly DispatcherTimer _driveTimer = new() { Interval = TimeSpan.FromSeconds(3) };
@@ -61,6 +62,18 @@ public partial class MainWindow : Window
         _mixerWindow.Show();
     }
 
+    private void OpenHeadphones_Click(object sender, RoutedEventArgs e)
+    {
+        if (_headphonesWindow is not null)
+        {
+            if (_headphonesWindow.WindowState == WindowState.Minimized) _headphonesWindow.WindowState = WindowState.Normal;
+            _headphonesWindow.Activate(); return;
+        }
+        _headphonesWindow = new HeadphonesWindow(_model) { Owner = this };
+        _headphonesWindow.Closed += (_, _) => _headphonesWindow = null;
+        _headphonesWindow.Show();
+    }
+
     private void OpenVisualizer_Click(object sender, RoutedEventArgs e)
     {
         if (_model.IsClearingCache) return;
@@ -103,6 +116,8 @@ public partial class MainWindow : Window
     {
         _driveTimer.Start();
         _playTimer.Start();
+        HeadphoneSession.Current.RestartTracker();
+        if (HeadphoneSession.Current.Options.Enabled) OpenHeadphones_Click(this, new RoutedEventArgs());
         await Task.WhenAll(_model.RefreshCacheSizeAsync(), _model.DetectInsertedDiscAsync());
     }
 
@@ -120,6 +135,8 @@ public partial class MainWindow : Window
     private void Window_Closing(object? sender, CancelEventArgs e)
     {
         _cacheWindow?.Close();
+        _headphonesWindow?.Close();
+        HeadphoneSession.Current.Dispose();
         _mixerWindow?.Close();
         CommitTrackEdits();
         _driveTimer.Stop();

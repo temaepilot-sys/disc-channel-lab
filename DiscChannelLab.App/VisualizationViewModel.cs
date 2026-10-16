@@ -8,6 +8,7 @@ public sealed partial class MainViewModel
     {
         if (!Visualization.IsConnected) return;
         Visualization.PublishClock(_transportVersion, SelectedTrack?.Title ?? "DiscChannelLab", SelectedStream?.Codec ?? "",
-            SelectedStream?.SampleRate ?? 48000, MeterPlaybackPosition, PreviewMax, IsPlaying && _playClock.IsRunning);
+            SelectedStream?.SampleRate ?? 48000, MeterPlaybackPosition, PreviewMax, IsPlaying && _playClock.IsRunning,
+            SelectedStream is { } stream ? HeadphoneGeometry.Channels(stream) : null);
     }
 }

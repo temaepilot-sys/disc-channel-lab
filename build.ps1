@@ -26,6 +26,11 @@ $sdkVersion = & $dotnetExe --version
 if ($LASTEXITCODE -ne 0 -or $sdkVersion -notmatch '^10\.') {
     throw ".NET 10 SDK is required. Found: $dotnetExe ($sdkVersion)"
 }
+foreach ($name in @('phonon.dll', 'LICENSE.txt', 'THIRDPARTY.md', 'provenance.json')) {
+    if (-not (Test-Path -LiteralPath (Join-Path $projectRoot "tools\steamaudio\$name") -PathType Leaf)) {
+        throw 'Run python fetch-steamaudio.py to prepare the Steam Audio runtime and notices.'
+    }
+}
 
 # This publish mode deliberately excludes FFmpeg and the local embedded-tools bundle.
 & $dotnetExe publish $project -c $Configuration -r win-x64 --self-contained false `
@@ -53,3 +58,7 @@ if (-not (Test-Path -LiteralPath $analysisSettings)) {
     Copy-Item -LiteralPath (Join-Path $projectRoot 'DiscChannelLab.Visualizer\AudioVisualizationSettings.json') -Destination $analysisSettings
 }
 Write-Output "Visualizer build complete: $viewerDestination"
+foreach ($name in @('README.md', 'README.ja.md', 'LICENSE', 'NOTICE')) {
+    Copy-Item -LiteralPath (Join-Path $projectRoot $name) -Destination $destination -Force
+}
+Copy-Item -LiteralPath (Join-Path $projectRoot 'docs') -Destination $destination -Recurse -Force

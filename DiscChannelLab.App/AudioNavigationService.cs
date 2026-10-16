@@ -6,7 +6,7 @@ using System.Text.RegularExpressions;
 
 namespace Disc2Flac;
 
-public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner, FfprobeService probe, AppLog log, SacdService? sacd = null)
+public sealed partial class AudioNavigationService(ToolPaths paths, ProcessRunner runner, FfprobeService probe, AppLog log, SacdService? sacd = null)
 {
     private readonly SacdService _sacd = sacd ?? new SacdService(paths, runner, log);
     private static readonly Regex SilenceEvent = new(@"silence_(start|end):\s*([0-9]+(?:\.[0-9]+)?)", RegexOptions.Compiled);
@@ -16,7 +16,7 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
     private readonly Dictionary<string, AudioStreamInfo> _clipCache = new(StringComparer.OrdinalIgnoreCase);
     private bool? _meterFiltersAvailable;
 
-    public bool CanPlay => paths.Ffplay is not null;
+    public bool CanPlay => HeadphoneSession.Current.Options.Enabled ? File.Exists(paths.Ffmpeg) : paths.Ffplay is not null;
     public void ClearCache() => _clipCache.Clear();
 
     public async Task PlayAsync(DiscAnalysis disc, PlaylistInfo playlist, AudioStreamInfo stream,
@@ -27,6 +27,12 @@ public sealed class AudioNavigationService(ToolPaths paths, ProcessRunner runner
         Func<PreviewMixState>? liveMix = null, Action<long, MixerMeterFrame>? mixedLevels = null,
         PreviewPcmTap? visualization = null)
     {
+        if (HeadphoneSession.Current.Options.Enabled)
+        {
+            await Task.Run(() => PlayHeadphonesAsync(disc, playlist, stream, startTicks, endTicks, token, segmentStarted,
+                volume ?? (() => 1), liveMix ?? (() => new(mix ?? StereoMixSettings.Default, soloChannel)), playbackPosition, mixedLevels, visualization), token);
+            return;
+        }
         var ffplay = paths.Ffplay ?? throw new FileNotFoundException("再生用の ffplay.exe が見つかりません。");
         mix ??= StereoMixSettings.Default;
         // The live PCM mixer supplies input and output levels in one timestamped frame.

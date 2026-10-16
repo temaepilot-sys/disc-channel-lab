@@ -121,3 +121,7 @@ node tests/visualizer-frontend.cjs
 ```
 
 The frontend checks simulate browser and audio APIs. They verify controls and data flow, not actual GPU rendering or audible latency. The screenshots above were supplied from interactive use; a final visual and listening check on the target PC remains useful. This is a source preview; no binary release or ZIP is supplied.
+
+## Headphone direction link
+
+[Headphone playback](headphones.md) sends its actual pose and speaker geometry to the viewer. Keyboard control keeps the listener fixed and rotates the room; opentrack keeps the room fixed and turns the head. Headphone mode uses current speaker emission sync, with zero-travel-delay beams. Ordinary playback retains its Listener/Speakers synchronization choice.

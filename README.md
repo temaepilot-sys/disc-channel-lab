@@ -38,6 +38,14 @@ This companion window follows DiscChannelLab playback and lets you compare Input
 
 [Usage, mixer behavior and requirements](docs/visualizer.md). Particle spread is an artistic representation, not a precise acoustic simulation.
 
+## Headphones — turn toward the sound
+
+Explore multichannel audio through headphones with **Direct** angle-based mixing or **Steam Audio HRTF**. Turn with the keyboard or opentrack; hear the channels change direction and watch the same movement in the 3D viewer. Front L/R separation is adjustable. Ordinary playback remains available.
+
+Open **Headphones** in the player, enable headphone rendering and select a renderer while stopped or paused. Keyboard mode keeps the listener fixed and rotates the room; tracking mode keeps the room fixed and turns the head. Headphone processing affects playback; existing FLAC exports use their source or stereo-mixer settings.
+
+[Setup, controls, speaker placement, theory and limitations](docs/headphones.md).
+
 ## Features
 
 - Inspect titles, chapters, tracks, audio streams, and channel layouts.
@@ -66,7 +74,7 @@ An AI-generated recommendation supplied by the developer, translated from Japane
 
 ## Why can a 5.1 stereo mix sound quieter?
 
-The standard mix uses fixed attenuation to leave room for channels being added together. Initial channel-mixer settings and **Reset defaults** now reproduce this same mix for the selected layout. This is a conservative starting point, with no loudness matching to a separate stereo version.
+The standard mix uses fixed attenuation to leave room for channels being added together. In ordinary playback, initial channel-mixer settings and **Reset defaults** reproduce this same mix for the selected layout. This is a conservative starting point, with no loudness matching to a separate stereo version.
 
 For 5.1 at Master 100%, using `S_L`/`S_R` for the left/right surround channels:
 
@@ -188,7 +196,7 @@ Existing selected-track export, edited boundaries, tags and disc/title folder or
 
 - Windows x64.
 - .NET 10 SDK to build; .NET 10 Desktop Runtime to run the public player. The viewer also needs ASP.NET Core Runtime 10 (x64) and Microsoft Edge with WebGL.
-- An FFmpeg installation supplied by the user. `ffmpeg.exe` and `ffprobe.exe` are required; `ffplay.exe` is required for preview playback. Place them in a `tools` folder beside the app or make them available on `PATH`.
+- An FFmpeg installation supplied by the user. `ffmpeg.exe` and `ffprobe.exe` are required; `ffplay.exe` is required for ordinary preview playback. Direct/HRTF headphone playback uses Windows audio output. Place them in a `tools` folder beside the app or make them available on `PATH`.
 
 For supported multichannel stereo playback, Input/Post/Output meters are measured together from PCM in the app. Other playback paths use FFmpeg's `astats` and `ametadata` filters; those meters remain unavailable if the filters are missing.
 
@@ -196,7 +204,13 @@ The FFmpeg build must provide the demuxers, protocols, and decoders needed for y
 
 ## Build
 
-From PowerShell in this directory:
+Prepare the pinned Steam Audio runtime and its notices first (Python 3 required):
+
+```powershell
+python fetch-steamaudio.py
+```
+
+Then, from PowerShell in this directory:
 
 ```powershell
 ./build.ps1
@@ -204,7 +218,7 @@ From PowerShell in this directory:
 
 The output is in `artifacts/public-win-x64`, with the separate viewer in its `SpaceSketch` subfolder. Click **3D Viewer** in the player to open it. It is a framework-dependent, multi-file application. Run `DiscChannelLab.exe` after installing the .NET 10 Desktop Runtime and making the FFmpeg tools available. The public build does not embed FFmpeg or include a single-file executable.
 
-For personal use, `./build-personal.ps1` builds a self-contained single-file executable from **the same source files**. It embeds the FFmpeg executables installed on the builder's computer. Its output is local and is excluded from this repository; it is not the public distribution build. Before distributing such an executable, review the licenses and corresponding-source obligations of every embedded component.
+For personal use, `./build-personal.ps1` builds a self-contained application folder from **the same source files**. It embeds the FFmpeg executables installed on the builder's computer. Keep the complete folder, including `tools` and `SpaceSketch`. Its output is local and is excluded from this repository; it is not the public distribution build. Before distributing it, review the licenses and corresponding-source obligations of every included component.
 
 ## Settings and migration
 

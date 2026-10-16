@@ -24,3 +24,12 @@
 - [x] Include supplied overview and listener screenshots, reviewed for visible personal paths.
 - [x] Exclude saved viewer preferences, local endpoint tokens, browser profiles and test audio.
 - [ ] Broaden hardware, GPU and listening-latency checks before a binary release.
+
+## Headphone playback in the main application
+
+- [x] Integrate optional Direct and Steam Audio HRTF playback with the same public/personal sources.
+- [x] Retain ordinary playback, standard coefficients and independent in-session fader banks.
+- [x] Add English/Japanese controls, one-time trial settings import and metadata backup.
+- [x] Pin the external Steam Audio SDK download and retain upstream licensing/dependency notices.
+- [x] Document playback-only processing, model approximations, opentrack protocol and viewer timing.
+- [ ] Broaden physical tracker, headphone and individual HRTF listening checks before a binary release.

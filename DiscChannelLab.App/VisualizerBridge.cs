@@ -21,7 +21,9 @@ public sealed record PreviewPcmTap(Func<bool> Enabled, Action<PreviewPcmChunk> P
 }
 
 public sealed record VisualizerClock(int Version, int Epoch, string Name, string Codec, int SourceSampleRate,
-    double Position, double Duration, bool Playing, long ClockMilliseconds);
+    double Position, double Duration, bool Playing, long ClockMilliseconds, HeadPose? Head = null, string? HeadphoneRenderer = null, HeadphoneScene? Scene = null);
+public sealed record HeadphoneSpeaker(string Code, double X, double Y, double Z);
+public sealed record HeadphoneScene(bool RotateWorld, double FrontAngle, HeadphoneSpeaker[] Speakers);
 
 public sealed class VisualizerBridge : IDisposable
 {
@@ -58,10 +60,14 @@ public sealed class VisualizerBridge : IDisposable
         _viewer = Process.Start(start) ?? throw new IOException("3D viewer を起動できません。");
     }
 
-    public void PublishClock(int epoch, string name, string codec, int sampleRate, double position, double duration, bool playing)
+    public void PublishClock(int epoch, string name, string codec, int sampleRate, double position, double duration, bool playing, IReadOnlyCollection<string>? channels = null)
     {
         if (!_connected) return;
-        _messages.Writer.TryWrite(new VisualizerClock(1, epoch, name, codec, sampleRate, position, duration, playing, Environment.TickCount64));
+        var session = HeadphoneSession.Current;
+        var options = session.Options;
+        _messages.Writer.TryWrite(new VisualizerClock(1, epoch, name, codec, sampleRate, position, duration, playing, Environment.TickCount64,
+            options.Enabled ? session.Pose : null, options.Enabled ? options.Method.ToString() : null,
+            options.Enabled ? HeadphoneGeometry.Scene(channels ?? ["FL", "FR", "FC", "LFE", "SL", "SR"], options) : null));
     }
     public void PublishPcm(int epoch, PreviewPcmChunk frame)
     {

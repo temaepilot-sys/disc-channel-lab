@@ -3,10 +3,10 @@ using System.Text.RegularExpressions;
 namespace Disc2Flac;
 
 /// <summary>Current storage location and read-only compatibility with earlier app names.</summary>
-public sealed class AppDataPaths(string localApplicationData)
+public sealed partial class AppDataPaths(string localApplicationData)
 {
     public static AppDataPaths Current { get; } = new(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
+        Environment.GetEnvironmentVariable("DISCCHANNEL_DATA_HOME") ?? Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
     public static string TemporaryRoot => Path.Combine(Path.GetTempPath(), "DiscChannelLab");
     public string Root { get; } = Path.Combine(localApplicationData, "DiscChannelLab");
     public string LegacyRoot { get; } = Path.Combine(localApplicationData, "BDDVD2Flac");

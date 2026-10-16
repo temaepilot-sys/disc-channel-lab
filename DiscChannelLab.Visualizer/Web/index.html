@@ -2,7 +2,7 @@
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>DiscChannelLab · Space sketch</title><link rel="stylesheet" href="/style.css"></head>
 <body>
-<header><div><div class="eyebrow">DISC CHANNEL LAB <span>PERSONAL PROTOTYPE · LINK PREVIEW</span></div><h1>Space sketch <small>A space filled with sound</small></h1></div><div class="actions"><button id="follow" hidden>Link to DiscChannelLab</button><button id="toggle-ui" title="H: hide / show UI. Ctrl+S: save settings." aria-pressed="false">Hide UI · H</button><button id="demo">5.1 demo</button></div></header>
+<header><div><div class="eyebrow">DISC CHANNEL LAB <span>MULTICHANNEL SOUND · 3D VIEW</span></div><h1>Space sketch <small>A space filled with sound</small></h1></div><div class="actions"><button id="follow" hidden>Link to DiscChannelLab</button><button id="toggle-ui" title="H: hide / show UI. Ctrl+S: save settings." aria-pressed="false">Hide UI · H</button><button id="demo">5.1 demo</button></div></header>
 <main>
   <canvas id="scene" tabindex="0" aria-label="3D particle view of audio frequency bands"></canvas><div id="labels"></div>
   <section id="source" class="glass"><div class="section-title">SOURCE</div><strong id="filename">Explore sound in space</strong><p id="format">Link from DiscChannelLab or try the demo</p><p id="preview-note">Open this viewer from the player’s 3D Viewer button.</p><div id="source-mode" class="source-mode">Input channels <span>→</span> Stereo playback</div></section>
@@ -12,6 +12,7 @@
     <label title="Visual flow speed relative to the original viewer. Does not change audio playback speed.">Particle speed <output id="particle-speed-value">2.0×</output><input id="particle-speed" type="range" min="0.5" max="4" step="0.1" value="2"></label>
     <label id="live-analysis" hidden>Signal<select id="analysis-mode"><option value="post">Post-mix channels</option><option value="input">Input channels</option><option value="output">Final stereo output</option></select></label>
     <label>Camera<select id="view"><option value="orbit">Overview</option><option value="bird">Bird’s-eye</option><option value="top">Top</option><option value="listener">Listener</option><option value="front">Front</option><option value="back">Back</option></select></label>
+    <label id="head-follow-label" class="check" hidden><input id="head-follow" type="checkbox" checked>Listener camera follows head</label>
     <label title="Maximum angle on each side toward the listener. Treble may be narrower. LFE always radiates 360°.">Spread<output id="spread-value">±20°</output><input id="spread" type="range" min="0" max="90" step="1" value="20"></label>
     <label>Particle size <output id="particle-size-value">1.0×</output><input id="particle-size" type="range" min="0.3" max="3" step="0.1" value="1"></label>
     <label title="Extra size near the listener in Listener sync. Grows smoothly from 1.8 m out. 1.0× disables enlargement; Particle size still scales all particles.">Listener size <output id="listener-size-value">1.5×</output><input id="listener-size" type="range" min="1" max="3" step="0.1" value="1.5"></label>

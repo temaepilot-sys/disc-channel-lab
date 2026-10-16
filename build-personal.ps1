@@ -1,7 +1,7 @@
 param(
     [ValidateSet('Debug', 'Release')]
     [string]$Configuration = 'Release',
-    [string]$OutputDirectory = 'artifacts\standalone-win-x64'
+    [string]$OutputDirectory = 'artifacts\standalone-win-x64-visualizer-link'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -24,6 +24,11 @@ $dotnetExe = if ($null -ne $localDotnet) {
 $sdkVersion = & $dotnetExe --version
 if ($LASTEXITCODE -ne 0 -or $sdkVersion -notmatch '^10\.') {
     throw ".NET 10 SDK が必要です。使用した dotnet: $dotnetExe ($sdkVersion)"
+}
+foreach ($name in @('phonon.dll', 'LICENSE.txt', 'THIRDPARTY.md', 'provenance.json')) {
+    if (-not (Test-Path -LiteralPath (Join-Path $root "tools\steamaudio\$name") -PathType Leaf)) {
+        throw 'Run python fetch-steamaudio.py to prepare the Steam Audio runtime and notices.'
+    }
 }
 
 New-Item -ItemType Directory -Path $offlineSource -Force | Out-Null
@@ -48,7 +53,7 @@ $ffmpeg = Get-Command 'ffmpeg.exe' -ErrorAction SilentlyContinue
 $ffprobe = Get-Command 'ffprobe.exe' -ErrorAction SilentlyContinue
 $ffplay = Get-Command 'ffplay.exe' -ErrorAction SilentlyContinue
 if ($null -eq $ffmpeg -or $null -eq $ffprobe -or $null -eq $ffplay) {
-    throw '単一 EXE の作成には ffmpeg.exe、ffprobe.exe、ffplay.exe が必要です。'
+    throw '個人用ビルドには ffmpeg.exe、ffprobe.exe、ffplay.exe が必要です。'
 }
 $protocols = & $ffmpeg.Source -hide_banner -protocols
 $decoders = & $ffmpeg.Source -hide_banner -decoders
@@ -69,8 +74,20 @@ $bundleId = (Get-FileHash -LiteralPath $bundlePath -Algorithm SHA256).Hash.Subst
 & $dotnetExe restore $project -r win-x64 -p:SelfContained=true --source $offlineSource
 if ($LASTEXITCODE -ne 0) { throw 'dotnet restore に失敗しました。' }
 & $dotnetExe publish $project -c $Configuration --no-restore -r win-x64 -o $destination `
-    -p:PublishSingleFile=true -p:SelfContained=true `
-    -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:DebugType=None `
+    -p:PublishSingleFile=false -p:SelfContained=true -p:DebugType=None `
     "-p:ToolsBundleId=$bundleId"
 if ($LASTEXITCODE -ne 0) { throw 'dotnet publish に失敗しました。' }
-Write-Output "単一 EXE ビルド完了 (net10.0-windows, SDK $sdkVersion): $(Join-Path $destination 'DiscChannelLab.exe')"
+$viewerDestination = Join-Path $destination 'SpaceSketch'
+& $dotnetExe publish (Join-Path $root 'DiscChannelLab.Visualizer\DiscChannelLab.Visualizer.csproj') `
+    -c $Configuration -r win-x64 --self-contained true -o $viewerDestination --source $offlineSource `
+    -p:PublishSingleFile=false -p:DebugType=None
+if ($LASTEXITCODE -ne 0) { throw 'Visualizer publish failed.' }
+$analysisSettings = Join-Path $viewerDestination 'AudioVisualizationSettings.json'
+if (-not (Test-Path -LiteralPath $analysisSettings)) {
+    Copy-Item -LiteralPath (Join-Path $root 'DiscChannelLab.Visualizer\AudioVisualizationSettings.json') -Destination $analysisSettings
+}
+foreach ($name in @('README.md', 'README.ja.md', 'LICENSE', 'NOTICE')) {
+    Copy-Item -LiteralPath (Join-Path $root $name) -Destination $destination -Force
+}
+Copy-Item -LiteralPath (Join-Path $root 'docs') -Destination $destination -Recurse -Force
+Write-Output "個人用ビルド完了 (.NET同梱、フォルダー全体を保持): $(Join-Path $destination 'DiscChannelLab.exe')"

@@ -27,6 +27,21 @@ Type 1: playback clock
   Playing means the player's playback clock is running, not merely decoder startup.
   Epoch changes on transport changes. Old-epoch PCM is rejected.
 
+  Optional headphone fields (null/absent in ordinary playback):
+    Head: {Yaw, Pitch, Roll}, degrees, yaw right-positive, pitch up-positive.
+    HeadphoneRenderer: Direct or SteamAudio.
+    Scene: {RotateWorld, FrontAngle, Speakers:[{Code,X,Y,Z}, ...]}.
+  Source vectors are unit length in audio coordinates: +X right, +Y up, +Z front.
+  RotateWorld=true for keyboard/manual orientation (fixed listener); false for
+  tracker input (fixed room). Inverse head orientation rotates the scene around
+  the listener's ears. The browser converts audio +Z to rendering -Z.
+  FrontAngle is 15..90 degrees per side and source vectors are authoritative.
+  Headphone playback sends current type 2 PCM only, without type 3 forecasts.
+  The viewer uses speaker emission sync and restores the ordinary sync choice
+  when headphone fields become null. In headphone mode, Post is the mono sum
+  of each source's left/right ear contributions (phase cancellation is possible),
+  and Output is the clipped stereo PCM sent to Windows audio.
+
 Type 2: PCM block
   Byte 2
   int32 Epoch

@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -6,6 +6,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyName>DiscChannelLab</AssemblyName>
     <Product>DiscChannelLab</Product>
   </PropertyGroup>
@@ -25,4 +26,8 @@
            Text="The embedded tools bundle is missing. Build the personal application with build-personal.ps1." />
   </Target>
 
+  <ItemGroup>
+    <Content Include="../tools/steamaudio/*.dll" Link="tools/steamaudio/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+    <Content Include="../tools/steamaudio/LICENSE.txt;../tools/steamaudio/THIRDPARTY.md;../tools/steamaudio/provenance.json" Link="tools/steamaudio/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+  </ItemGroup>
 </Project>

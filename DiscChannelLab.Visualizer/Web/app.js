@@ -8,6 +8,7 @@ setInterval(() => api('/api/heartbeat').catch(() => {}), 5000);
 let clip = null, spectrum = null, fastSpectrum = null, audioBuffer = null, context = null, gain = null, source = null;
 let playing = false, offset = 0, sourceStart = 0, busy = false, generation = 0;
 let sourceEnded = false, lastVisualTime = 0, draggingTimeline = false;
+let normalSyncReference = null;
 let liveMode = false, liveState = null, liveAt = 0, liveInitialized = false, livePollBusy = false, liveKey = '';
 
 function error(message) { $('notice').textContent = message; $('notice').hidden = false; }
@@ -109,6 +110,37 @@ const scale = (a, k) => a.map(x => x * k);
 const dot = (a, b) => a.reduce((s, x, i) => s + x * b[i], 0);
 const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
 const norm = a => scale(a, 1 / (Math.hypot(...a) || 1));
+// Same Ry(yaw) * Rx(-pitch) * Rz(-roll) convention as HeadPose.Rotation.
+// Audio uses +Z forward; this scene uses -Z forward. Reflect Z only at this boundary.
+function headFrame(head) {
+  const y = (head?.yaw || 0) * Math.PI / 180, p = -(head?.pitch || 0) * Math.PI / 180, r = -(head?.roll || 0) * Math.PI / 180;
+  const transform = ([x, yy, z]) => {
+    const rx = x * Math.cos(r) - yy * Math.sin(r), ry = x * Math.sin(r) + yy * Math.cos(r);
+    const py = ry * Math.cos(p) - z * Math.sin(p), pz = ry * Math.sin(p) + z * Math.cos(p);
+    return [rx * Math.cos(y) + pz * Math.sin(y), py, rx * Math.sin(y) - pz * Math.cos(y)];
+  };
+  return { right: transform([1, 0, 0]), up: transform([0, 1, 0]), forward: transform([0, 0, 1]) };
+}
+const headCenter = [0, 1.16, 0];
+function listenerWorldRotation(head) {
+  const f = headFrame(head), back = scale(f.forward, -1), p = headCenter;
+  // Inverse head rotation about the ears. This transforms the room, beams,
+  // particles and labels together, while the listener is drawn separately.
+  return new Float32Array([
+    f.right[0], f.up[0], back[0], 0,
+    f.right[1], f.up[1], back[1], 0,
+    f.right[2], f.up[2], back[2], 0,
+    p[0] - dot(f.right, p), p[1] - dot(f.up, p), p[2] - dot(back, p), 1
+  ]);
+}
+function pointInListenerView(point, head) {
+  const f = headFrame(head), d = sub(point, headCenter);
+  return add(headCenter, [dot(f.right, d), dot(f.up, d), -dot(f.forward, d)]);
+}
+function pointInRoom(point, head) {
+  const f = headFrame(head), d = sub(point, headCenter);
+  return add(headCenter, add(add(scale(f.right, d[0]), scale(f.up, d[1])), scale(f.forward, -d[2])));
+}
 // CPU particle record: position, velocity, age/life, RGB, size/alpha,
 // log-frequency, source channel, band index, fixed horizontal fan sample.
 const PARTICLE_STRIDE = 18; // Last value: stable phase for small, smooth XYZ drift.
@@ -254,11 +286,17 @@ class SpaceRenderer {
     this.info = info; this.clear(); this.budgets = new Array(info.channels.length * info.bandCount).fill(0); this.bands = new Float32Array(this.budgets.length);
     this.lightLevels = new Float32Array(this.budgets.length);
     this.frequencies = info.centers.map(hz => clamp(Math.log(hz / 20) / Math.log(1000), 0, 1));
-    const angles = { FL: -30, FR: 30, FC: 0, SL: -110, SR: 110, BL: -150, BR: 150, BC: 180, FLC: -15, FRC: 15, TFL: -30, TFR: 30 };
+    const backAngle = info.channels.includes('SL') || info.channels.includes('SR') ? 150 : 110;
+    const frontAngle = info.scene?.frontAngle ?? 30;
+    const angles = { FL: -frontAngle, FR: frontAngle, FC: 0, SL: -110, SR: 110, BL: -backAngle, BR: backAngle, BC: 180, FLC: -15, FRC: 15, TFL: -30, TFR: 30 };
     $('labels').replaceChildren();
     this.speakers = info.channels.map(code => {
       const angle = (angles[code] || 0) * Math.PI / 180;
-      const position = code === 'LFE' ? [0, LFE_HEIGHT, 0] : [Math.sin(angle) * 3.5, code.startsWith('T') ? 3 : 1.2, -Math.cos(angle) * 3.5];
+      const source = info.scene?.speakers?.find(p => p.code === code);
+      const elevation = code.startsWith('T') ? Math.PI / 4 : 0;
+      const position = code === 'LFE' ? [0, LFE_HEIGHT, 0] : source
+        ? [source.x * 3.5, headCenter[1] + source.y * 3.5, -source.z * 3.5]
+        : [Math.sin(angle) * Math.cos(elevation) * 3.5, headCenter[1] + Math.sin(elevation) * 3.5, -Math.cos(angle) * Math.cos(elevation) * 3.5];
       const label = document.createElement('div'); label.className = 'channel-label' + (code === 'LFE' ? ' lfe' : ''); label.textContent = code; $('labels').append(label);
       const direction = norm(sub([0, 1.05, 0], position)), side = norm(cross(direction, [0, 1, 0])), up = norm(cross(side, direction));
       return { code, position, direction, side, up, label, azimuth: Math.atan2(-position[2], -position[0]), radius: Math.hypot(position[0], position[2]) };
@@ -298,13 +336,13 @@ class SpaceRenderer {
         this.line(p(i * Math.PI / 12), p((i + 1) * Math.PI / 12), col, .75);
       }
     }
+    this.staticLines = new Float32Array(this.lines);
+    this.lines = [];
     this.box([0, .66, 0], [.37, .57, .23], [.35, .49, .57], .55);
-    this.circle([0, 1.16, 0], .19, [.42, .59, .64], .75, 'face', 32);
-    this.circle([0, 1.16, 0], .19, [.32, .48, .56], .55, 'floor', 32);
     this.box([0, .36, .08], [.58, .12, .6], [.27, .43, .5], .45);
     this.box([0, .72, .36], [.58, .7, .08], [.27, .43, .5], .45);
     for (const x of [-.24, .24]) for (const z of [-.15, .31]) this.line([x, .3, z], [x, 0, z], [.27, .43, .5], .5);
-    this.staticLines = new Float32Array(this.lines);
+    this.listenerLines = new Float32Array(this.lines);
   }
   wireInput() {
     let drag = null;
@@ -334,6 +372,13 @@ class SpaceRenderer {
       distance: ['top', 'bird'].includes(name) ? 13 : 12.8, target: [0, .8, 0] };
   }
   cameraPose() {
+    if (this.listenerView && liveMode && liveState?.head && liveState.scene?.rotateWorld) {
+      return { eye: headCenter, target: add(headCenter, [0, 0, -1]), right: [1, 0, 0] };
+    }
+    if (this.listenerView && liveMode && liveState?.head && $('head-follow').checked) {
+      const frame = headFrame(liveState.head), eye = [0, 1.16, 0];
+      return { eye, target: add(eye, frame.forward), right: frame.right };
+    }
     const c = this.camera, z = [Math.sin(c.yaw) * Math.cos(c.pitch), Math.sin(c.pitch) * (this.listenerView ? -1 : 1), Math.cos(c.yaw) * Math.cos(c.pitch)];
     // Look toward the listener from just behind, so the enlarged particles pass in front
     // of the camera instead of surrounding its near clipping plane.
@@ -502,17 +547,37 @@ class SpaceRenderer {
     if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
     gl.viewport(0, 0, width, height); gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
     const pose = this.cameraPose();
-    this.matrix = cameraMatrix(pose.eye, pose.target, width / Math.max(1, height), pose.right);
+    const baseMatrix = cameraMatrix(pose.eye, pose.target, width / Math.max(1, height), pose.right);
+    const rotateWorld = liveMode && !!liveState?.head && !!liveState.scene?.rotateWorld;
+    this.matrix = rotateWorld ? multiply(baseMatrix, listenerWorldRotation(liveState.head)) : baseMatrix;
     gl.uniformMatrix4fv(this.matrixLocation, false, this.matrix); gl.uniform1f(this.heightLocation, height);
     gl.uniform1f(this.pointLocation, 0); gl.bufferData(gl.ARRAY_BUFFER, this.staticLines, gl.DYNAMIC_DRAW); gl.drawArrays(gl.LINES, 0, this.staticLines.length / 8);
+    gl.uniformMatrix4fv(this.matrixLocation, false, baseMatrix);
+    gl.bufferData(gl.ARRAY_BUFFER, this.listenerLines, gl.DYNAMIC_DRAW); gl.drawArrays(gl.LINES, 0, this.listenerLines.length / 8);
     this.lines = [];
+    if (!(this.listenerView && liveMode && liveState?.head && (rotateWorld || $('head-follow').checked))) {
+      const frame = headFrame(liveMode && !rotateWorld ? liveState?.head : null), center = headCenter;
+      for (let i = 0; i < 32; i++) {
+        const point = a => add(center, add(scale(frame.right, .19 * Math.cos(a)), scale(frame.up, .19 * Math.sin(a))));
+        this.line(point(i * Math.PI / 16), point((i + 1) * Math.PI / 16), [.42, .7, .84], .8);
+      }
+      this.line(center, add(center, scale(frame.forward, .34)), [.8, .9, 1], .95);
+      for (const side of [-1, 1]) {
+        const ear = add(center, scale(frame.right, side * .23));
+        this.line(sub(ear, scale(frame.up, .055)), add(ear, scale(frame.up, .055)), side < 0 ? [.3, .75, 1] : [1, .6, .25], 1);
+      }
+      const headLines = new Float32Array(this.lines);
+      gl.bufferData(gl.ARRAY_BUFFER, headLines, gl.DYNAMIC_DRAW); gl.drawArrays(gl.LINES, 0, headLines.length / 8);
+      this.lines = [];
+    }
+    gl.uniformMatrix4fv(this.matrixLocation, false, this.matrix);
     const lfe = this.speakers.findIndex(s => s.code === 'LFE');
     if ($('lfe').checked && lfe >= 0 && this.bands.length && this.count) {
       let level = 0; for (let b = 0; b < this.info.bandCount; b++) if (this.info.centers[b] <= 160) level = Math.max(level, this.bands[lfe * this.info.bandCount + b]);
       for (let r = 0; r < 4; r++) { const radius = ((time * .8 + r * 1.5) % 6); this.circle([0, .025, 0], radius, [.85, .23, .08], level * .2 * (1 - radius / 7), 'floor', 90); }
       if (this.lines.length) { const rings = new Float32Array(this.lines); gl.bufferData(gl.ARRAY_BUFFER, rings, gl.DYNAMIC_DRAW); gl.drawArrays(gl.LINES, 0, rings.length / 8); }
     }
-    this.beamMesh.build(this, pose.eye);
+    this.beamMesh.build(this, rotateWorld ? pointInRoom(pose.eye, liveState.head) : pose.eye);
     if (this.beamMesh.vertexCount) {
       gl.bufferData(gl.ARRAY_BUFFER, this.beamMesh.vertices.subarray(0, this.beamMesh.vertexCount * 8), gl.DYNAMIC_DRAW);
       gl.drawArrays(gl.TRIANGLES, 0, this.beamMesh.vertexCount);
@@ -572,12 +637,25 @@ function leaveLive() {
 function applyLive(state) {
   const mode = $('analysis-mode').value || 'post';
   const channels = mode === 'output' ? ['FL', 'FR'] : state.channels;
-  const key = `${mode}:${channels.join(',')}:${state.bandCount}`;
+  const geometry = state.scene ? JSON.stringify([state.scene.frontAngle, state.scene.speakers]) : '';
+  const key = `${mode}:${channels.join(',')}:${state.bandCount}:${geometry}`;
   const previousPosition = position();
   const forecastReset = renderer.syncReference === 'listener' && liveState?.lookahead?.revision !== state.lookahead?.revision;
   const reset = liveState && (state.epoch !== liveState.epoch || state.revision !== liveState.revision);
   liveState = state; liveAt = performance.now();
   if (!liveMode) return;
+  $('head-follow-label').hidden = !state.head || !!state.scene?.rotateWorld;
+  $('scene-help').textContent = state.head
+    ? 'Change sound direction in Headphones: click its room, then use arrow keys. Camera → Listener shows that direction; drag in Overview to orbit.'
+    : 'Click the scene, then ↑ ↓: tilt · ← →: rotate · Drag: look / orbit · Right-drag: pan · Wheel: zoom';
+  $('sync-reference').options[0].disabled = !!state.head;
+  if (state.head && normalSyncReference === null) normalSyncReference = renderer.syncReference;
+  if (!state.head && normalSyncReference !== null) {
+    $('sync-reference').value = normalSyncReference; renderer.setSyncReference(normalSyncReference); normalSyncReference = null;
+  }
+  if (state.head && renderer.syncReference !== 'speaker') {
+    $('sync-reference').value = 'speaker'; renderer.setSyncReference('speaker');
+  }
   if (key !== liveKey) {
     clip = { ...state, channels, layout: channels.join(' / '), demo: false };
     renderer.setClip(clip); liveKey = key; lastVisualTime = state.position;
@@ -589,10 +667,12 @@ function applyLive(state) {
   playing = state.connected && state.playing;
   $('filename').textContent = state.name;
   $('format').textContent = `${state.codec || 'DiscChannelLab'} · ${(state.sourceSampleRate / 1000).toFixed(1)} kHz · ${state.channels.length ? state.channels.join(' / ') : 'Waiting for audio'}`;
-  $('preview-note').textContent = renderer.syncReference === 'listener' && !state.lookahead?.times?.length
+  $('preview-note').textContent = state.head
+    ? `Headphones · ${state.headphoneRenderer} · yaw ${state.head.yaw.toFixed(1)}° / pitch ${state.head.pitch.toFixed(1)}° / roll ${state.head.roll.toFixed(1)}°. ${state.scene?.rotateWorld ? 'Keyboard: listener fixed, room rotates.' : 'Tracker: room fixed, head turns.'} FL / FR ±${state.scene?.frontAngle ?? 30}°. Particles show current emission.`
+    : renderer.syncReference === 'listener' && !state.lookahead?.times?.length
     ? 'Preparing look-ahead. If this persists, restart the updated player and playback.'
     : 'Use DiscChannelLab for playback, seeking and volume.';
-  $('source-mode').textContent = mode === 'input' ? 'Input · Unaffected by Mute / Solo / Volume' : mode === 'post' ? 'Combined L/R contribution per channel · Includes Mute / Solo / Master' : 'Final stereo PCM · Includes mix, volume and clipping';
+  $('source-mode').textContent = mode === 'input' ? 'Input · Unaffected by Mute / Solo / Volume' : mode === 'post' ? (state.head ? 'Mono sum of ear contributions per source · Includes Mute / Solo / Master' : 'Post-mix channels · Includes Mute / Solo / Master') : 'Final stereo PCM · Includes mix, volume and clipping';
   $('timeline').max = Math.max(1, state.duration);
   $('state').textContent = !state.connected ? 'Waiting for player connection' : playing ? (state.hasData ? 'Following DiscChannelLab' : 'Waiting for player audio') : 'Player stopped / paused';
 }
@@ -623,6 +703,7 @@ $('timeline').onchange = () => { draggingTimeline = false; seek(Number($('timeli
 $('view').onchange = () => renderer.view($('view').value);
 $('reset-view').onclick = () => { $('view').value = 'orbit'; renderer.view('orbit'); };
 $('sync-reference').onchange = () => {
+  if (liveMode && liveState?.head) $('sync-reference').value = 'speaker';
   renderer.setSyncReference($('sync-reference').value);
   $('listener-size').disabled = $('sync-reference').value !== 'listener';
 };
@@ -688,7 +769,7 @@ document.addEventListener('focusin', () => { if (editingControl()) cameraKeys.cl
 
 function captureSettings() {
   return {
-    version: 1, signal: $('analysis-mode').value, view: $('view').value, syncReference: $('sync-reference').value,
+    version: 1, signal: $('analysis-mode').value, view: $('view').value, syncReference: normalSyncReference ?? $('sync-reference').value,
     spread: Number($('spread').value), particleSize: Number($('particle-size').value), particleSpeed: Number($('particle-speed').value),
     listenerSize: Number($('listener-size').value), listenerBrightness: Number($('listener-brightness').value), transparency: Number($('transparency').value), density: Number($('density').value),
     speakerBeams: $('speaker-beams').checked, beamStrength: Number($('beam-strength').value),
@@ -771,5 +852,9 @@ requestAnimationFrame(render);
 // Read-only diagnostics and small controls for local browser integration checks.
 window.lab = {
   get state() { return { playing, liveMode, time: position(), particles: renderer.count, fps, channels: clip?.channels, duration: clip?.duration, contextState: context?.state, errors: $('notice').hidden ? null : $('notice').textContent, bands: Array.from(renderer.bands), view: $('view').value }; },
-  play, pause, stop, seek, settingsReady
+  play, pause, stop, seek, settingsReady, headFrame,
+  get head() { return liveState?.head; },
+  get scene() { return liveState?.scene; },
+  get cameraPose() { return renderer.cameraPose(); },
+  get displayedSpeakers() { return renderer.speakers.map(s => ({ code: s.code, position: liveMode && liveState?.scene?.rotateWorld ? pointInListenerView(s.position, liveState.head) : s.position })); }
 };

@@ -141,6 +141,8 @@ public sealed partial class AudioNavigationService
                 log.Write($"HEADPHONES {session.Options.Method}, 48000 Hz float, {channels.Length}ch, endpoint buffer {output.BufferMilliseconds:0.0} ms, " +
                     $"raw prebuffer {pcm.Count * HeadphoneRenderer.BlockSize * 1000d / 48000:0.0} ms, " +
                     $"device latency {output.StreamLatencyMilliseconds:0.0} ms, silent guard {output.GuardFrames * 1000d / 48000:0.0} ms, MMCSS={scheduling.IsRegistered}");
+                if (session.Options.Method == HeadphoneMethod.SteamAudio)
+                    log.Write($"HEADPHONES HRTF {session.Options.Hrtf}" + (session.Options.Hrtf == HeadphoneHrtf.Sofa ? $" {session.Options.SofaPath}" : ""));
                 var input = channels.Select(_ => new float[HeadphoneRenderer.BlockSize]).ToArray();
                 var stereo = new float[HeadphoneRenderer.BlockSize * 2];
                 bool announced = false;
@@ -154,7 +156,7 @@ public sealed partial class AudioNavigationService
                     // Preserve the final HRIR / delay-line decay without discarding partial source blocks.
                     var silence = pcm.Rent();
                     Array.Clear(silence);
-                    for (int i = 0; i < 4; i++) Render(silence, HeadphoneRenderer.BlockSize);
+                    for (int i = 0, blocks = renderer.TailBlocks; i < blocks; i++) Render(silence, HeadphoneRenderer.BlockSize);
                     pcm.Recycle(silence);
                     output.Drain(token);
                     if (!announced && output.HasStarted) started?.Invoke(startTicks);

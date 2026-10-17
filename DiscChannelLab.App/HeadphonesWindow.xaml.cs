@@ -4,6 +4,8 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Shapes;
 using System.Windows.Threading;
+using Microsoft.Win32;
+using Path = System.IO.Path;
 
 namespace Disc2Flac;
 
@@ -13,6 +15,16 @@ public partial class HeadphonesWindow : Window
     private readonly HeadphoneSession _session = HeadphoneSession.Current;
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(40) };
     private bool _updating = true;
+    private bool _sofaLoading, _closed;
+    private static readonly HeadphoneOptions Defaults = new();
+    private static readonly IReadOnlyDictionary<string, double> SliderDefaults = new Dictionary<string, double>
+    {
+        ["FrontAngle"] = Defaults.FrontAngle, ["Shadow"] = Defaults.ShadowStrength * 100,
+        ["Rear"] = Defaults.RearCutDb, ["Corner"] = Defaults.RearFrequency, ["Radius"] = Defaults.HeadRadius * 100,
+        ["Headroom"] = Defaults.HeadroomDb, ["Lfe"] = Defaults.LfeGain * 100,
+        ["DirectTrim"] = Defaults.DirectTrimDb, ["SteamTrim"] = Defaults.SteamTrimDb, ["Smooth"] = Defaults.SmoothingMs,
+        ["Yaw"] = 0, ["Pitch"] = 0, ["Roll"] = 0
+    };
     private double _mark;
     private TrackRow? _markTrack;
     public HeadphonesWindow(MainViewModel model)
@@ -22,7 +34,7 @@ public partial class HeadphonesWindow : Window
         ReadOptions();
         _timer.Tick += (_, _) => Refresh();
         Loaded += (_, _) => { _timer.Start(); Room.Focus(); Refresh(); };
-        Closed += (_, _) => { _timer.Stop(); _session.Save(); };
+        Closed += (_, _) => { _closed = true; _timer.Stop(); _session.Save(); };
         _updating = false;
     }
     private void ReadOptions()
@@ -31,12 +43,28 @@ public partial class HeadphonesWindow : Window
         EnableHeadphones.IsChecked = o.Enabled;
         MethodCombo.SelectedIndex = (int)o.Method;
         SettingsTabs.SelectedIndex = (int)o.Method;
-        Shadow.Value = o.ShadowStrength * 100; Rear.Value = o.RearCutDb; Corner.Value = o.RearFrequency; Radius.Value = o.HeadRadius * 100;
-        Delay.IsChecked = o.InterauralDelay; Headroom.Value = o.HeadroomDb; Lfe.Value = o.LfeGain * 100;
-        DirectTrim.Value = o.DirectTrimDb; SteamTrim.Value = o.SteamTrimDb; Smooth.Value = o.SmoothingMs;
-        FrontAngle.Value = o.FrontAngle;
+        ReadSoundOptions();
+        ReadHrtfOptions();
         UseTracker.IsChecked = o.UseTracker; Port.Text = o.UdpPort.ToString();
         InvertYaw.IsChecked = o.InvertYaw; InvertPitch.IsChecked = o.InvertPitch; InvertRoll.IsChecked = o.InvertRoll;
+        UpdateLabels();
+    }
+    private void ReadSoundOptions()
+    {
+        var o = _session.Options;
+        Shadow.Value = o.ShadowStrength * 100; Rear.Value = o.RearCutDb; Corner.Value = o.RearFrequency; Radius.Value = o.HeadRadius * 100;
+        Delay.IsChecked = o.InterauralDelay; Headroom.Value = o.HeadroomDb; Lfe.Value = o.LfeGain * 100;
+        DirectTrim.Value = o.DirectTrimDb; SteamTrim.Value = o.Hrtf == HeadphoneHrtf.Sofa ? o.SofaTrimDb : o.SteamTrimDb; Smooth.Value = o.SmoothingMs;
+        FrontAngle.Value = o.FrontAngle;
+    }
+    private void ReadHrtfOptions()
+    {
+        var updating = _updating; _updating = true;
+        HrtfCombo.SelectedIndex = (int)_session.Options.Hrtf;
+        SofaPathText.Text = string.IsNullOrWhiteSpace(_session.Options.SofaPath) ? LanguageService.T("SOFA未選択") : _session.Options.SofaPath;
+        SofaPathText.ToolTip = SofaPathText.Text;
+        SteamTrim.Value = _session.Options.Hrtf == HeadphoneHrtf.Sofa ? _session.Options.SofaTrimDb : _session.Options.SteamTrimDb;
+        _updating = updating;
         UpdateLabels();
     }
     private void UpdateLabels()
@@ -48,22 +76,92 @@ public partial class HeadphonesWindow : Window
         HeadroomLabel.Text = $"{HeadphoneText.T("Shared headroom")} · {Headroom.Value:0.0} dB";
         LfeLabel.Text = $"{HeadphoneText.T("LFE contribution")} · {Lfe.Value:0}%";
         DirectTrimLabel.Text = $"{HeadphoneText.T("Direct comparison trim")} · {DirectTrim.Value:+0.0;-0.0;0.0} dB";
-        SteamTrimLabel.Text = $"{HeadphoneText.T("HRTF comparison trim")} · {SteamTrim.Value:+0.0;-0.0;0.0} dB";
+        SteamTrimLabel.Text = $"{(_session.Options.Hrtf == HeadphoneHrtf.Sofa ? LanguageService.T("SOFA比較トリム") : HeadphoneText.T("HRTF comparison trim"))} · {SteamTrim.Value:+0.0;-0.0;0.0} dB";
         SmoothLabel.Text = $"{HeadphoneText.T("Orientation smoothing")} · {Smooth.Value:0} ms";
         FrontAngleLabel.Text = $"{HeadphoneText.T("Front L/R angle")} · ±{FrontAngle.Value:0}° ({HeadphoneText.T("apart")} {FrontAngle.Value * 2:0}°)";
+        foreach (var (name, value) in SliderDefaults)
+        {
+            var button = (Button)FindName("Reset" + name);
+            var title = ((TextBlock)FindName(name + "Label")).Text;
+            button.ToolTip = $"{LanguageService.T("標準値に戻す")} · {title} → {value:0.###}";
+            System.Windows.Automation.AutomationProperties.SetName(button, (string)button.ToolTip);
+        }
     }
     private void Options_Changed(object sender, RoutedPropertyChangedEventArgs<double> e) => WriteOptions();
     private void Option_Checked(object sender, RoutedEventArgs e) => WriteOptions();
     private void WriteOptions()
     {
         if (_updating) return;
-        _session.SetOptions(_session.Options with
+        var current = _session.Options;
+        _session.SetOptions(current with
         {
             ShadowStrength = Shadow.Value / 100, RearCutDb = Rear.Value, RearFrequency = Corner.Value, HeadRadius = Radius.Value / 100,
             InterauralDelay = Delay.IsChecked == true, HeadroomDb = Headroom.Value, LfeGain = Lfe.Value / 100,
-            DirectTrimDb = DirectTrim.Value, SteamTrimDb = SteamTrim.Value, SmoothingMs = Smooth.Value, FrontAngle = FrontAngle.Value
+            DirectTrimDb = DirectTrim.Value, SteamTrimDb = current.Hrtf == HeadphoneHrtf.BuiltIn ? SteamTrim.Value : current.SteamTrimDb,
+            SofaTrimDb = current.Hrtf == HeadphoneHrtf.Sofa ? SteamTrim.Value : current.SofaTrimDb,
+            SmoothingMs = Smooth.Value, FrontAngle = FrontAngle.Value
         });
         UpdateLabels();
+    }
+    private async void Hrtf_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (_updating || HrtfCombo.SelectedIndex < 0 || HrtfCombo.SelectedIndex == (int)_session.Options.Hrtf) return;
+        var hrtf = (HeadphoneHrtf)HrtfCombo.SelectedIndex;
+        if (hrtf == HeadphoneHrtf.Sofa && string.IsNullOrWhiteSpace(_session.Options.SofaPath)) await BrowseSofaAsync();
+        else await SelectHrtfAsync(hrtf, _session.Options.SofaPath);
+    }
+    private async void BrowseSofa_Click(object sender, RoutedEventArgs e) => await BrowseSofaAsync();
+    private async Task BrowseSofaAsync()
+    {
+        if (!_model.CanChoosePreviewMode || _sofaLoading) { ReadHrtfOptions(); return; }
+        var dialog = new OpenFileDialog { Title = LanguageService.T("SOFAファイルを選択"), Filter = "SOFA (*.sofa)|*.sofa", CheckFileExists = true };
+        if (File.Exists(_session.Options.SofaPath)) dialog.FileName = _session.Options.SofaPath;
+        if (dialog.ShowDialog(this) == true) await SelectHrtfAsync(HeadphoneHrtf.Sofa, dialog.FileName);
+        else ReadHrtfOptions();
+    }
+    internal async Task<bool> SelectHrtfAsync(HeadphoneHrtf hrtf, string? sofaPath = null)
+    {
+        if (!_model.CanChoosePreviewMode || _sofaLoading)
+        {
+            NoteText.Text = LanguageService.T("一時停止または停止してからHRTFを変更してください。");
+            if (!_sofaLoading) ReadHrtfOptions();
+            return false;
+        }
+        _sofaLoading = true;
+        try
+        {
+            Refresh();
+            string? path = null;
+            if (hrtf == HeadphoneHrtf.Sofa)
+            {
+                NoteText.Text = LanguageService.T("SOFAを検証しています…");
+                path = Path.GetFullPath(sofaPath ?? _session.Options.SofaPath);
+                await Task.Run(() => SofaHrtf.Validate(path));
+            }
+            if (_closed) return false;
+            // The main player can be operated while validation is running. Do not replace
+            // the renderer that such a playback session has already created.
+            if (!_model.CanChoosePreviewMode)
+            {
+                NoteText.Text = LanguageService.T("一時停止または停止してからHRTFを変更してください。");
+                return false;
+            }
+            _session.SetOptions(_session.Options with { Hrtf = hrtf, SofaPath = path ?? _session.Options.SofaPath });
+            _session.Save();
+            NoteText.Text = LanguageService.T(hrtf == HeadphoneHrtf.Sofa ? "外部SOFAを検証して選択しました。" : "標準HRTFを選択しました。");
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or ArgumentException or InvalidOperationException or
+            DllNotFoundException or BadImageFormatException or EntryPointNotFoundException)
+        {
+            if (!_closed) NoteText.Text = LanguageService.T("HRTFを変更できませんでした。") + " " + ex.Message;
+            return false;
+        }
+        finally
+        {
+            _sofaLoading = false;
+            if (!_closed) { ReadHrtfOptions(); Refresh(); }
+        }
     }
     private void Enable_Changed(object sender, RoutedEventArgs e)
     {
@@ -142,10 +240,22 @@ public partial class HeadphonesWindow : Window
     private void Center_Click(object sender, RoutedEventArgs e) { _session.Recenter(); Room.Focus(); Refresh(); }
     private void ResetDirect_Click(object sender, RoutedEventArgs e)
     {
-        _session.SetOptions(_session.Options with { ShadowStrength = .35, RearCutDb = 6, RearFrequency = 4000, HeadRadius = .0875, InterauralDelay = false });
-        _updating = true; ReadOptions(); _updating = false;
+        _session.SetOptions(_session.Options with { ShadowStrength = Defaults.ShadowStrength, RearCutDb = Defaults.RearCutDb,
+            RearFrequency = Defaults.RearFrequency, HeadRadius = Defaults.HeadRadius, InterauralDelay = Defaults.InterauralDelay });
+        _updating = true; ReadSoundOptions(); _updating = false; UpdateLabels();
     }
-    private void ResetPlacement_Click(object sender, RoutedEventArgs e) => FrontAngle.Value = 30;
+    private void ResetPlacement_Click(object sender, RoutedEventArgs e) => FrontAngle.Value = Defaults.FrontAngle;
+    private void ResetSlider_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: string name } && SliderDefaults.TryGetValue(name, out var value) && FindName(name) is Slider slider)
+            slider.SetCurrentValue(Slider.ValueProperty, value);
+    }
+    private void ResetSound_Click(object sender, RoutedEventArgs e)
+    {
+        _session.SetOptions(_session.Options.ResetSound());
+        _updating = true; ReadSoundOptions(); _updating = false; UpdateLabels();
+        NoteText.Text = LanguageService.T("音響設定を標準値へ戻しました。HRTFモデルとトラッカー設定は保持します。");
+    }
     private async void Play_Click(object sender, RoutedEventArgs e) => await _model.TogglePlaybackAsync();
     private void Stop_Click(object sender, RoutedEventArgs e) => _model.StopPlayback();
     private void Mark_Click(object sender, RoutedEventArgs e) { _mark = _model.PreviewSeconds; _markTrack = _model.SelectedTrack; Refresh(); }
@@ -170,6 +280,10 @@ public partial class HeadphonesWindow : Window
         _updating = false;
         EnableHeadphones.IsEnabled = _model.CanChoosePreviewMode;
         MethodCombo.IsEnabled = _model.CanChoosePreviewMode && _session.Options.Enabled;
+        HrtfCombo.IsEnabled = BrowseSofaButton.IsEnabled = _model.CanChoosePreviewMode && !_sofaLoading;
+        if (!_sofaLoading && HrtfCombo.SelectedIndex != (int)_session.Options.Hrtf) ReadHrtfOptions();
+        var sofaText = string.IsNullOrWhiteSpace(_session.Options.SofaPath) ? LanguageService.T("SOFA未選択") : _session.Options.SofaPath;
+        if (SofaPathText.Text != sofaText) { SofaPathText.Text = sofaText; SofaPathText.ToolTip = sofaText; }
         DirectControls.IsEnabled = _session.Options.Method == HeadphoneMethod.Direct;
         MethodHint.Text = !_session.Options.Enabled ? HeadphoneText.T("Headphones are disabled; standard playback is active.") : _model.IsPlaying ? HeadphoneText.T("Stop or pause before changing renderer.") : HeadphoneText.T("Renderer can be changed while stopped.");
         ManualControls.IsEnabled = !_session.Options.UseTracker;
@@ -179,8 +293,8 @@ public partial class HeadphonesWindow : Window
         var p = _session.Pose;
         PoseText.Text = $"Yaw {p.Yaw:+0.0;-0.0;0.0}°  ·  Pitch {p.Pitch:+0.0;-0.0;0.0}°  ·  Roll {p.Roll:+0.0;-0.0;0.0}°";
         _updating = true; Yaw.Value = p.Yaw; Pitch.Value = p.Pitch; Roll.Value = p.Roll; _updating = false;
-        PlayButton.IsEnabled = _model.CanPlay || _model.IsPlaying; StopButton.IsEnabled = _model.CanSeek;
-        MarkButton.IsEnabled = ReplayButton.IsEnabled = _model.CanSeek;
+        PlayButton.IsEnabled = (!_sofaLoading && _model.CanPlay) || _model.IsPlaying; StopButton.IsEnabled = _model.CanSeek;
+        MarkButton.IsEnabled = _model.CanSeek; ReplayButton.IsEnabled = _model.CanSeek && !_sofaLoading;
         PlayButton.Content = _model.IsPlaying ? HeadphoneText.T("Pause") : HeadphoneText.T("Play");
         MarkText.Text = $"{HeadphoneText.T("Mark")} {TimeSpan.FromSeconds(_mark):mm\\:ss\\.f}";
         TrackText.Text = _model.SelectedTrack is { } t ? $"{t.Title}  ·  {_model.SelectedStream?.ChannelLayout}" : HeadphoneText.T("Open a disc, ISO or audio file in the main window.");

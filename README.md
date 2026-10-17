@@ -46,6 +46,8 @@ The player always starts in **2ch Stereo**. Under **Preview Audio**, select **2c
 
 [Setup, controls, speaker placement, theory and limitations](docs/headphones.md).
 
+Use the built-in HRTF or choose an **external SOFA** and replay the same marked passage to compare. Standard and SOFA retain separate comparison trims. Every Lab slider has an individual **↺** reset, and **Reset sound settings** restores the audio defaults together.
+
 ## Features
 
 - Inspect titles, chapters, tracks, audio streams, and channel layouts.

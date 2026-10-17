@@ -10,6 +10,16 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Threading;
 
+if (args is ["headphone-sofa-tests", var sofaFixtures, var sofaOutput])
+{
+    try { await HeadphoneSofaTests.RunAsync(sofaFixtures, sofaOutput); return 0; }
+    catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
+}
+if (args is ["headphone-sofa-buffer-tests", var bufferSofa, var sofaBufferOutput])
+{
+    try { await HeadphoneBufferTests.RunAsync(sofaBufferOutput, sofaFile: bufferSofa); return 0; }
+    catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
+}
 if (args is ["headphone-restart-tests", var restartOutput])
 {
     try { await HeadphoneRestartTests.RunAsync(restartOutput); return 0; }
@@ -33,6 +43,11 @@ if (args is ["headphone-tests", var headphoneOutput])
 if (args is ["headphone-ui-tests", var headphoneUiOutput])
 {
     try { HeadphoneUiTests.Run(headphoneUiOutput); return 0; }
+    catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
+}
+if (args is ["headphone-sofa-ui-tests", var sofaUiFixtures, var sofaUiOutput])
+{
+    try { HeadphoneUiTests.Run(sofaUiOutput, sofaUiFixtures); return 0; }
     catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
 }
 if (args is ["headphone-viewer-feed", var headViewer, var headViewerOutput])

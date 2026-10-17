@@ -9,6 +9,11 @@
         <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="Padding" Value="10,5"/><Setter Property="Margin" Value="0,0,6,6"/></Style>
         <Style TargetType="CheckBox" BasedOn="{StaticResource {x:Type CheckBox}}"><Setter Property="Margin" Value="0,6,0,6"/></Style>
         <Style TargetType="Slider" BasedOn="{StaticResource {x:Type Slider}}"><Setter Property="Margin" Value="0,3,0,8"/></Style>
+        <Style x:Key="SliderResetButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Content" Value="↺"/><Setter Property="Width" Value="30"/>
+            <Setter Property="Padding" Value="2,0"/><Setter Property="Margin" Value="6,0,0,0"/>
+            <Setter Property="FontSize" Value="16"/><Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
         <Style TargetType="TabItem">
             <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
             <Setter Property="Background" Value="{DynamicResource InputBrush}"/>
@@ -66,8 +71,12 @@
             </Grid>
             <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                 <StackPanel Margin="0,0,5,0">
+                    <DockPanel Margin="0,0,0,8">
+                        <Button x:Name="ResetSoundButton" DockPanel.Dock="Right" Content="{local:Loc Key='音響設定を標準に戻す'}" Click="ResetSound_Click"/>
+                        <TextBlock Text="{local:Loc Key='↺：そのスライダーだけ標準値へ'}" FontSize="12" VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}"/>
+                    </DockPanel>
                     <TextBlock Text="{local:Loc Key='スピーカー配置 / L・Rの分離'}" FontSize="15" FontWeight="SemiBold"/>
-                    <TextBlock x:Name="FrontAngleLabel" Margin="0,6,0,0"/>
+                    <DockPanel Margin="0,6,0,0"><Button x:Name="ResetFrontAngle" DockPanel.Dock="Right" Style="{StaticResource SliderResetButton}" Tag="FrontAngle" Click="ResetSlider_Click"/><TextBlock x:Name="FrontAngleLabel"/></DockPanel>
                     <Slider x:Name="FrontAngle" Minimum="15" Maximum="90" SmallChange="1" LargeChange="5" TickFrequency="1" IsSnapToTickEnabled="True" IsMoveToPointEnabled="True" ValueChanged="Options_Changed"/>
                     <WrapPanel>
                         <Button x:Name="ResetPlacementButton" Content="{local:Loc Key='標準 ±30°'}" Click="ResetPlacement_Click"/>
@@ -81,10 +90,10 @@
                                 <TextBlock Text="{local:Loc Key='角度に基づく試聴'}" FontWeight="SemiBold"/>
                                 <TextBlock Text="{local:Loc Key='等電力パンと球形頭部フィルターを使用します。背面の高域カットは聴感に合わせる近似で、耳の実測値ではありません。'}"
                                            Margin="0,6,0,10" FontSize="12" Foreground="{DynamicResource MutedBrush}"/>
-                                <TextBlock x:Name="ShadowLabel"/><Slider x:Name="Shadow" Minimum="0" Maximum="100" ValueChanged="Options_Changed"/>
-                                <TextBlock x:Name="RearLabel"/><Slider x:Name="Rear" Minimum="0" Maximum="18" ValueChanged="Options_Changed"/>
-                                <TextBlock x:Name="CornerLabel"/><Slider x:Name="Corner" Minimum="500" Maximum="12000" TickFrequency="500" ValueChanged="Options_Changed"/>
-                                <TextBlock x:Name="RadiusLabel"/><Slider x:Name="Radius" Minimum="6" Maximum="12" ValueChanged="Options_Changed"/>
+                                <DockPanel><Button x:Name="ResetShadow" DockPanel.Dock="Right" Style="{StaticResource SliderResetButton}" Tag="Shadow" Click="ResetSlider_Click"/><TextBlock x:Name="ShadowLabel"/></DockPanel><Slider x:Name="Shadow" Minimum="0" Maximum="100" ValueChanged="Options_Changed"/>
+                                <DockPanel><Button x:Name="ResetRear" DockPanel.Dock="Right" Style="{StaticResource SliderResetButton}" Tag="Rear" Click="ResetSlider_Click"/><TextBlock x:Name="RearLabel"/></DockPanel><Slider x:Name="Rear" Minimum="0" Maximum="18" ValueChanged="Options_Changed"/>
+                                <DockPanel><Button x:Name="ResetCorner" DockPanel.Dock="Right" Style="{StaticResource SliderResetButton}" Tag="Corner" Click="ResetSlider_Click"/><TextBlock x:Name="CornerLabel"/></DockPanel><Slider x:Name="Corner" Minimum="500" Maximum="12000" TickFrequency="500" ValueChanged="Options_Changed"/>
+                                <DockPanel><Button x:Name="ResetRadius" DockPanel.Dock="Right" Style="{StaticResource SliderResetButton}" Tag="Radius" Click="ResetSlider_Click"/><TextBlock x:Name="RadiusLabel"/></DockPanel><Slider x:Name="Radius" Minimum="6" Maximum="12" ValueChanged="Options_Changed"/>
                                 <CheckBox x:Name="Delay" Content="{local:Loc Key='近似した耳間時間差を加える'}" Checked="Option_Checked" Unchecked="Option_Checked"/>
                                 <Button Content="{local:Loc Key='Directの設定を戻す'}" Click="ResetDirect_Click" HorizontalAlignment="Left"/>
                             </StackPanel>
@@ -92,7 +101,18 @@
                         <TabItem Header="HRTF">
                             <StackPanel Margin="10">
                                 <TextBlock Text="Steam Audio 4.8.1" FontWeight="SemiBold"/>
-                                <TextBlock Text="{local:Loc Key='各スピーカーに組み込みHRTFと頭の向きを適用します。部屋の残響は追加しません。'}"
+                                <TextBlock Text="{local:Loc Key='HRTFモデル'}" Margin="0,8,0,4"/>
+                                <ComboBox x:Name="HrtfCombo" MinHeight="30" SelectionChanged="Hrtf_Changed">
+                                    <ComboBoxItem Content="{local:Loc Key='標準（組み込みHRTF）'}"/>
+                                    <ComboBoxItem Content="{local:Loc Key='外部SOFA'}"/>
+                                </ComboBox>
+                                <DockPanel Margin="0,7,0,5">
+                                    <Button x:Name="BrowseSofaButton" DockPanel.Dock="Right" Content="{local:Loc Key='SOFAを選択…'}" Click="BrowseSofa_Click" Margin="6,0,0,0"/>
+                                    <TextBox x:Name="SofaPathText" IsReadOnly="True" MinWidth="0" VerticalContentAlignment="Center"/>
+                                </DockPanel>
+                                <TextBlock Text="{local:Loc Key='一時停止し、HRTFを選んで「比較位置から再生」で聴き比べます。モデルごとに比較トリムを保持します。'}" FontSize="12" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,8"/>
+                                <TextBlock Text="{local:Loc Key='SimpleFreeFieldHRIR・左右2耳・Data.Delayが0のSOFAに対応します。'}" FontSize="12" Foreground="{DynamicResource MutedBrush}"/>
+                                <TextBlock Text="{local:Loc Key='各スピーカーに選択したHRTFと頭の向きを適用します。部屋の残響は追加しません。'}"
                                            Margin="0,8,0,8"/>
                                 <TextBlock Text="{local:Loc Key='Directのフィルターと遅延は使用しません。同じ音源・入力レベル・ヘッドルーム・頭の向きで比較できます。'}"
                                            Margin="0,0,0,8"/>
@@ -115,20 +135,20 @@
                                     <CheckBox x:Name="InvertPitch" Content="{local:Loc Key='上下を反転'}" Margin="0,6,12,6" Checked="Tracker_Changed" Unchecked="Tracker_Changed"/>
                                     <CheckBox x:Name="InvertRoll" Content="{local:Loc Key='傾きを反転'}" Checked="Tracker_Changed" Unchecked="Tracker_Changed"/>
                                 </WrapPanel>
-                                <TextBlock x:Name="SmoothLabel"/><Slider x:Name="Smooth" Minimum="0" Maximum="100" ValueChanged="Options_Changed"/>
+                                <DockPanel><Button x:Name="ResetSmooth" DockPanel.Dock="Right" Style="{StaticResource SliderResetButton}" Tag="Smooth" Click="ResetSlider_Click"/><TextBlock x:Name="SmoothLabel"/></DockPanel><Slider x:Name="Smooth" Minimum="0" Maximum="100" ValueChanged="Options_Changed"/>
                                 <StackPanel x:Name="ManualControls">
-                                    <TextBlock Text="{local:Loc Key='手動：左右'}"/><Slider x:Name="Yaw" Minimum="-180" Maximum="180" ValueChanged="Pose_Changed"/>
-                                    <TextBlock Text="{local:Loc Key='手動：上下'}"/><Slider x:Name="Pitch" Minimum="-89" Maximum="89" ValueChanged="Pose_Changed"/>
-                                    <TextBlock Text="{local:Loc Key='手動：傾き'}"/><Slider x:Name="Roll" Minimum="-180" Maximum="180" ValueChanged="Pose_Changed"/>
+                                    <DockPanel><Button x:Name="ResetYaw" DockPanel.Dock="Right" Style="{StaticResource SliderResetButton}" Tag="Yaw" Click="ResetSlider_Click"/><TextBlock x:Name="YawLabel" Text="{local:Loc Key='手動：左右'}"/></DockPanel><Slider x:Name="Yaw" Minimum="-180" Maximum="180" ValueChanged="Pose_Changed"/>
+                                    <DockPanel><Button x:Name="ResetPitch" DockPanel.Dock="Right" Style="{StaticResource SliderResetButton}" Tag="Pitch" Click="ResetSlider_Click"/><TextBlock x:Name="PitchLabel" Text="{local:Loc Key='手動：上下'}"/></DockPanel><Slider x:Name="Pitch" Minimum="-89" Maximum="89" ValueChanged="Pose_Changed"/>
+                                    <DockPanel><Button x:Name="ResetRoll" DockPanel.Dock="Right" Style="{StaticResource SliderResetButton}" Tag="Roll" Click="ResetSlider_Click"/><TextBlock x:Name="RollLabel" Text="{local:Loc Key='手動：傾き'}"/></DockPanel><Slider x:Name="Roll" Minimum="-180" Maximum="180" ValueChanged="Pose_Changed"/>
                                 </StackPanel>
                             </StackPanel>
                         </TabItem>
                     </TabControl>
                     <TextBlock Text="{local:Loc Key='共通出力 / 比較'}" FontSize="15" FontWeight="SemiBold" Margin="0,14,0,8"/>
-                    <TextBlock x:Name="HeadroomLabel"/><Slider x:Name="Headroom" Minimum="-30" Maximum="0" ValueChanged="Options_Changed"/>
-                    <TextBlock x:Name="LfeLabel"/><Slider x:Name="Lfe" Minimum="0" Maximum="100" ValueChanged="Options_Changed"/>
-                    <TextBlock x:Name="DirectTrimLabel"/><Slider x:Name="DirectTrim" Minimum="-12" Maximum="12" ValueChanged="Options_Changed"/>
-                    <TextBlock x:Name="SteamTrimLabel"/><Slider x:Name="SteamTrim" Minimum="-12" Maximum="12" ValueChanged="Options_Changed"/>
+                    <DockPanel><Button x:Name="ResetHeadroom" DockPanel.Dock="Right" Style="{StaticResource SliderResetButton}" Tag="Headroom" Click="ResetSlider_Click"/><TextBlock x:Name="HeadroomLabel"/></DockPanel><Slider x:Name="Headroom" Minimum="-30" Maximum="0" ValueChanged="Options_Changed"/>
+                    <DockPanel><Button x:Name="ResetLfe" DockPanel.Dock="Right" Style="{StaticResource SliderResetButton}" Tag="Lfe" Click="ResetSlider_Click"/><TextBlock x:Name="LfeLabel"/></DockPanel><Slider x:Name="Lfe" Minimum="0" Maximum="100" ValueChanged="Options_Changed"/>
+                    <DockPanel><Button x:Name="ResetDirectTrim" DockPanel.Dock="Right" Style="{StaticResource SliderResetButton}" Tag="DirectTrim" Click="ResetSlider_Click"/><TextBlock x:Name="DirectTrimLabel"/></DockPanel><Slider x:Name="DirectTrim" Minimum="-12" Maximum="12" ValueChanged="Options_Changed"/>
+                    <DockPanel><Button x:Name="ResetSteamTrim" DockPanel.Dock="Right" Style="{StaticResource SliderResetButton}" Tag="SteamTrim" Click="ResetSlider_Click"/><TextBlock x:Name="SteamTrimLabel"/></DockPanel><Slider x:Name="SteamTrim" Minimum="-12" Maximum="12" ValueChanged="Options_Changed"/>
                     <TextBlock Text="{local:Loc Key='比較前に2つのトリムで聴感上の音量を合わせてください。LFEは方向を付けず両耳へ等量で出力します。'}"
                                FontSize="12" Foreground="{DynamicResource MutedBrush}"/>
                 </StackPanel>

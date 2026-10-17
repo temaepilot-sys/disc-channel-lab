@@ -16,9 +16,26 @@ Every launch starts in **2ch Stereo**, even when the previous session used headp
 | Renderer | Processing |
 | --- | --- |
 | Direct | Equal-power pan from relative direction, a spherical-head shadow filter, and adjustable rear high-frequency reduction. Approximate interaural delay is optional. |
-| Steam Audio | Steam Audio 4.8.1 applies its built-in HRTF separately to each source channel, with direction interpolation. Direct filters and additional delay are bypassed. |
+| Steam Audio | Steam Audio 4.8.1 applies its built-in HRTF or a selected external SOFA separately to each source channel, with direction interpolation. Direct filters and additional delay are bypassed. |
 
 Neither renderer adds room reflections, wall occlusion or distance attenuation. LFE is added equally to both ears at 70% by default, without directional filtering. A 5.0 input does not acquire an LFE channel.
+
+## Resetting adjustments
+
+Each slider in the Headphones window has a **↺** button. It resets that slider alone; its tooltip shows the standard value. The yaw, pitch and roll buttons return only their respective axis to zero while using keyboard control. **Reset sound settings** restores speaker width, Direct filters and optional delay, smoothing, headroom, LFE contribution and all three comparison trims. It preserves the selected renderer, HRTF model, SOFA file, tracker settings, head pose and mixer faders/Mute/Solo. The Direct and speaker-placement reset buttons remain available. Sound resets can be used during playback.
+
+## Comparing Standard and external SOFA
+
+1. Choose **Headphones · HRTF** in Preview Audio, open **Headphones**, and select the **HRTF** tab.
+2. Click **Mark position**, then pause playback.
+3. Choose **Standard (built-in HRTF)** or click **Choose SOFA…** to validate and select a file. Once selected, the **HRTF model** dropdown switches between Standard and that remembered file.
+4. Click **Play from mark**. Pause, change model, and replay the same passage to compare.
+
+The Standard and external SOFA comparison trims are stored separately; the visible HRTF/SOFA trim follows the selected model. Its ↺ button resets only that model's trim. Models can differ in loudness; use these trims to match perceived level. HRTF data volume remains 1, with no automatic normalization or loudness matching.
+
+The file is read in place and its path and selection are saved in `headphones.json`. Keep the SOFA file available, or select it again after moving it. A failed selection preserves the current model and settings. If a saved file later becomes unavailable or invalid, HRTF playback reports the error before opening the output device; select Standard or choose a valid file to continue. Direct and ordinary stereo remain usable.
+
+SOFA support follows [Steam Audio's custom-HRTF requirements](https://valvesoftware.github.io/steam-audio/doc/capi/guide.html#custom-hrtfs): HDF5 SOFA using `SimpleFreeFieldHRIR`, two receivers and zero `Data.Delay`, plus the other documented coordinate/metadata restrictions. The application accepts files up to 128 MiB, handles Unicode paths, and validates actual native filters without playing a test sound. Selection and validation happen while stopped/paused; playback is checked again before applying an asynchronously loaded file. The end-of-track flush covers the filter tail reported by Steam Audio. SOFA data is user supplied; confirm the data set's terms before redistributing it.
 
 ## Speaker placement and L/R separation
 
@@ -84,7 +101,7 @@ Input shows source channels; Post shows each source's summed contribution to the
 
 The Direct head-shadow filter uses the spherical-head model in [Brown & Duda (1998), equations 3–5](https://users.umiacs.umd.edu/~ramanid/cmsc828d_audio/BrownDuda.pdf). Optional delay uses the Woodworth approximation, about 0.656 ms at 90° with the default 8.75 cm head radius. The separate rear shelf is a listening approximation: `max(0, -relativeZ)^2` weights a default −6 dB high-frequency shelf at 4 kHz. It is not a universal rule for sound behind a listener, and does not reproduce measured outer-ear cues.
 
-Steam Audio uses its [binaural effect](https://valvesoftware.github.io/steam-audio/doc/capi/binaural-effect.html) and default HRTF. Localization and front/back or height perception vary with the listener. This HRTF is not personalized. Physical tracker wearing tests and individual listening calibration remain user checks; synthetic UDP tests do not establish those results.
+Steam Audio uses its [binaural effect](https://valvesoftware.github.io/steam-audio/doc/capi/binaural-effect.html) with the built-in or selected SOFA HRTF. Localization and front/back or height perception vary with the listener; the built-in HRTF is not personalized. Physical tracker wearing tests and individual listening calibration remain user checks; synthetic UDP tests do not establish those results.
 
 ## Settings and build
 
@@ -106,3 +123,5 @@ dotnet run --project DiscChannelLab.Verify -c Release -- headphone-ui-tests veri
 `headphone-buffer-tests` checks bounded startup buffering, cancellation and a failed output device, and measures actual Windows buffer continuity while processing multichannel FLAC through both renderers. Its Windows output receives silence; it can optionally analyze an existing audio file without modifying it.
 
 `headphone-click-tests <output-folder>` records rendered PCM to verify smooth starts and stops, cancellation while priming, fresh state after restart, bounded shutdown, and FLAC seeks through Direct and HRTF. It does not send audible sound to the device.
+
+`headphone-sofa-tests <fixtures-folder> <output-folder>` checks actual SOFA loading, waveform changes, separate trims, Unicode paths, bad/unsupported/missing files, filter tails, persistence and six-channel FLAC playback. `headphone-sofa-ui-tests <fixtures-folder> <output-folder>` adds actual window controls, individual/global resets, model switching, failure rollback and playback locking. `headphone-sofa-buffer-tests <sofa-file> <output-folder>` checks Direct, built-in HRTF and that SOFA against the actual Windows output device while sending it only silence. The fixture folder contains separately obtained libmysofa test files `MIT_KEMAR_large_pinna.sofa`, `CIPIC_subject_003_hrir_final.sofa`, `CIPIC_subject_003_hrir_final_itdInDelayField.sofa` and `D1_48K_24bit_0.3s_FIR_SOFA.sofa`; the latter two exercise unsupported inputs. These tests do not establish personalized localization or audible device quality.

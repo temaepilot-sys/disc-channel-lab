@@ -8,6 +8,7 @@ using System.Text.Json;
 namespace Disc2Flac;
 
 public enum HeadphoneMethod { Direct, SteamAudio }
+public enum HeadphoneHrtf { BuiltIn, Sofa }
 public sealed record HeadphoneOptions
 {
     public bool Enabled { get; init; }
@@ -20,6 +21,9 @@ public sealed record HeadphoneOptions
     public double HeadroomDb { get; init; } = -12;
     public double DirectTrimDb { get; init; }
     public double SteamTrimDb { get; init; }
+    public double SofaTrimDb { get; init; }
+    public HeadphoneHrtf Hrtf { get; init; }
+    public string SofaPath { get; init; } = "";
     public double SmoothingMs { get; init; } = 8;
     public double LfeGain { get; init; } = .7;
     public double FrontAngle { get; init; } = 30;
@@ -32,12 +36,23 @@ public sealed record HeadphoneOptions
     public HeadphoneOptions Validated() => this with
     {
         Method = Enum.IsDefined(Method) ? Method : HeadphoneMethod.Direct,
+        Hrtf = Enum.IsDefined(Hrtf) ? Hrtf : HeadphoneHrtf.BuiltIn,
+        SofaPath = SofaPath?.Trim() ?? "",
         ShadowStrength = Limit(ShadowStrength, 0, 1, .35), RearCutDb = Limit(RearCutDb, 0, 18, 6),
         RearFrequency = Limit(RearFrequency, 500, 12000, 4000), HeadRadius = Limit(HeadRadius, .06, .12, .0875),
         HeadroomDb = Limit(HeadroomDb, -30, 0, -12), DirectTrimDb = Limit(DirectTrimDb, -12, 12, 0), SteamTrimDb = Limit(SteamTrimDb, -12, 12, 0),
+        SofaTrimDb = Limit(SofaTrimDb, -12, 12, 0),
         SmoothingMs = Limit(SmoothingMs, 0, 100, 8), LfeGain = Limit(LfeGain, 0, 1, .7),
         FrontAngle = Limit(FrontAngle, 15, 90, 30), UdpPort = Math.Clamp(UdpPort, 1024, 65535)
     };
+    public HeadphoneOptions ResetSound()
+    {
+        var defaults = new HeadphoneOptions();
+        return this with { ShadowStrength = defaults.ShadowStrength, RearCutDb = defaults.RearCutDb,
+            RearFrequency = defaults.RearFrequency, HeadRadius = defaults.HeadRadius, InterauralDelay = defaults.InterauralDelay,
+            HeadroomDb = defaults.HeadroomDb, DirectTrimDb = defaults.DirectTrimDb, SteamTrimDb = defaults.SteamTrimDb,
+            SofaTrimDb = defaults.SofaTrimDb, SmoothingMs = defaults.SmoothingMs, LfeGain = defaults.LfeGain, FrontAngle = defaults.FrontAngle };
+    }
     private static double Limit(double value, double low, double high, double fallback) => double.IsFinite(value) ? Math.Clamp(value, low, high) : fallback;
 }
 

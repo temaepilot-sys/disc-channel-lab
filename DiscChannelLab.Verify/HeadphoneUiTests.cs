@@ -12,7 +12,7 @@ using System.Windows.Threading;
 
 internal static class HeadphoneUiTests
 {
-    public static void Run(string folder)
+    public static void Run(string folder, string? sofaFixtures = null)
     {
         var root = Path.GetFullPath(folder); Directory.CreateDirectory(root);
         Environment.SetEnvironmentVariable("DISCCHANNEL_DATA_HOME", Path.Combine(root, "profile"));
@@ -107,6 +107,77 @@ internal static class HeadphoneUiTests
                 Check(HeadphoneSession.Current.Options.FrontAngle == 90, "Shared front L/R angle slider changes the virtual speaker geometry");
                 ((Button)lab.FindName("ResetPlacementButton")).RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
                 Check(HeadphoneSession.Current.Options.FrontAngle == 30, "Standard placement button restores 30 degrees per front speaker");
+                void Button(string name) => ((Button)lab.FindName(name)).RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+                foreach (var (name, changed, standard) in new[] { ("FrontAngle", 74d, 30d), ("Shadow", 82d, 35d),
+                    ("Rear", 13d, 6d), ("Corner", 7000d, 4000d), ("Radius", 10.5, 8.75), ("Headroom", -23d, -12d),
+                    ("Lfe", 12d, 70d), ("DirectTrim", 7d, 0d), ("SteamTrim", -5d, 0d), ("Smooth", 60d, 8d) })
+                {
+                    var slider = (Slider)lab.FindName(name); slider.Value = changed;
+                    var beforeReset = HeadphoneSession.Current.Options;
+                    Button("Reset" + name);
+                    Check(Math.Abs(slider.Value - standard) < 1e-6 && HeadphoneSession.Current.Options != beforeReset &&
+                        ((string)((Button)lab.FindName("Reset" + name)).ToolTip).Contains("Reset to default"),
+                        name + " has a visible individual reset that restores the actual sound setting");
+                }
+                ((Slider)lab.FindName("Rear")).Value = 11; ((Slider)lab.FindName("Shadow")).Value = 80; Button("ResetShadow");
+                Check(HeadphoneSession.Current.Options.RearCutDb == 11 && HeadphoneSession.Current.Options.ShadowStrength == .35,
+                    "Resetting a single slider preserves the other sound controls");
+                HeadphoneSession.Current.SetKeyboard(33, 22, 11); Pump(Task.Delay(80));
+                Button("ResetYaw"); Check(HeadphoneSession.Current.Pose == new HeadPose(0, 22, 11), "Yaw reset changes only yaw");
+                Button("ResetPitch"); Check(HeadphoneSession.Current.Pose == new HeadPose(0, 0, 11), "Pitch reset changes only pitch");
+                Button("ResetRoll"); Check(HeadphoneSession.Current.Pose == new HeadPose(0, 0, 0), "Roll reset returns the remaining axis to neutral");
+                var fadersBeforeReset = model.MixerStrips.Select(s => s.Snapshot()).ToArray();
+                ((Slider)lab.FindName("Headroom")).Value = -25; ((Slider)lab.FindName("Lfe")).Value = 10;
+                Button("ResetSoundButton");
+                Check(HeadphoneSession.Current.Options is { HeadroomDb: -12, LfeGain: .7, FrontAngle: 30, RearCutDb: 6 } &&
+                    model.MixerStrips.Select(s => s.Snapshot()).SequenceEqual(fadersBeforeReset),
+                    "Reset sound restores common defaults without resetting mixer gains, Mute or Solo");
+                if (sofaFixtures is not null)
+                {
+                    var sofaFile = Path.GetFullPath(Path.Combine(sofaFixtures, "MIT_KEMAR_large_pinna.sofa"));
+                    var selection = lab.SelectHrtfAsync(HeadphoneHrtf.Sofa, sofaFile); Pump(selection);
+                    Check(selection.Result && HeadphoneSession.Current.Options is { Hrtf: HeadphoneHrtf.Sofa, Method: HeadphoneMethod.Direct } &&
+                        ((ComboBox)lab.FindName("HrtfCombo")).SelectedIndex == 1 && ((TextBox)lab.FindName("SofaPathText")).Text == sofaFile,
+                        "The Lab validates and selects a real SOFA while leaving the chosen playback renderer unchanged");
+                    ((Slider)lab.FindName("SteamTrim")).Value = -4;
+                    ((ComboBox)lab.FindName("HrtfCombo")).SelectedIndex = 0;
+                    Check(HeadphoneSession.Current.Options is { Hrtf: HeadphoneHrtf.BuiltIn, SofaTrimDb: -4 } &&
+                        ((Slider)lab.FindName("SteamTrim")).Value == 0,
+                        "The actual HRTF selector switches to Standard and restores its own comparison trim");
+                    ((Slider)lab.FindName("SteamTrim")).Value = 2;
+                    selection = lab.SelectHrtfAsync(HeadphoneHrtf.Sofa, sofaFile); Pump(selection);
+                    Check(selection.Result && ((Slider)lab.FindName("SteamTrim")).Value == -4 && HeadphoneSession.Current.Options.SteamTrimDb == 2,
+                        "Returning to SOFA recalls its trim without overwriting the Standard trim");
+                    Button("ResetSteamTrim");
+                    Check(HeadphoneSession.Current.Options.SofaTrimDb == 0 && HeadphoneSession.Current.Options.SteamTrimDb == 2,
+                        "The HRTF trim reset applies only to the selected model");
+                    foreach (var badFile in new[] { Path.Combine(root, "bad.sofa"),
+                        Path.GetFullPath(Path.Combine(sofaFixtures, "CIPIC_subject_003_hrir_final_itdInDelayField.sofa")) })
+                    {
+                        if (Path.GetFileName(badFile) == "bad.sofa") File.WriteAllText(badFile, "Not an HRTF.");
+                        var before = HeadphoneSession.Current.Options;
+                        selection = lab.SelectHrtfAsync(HeadphoneHrtf.Sofa, badFile); Pump(selection);
+                        Check(!selection.Result && HeadphoneSession.Current.Options == before && ((TextBlock)lab.FindName("NoteText")).Text.Contains("could not"),
+                            "Invalid SOFA selection reports an error and preserves the active model, path and trims");
+                    }
+                    ((Slider)lab.FindName("Headroom")).Value = -24; ((Slider)lab.FindName("Lfe")).Value = 13;
+                    Button("ResetSoundButton");
+                    Check(HeadphoneSession.Current.Options is { Hrtf: HeadphoneHrtf.Sofa, SofaTrimDb: 0, SteamTrimDb: 0, HeadroomDb: -12, LfeGain: .7 } &&
+                        HeadphoneSession.Current.Options.SofaPath == sofaFile,
+                        "Reset sound preserves the selected SOFA and restores both model trims and output defaults");
+                    ((TabControl)lab.FindName("SettingsTabs")).SelectedIndex = 1; lab.UpdateLayout();
+                    var sofaVisual = (FrameworkElement)lab.Content;
+                    var sofaBitmap = new RenderTargetBitmap((int)sofaVisual.ActualWidth, (int)sofaVisual.ActualHeight, 96, 96, PixelFormats.Pbgra32);
+                    sofaBitmap.Render(sofaVisual); var sofaPng = new PngBitmapEncoder(); sofaPng.Frames.Add(BitmapFrame.Create(sofaBitmap));
+                    using (var imageFile = File.Create(Path.Combine(root, "sofa-controls.png"))) sofaPng.Save(imageFile);
+                    LanguageService.Instance.SetJapanese(true); Pump(Task.Delay(80));
+                    Check(((Button)lab.FindName("ResetSoundButton")).Content is string resetText && resetText.Contains("標準") &&
+                        ((ComboBoxItem)((ComboBox)lab.FindName("HrtfCombo")).Items[1]).Content is string sofaText && sofaText == "外部SOFA",
+                        "New reset and HRTF selectors support Japanese labels");
+                    LanguageService.Instance.SetJapanese(false); Pump(Task.Delay(80));
+                    ((ComboBox)lab.FindName("HrtfCombo")).SelectedIndex = 0;
+                    ((TabControl)lab.FindName("SettingsTabs")).SelectedIndex = 0;
+                }
                 var room = (Canvas)lab.FindName("Room");
                 System.Windows.Shapes.Ellipse Speaker(string code) => room.Children.OfType<System.Windows.Shapes.Ellipse>().Single(s => Equals(s.Tag, code));
                 void ClickSpeaker(string code, bool shift = false, bool label = false)
@@ -208,6 +279,14 @@ internal static class HeadphoneUiTests
                 Pump(Task.Delay(170));
                 Check(model.IsPlaying && model.PreviewSeconds >= .3 && !mode.IsEnabled && !enable.IsEnabled && !previewMode.IsEnabled,
                     "Play from mark starts the chosen renderer at the saved position and locks mode selection during playback");
+                var beforeHrtfAttempt = HeadphoneSession.Current.Options;
+                var blockedHrtf = lab.SelectHrtfAsync(HeadphoneHrtf.Sofa, "not-read-while-playing.sofa"); Pump(blockedHrtf);
+                Check(!blockedHrtf.Result && HeadphoneSession.Current.Options == beforeHrtfAttempt && model.IsPlaying &&
+                    !((ComboBox)lab.FindName("HrtfCombo")).IsEnabled && !((Button)lab.FindName("BrowseSofaButton")).IsEnabled,
+                    "HRTF changes are blocked during playback without interrupting the playing renderer");
+                ((Slider)lab.FindName("Headroom")).Value = -20; Button("ResetHeadroom");
+                Check(model.IsPlaying && HeadphoneSession.Current.Options.HeadroomDb == -12,
+                    "Individual sound resets remain available during playback");
                 ClickSpeaker("FL");
                 ClickSpeaker("FR", shift: true);
                 Check(model.IsPlaying && model.MixerStrips.Single(s => s.Code == "FR").Solo,

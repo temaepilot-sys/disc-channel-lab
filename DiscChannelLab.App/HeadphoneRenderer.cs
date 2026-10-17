@@ -41,6 +41,7 @@ public sealed class FractionalEarDelay
 
 public interface IHeadphoneSpatializer : IDisposable
 {
+    int TailSamples => 0;
     void Process(int channel, float[] input, float[] left, float[] right, Vector3 direction, HeadphoneOptions options);
 }
 
@@ -91,6 +92,7 @@ public sealed class HeadphoneRenderer : IDisposable
     public const int SampleRate = 48000, BlockSize = 256;
     private readonly string[] _channels;
     private readonly HeadphoneMethod _method;
+    private readonly HeadphoneHrtf _hrtf;
     private readonly IHeadphoneSpatializer _engine;
     private readonly float[][] _left, _right, _scaled;
     private readonly double[] _gains;
@@ -102,10 +104,11 @@ public sealed class HeadphoneRenderer : IDisposable
     public IReadOnlyList<float[]> ChannelLeft => _left;
     public IReadOnlyList<float[]> ChannelRight => _right;
     public long ClippedSamples { get; private set; }
+    public int TailBlocks => Math.Max(4, (_engine.TailSamples + BlockSize - 1) / BlockSize);
     public HeadphoneRenderer(string[] channels, HeadphoneOptions options)
     {
-        _channels = channels; _method = options.Method;
-        _engine = _method == HeadphoneMethod.SteamAudio ? new SteamHeadphoneSpatializer(channels.Length) : new DirectHeadphoneSpatializer(channels.Length);
+        _channels = channels; _method = options.Method; _hrtf = options.Hrtf;
+        _engine = _method == HeadphoneMethod.SteamAudio ? new SteamHeadphoneSpatializer(channels.Length, options) : new DirectHeadphoneSpatializer(channels.Length);
         _left = channels.Select(_ => new float[BlockSize]).ToArray(); _right = channels.Select(_ => new float[BlockSize]).ToArray();
         _scaled = channels.Select(_ => new float[BlockSize]).ToArray(); _gains = new double[channels.Length];
     }
@@ -119,7 +122,7 @@ public sealed class HeadphoneRenderer : IDisposable
             (1 - Math.Exp(-BlockSize / (SampleRate * .008)));
         var hasSolo = state.Channels?.Any(c => c.Solo) == true;
         Array.Clear(output);
-        var trim = _method == HeadphoneMethod.Direct ? options.DirectTrimDb : options.SteamTrimDb;
+        var trim = _method == HeadphoneMethod.Direct ? options.DirectTrimDb : _hrtf == HeadphoneHrtf.Sofa ? options.SofaTrimDb : options.SteamTrimDb;
         var global = Math.Pow(10, (options.HeadroomDb + trim) / 20) * Math.Clamp(double.IsFinite(master) ? master : 1, 0, 2);
         if (_first) _master = global;
         for (var frame = 0; frame < BlockSize; frame++)

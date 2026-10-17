@@ -16,6 +16,8 @@ verification-output/
 *.iso
 *.ISO
 *.flac
+*.sofa
+*.SOFA
 *.dsf
 *.dff
 *.dsdiff

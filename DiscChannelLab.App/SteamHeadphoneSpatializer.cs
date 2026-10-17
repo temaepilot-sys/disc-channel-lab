@@ -7,7 +7,10 @@ namespace Disc2Flac;
 public sealed unsafe class SteamHeadphoneSpatializer : IHeadphoneSpatializer
 {
     private IntPtr _context, _hrtf;
+    private GCHandle _sofaData;
     private readonly IntPtr[] _effects;
+    private static readonly object HrtfCreationGate = new();
+    public int TailSamples => _effects.Max(effect => effect == IntPtr.Zero ? 0 : iplBinauralEffectGetTailSize(effect));
     static SteamHeadphoneSpatializer()
     {
         NativeLibrary.SetDllImportResolver(typeof(SteamHeadphoneSpatializer).Assembly, (name, assembly, path) =>
@@ -21,7 +24,7 @@ public sealed unsafe class SteamHeadphoneSpatializer : IHeadphoneSpatializer
             throw new DllNotFoundException("Steam Audio phonon.dll was not found in tools/steamaudio.");
         });
     }
-    public SteamHeadphoneSpatializer(int channels)
+    public SteamHeadphoneSpatializer(int channels, HeadphoneOptions? options = null)
     {
         _effects = new IntPtr[channels];
         try
@@ -29,8 +32,19 @@ public sealed unsafe class SteamHeadphoneSpatializer : IHeadphoneSpatializer
             var context = new ContextSettings { Version = 0x00040801, Simd = 0 };
             Check(iplContextCreate(ref context, out _context), "create context");
             var audio = new AudioSettings { Rate = HeadphoneRenderer.SampleRate, Frames = HeadphoneRenderer.BlockSize };
-            var hrtf = new HrtfSettings { Volume = 1, Normalization = 0 };
-            Check(iplHRTFCreate(_context, ref audio, ref hrtf, out _hrtf), "create HRTF");
+            var sofa = options?.Hrtf == HeadphoneHrtf.Sofa ? SofaHrtf.Read(options.SofaPath) : null;
+            // Keep externally owned SOFA bytes pinned until the native HRTF is released.
+            // Validation and playback therefore use the same lifetime guarantee.
+            if (sofa is not null) _sofaData = GCHandle.Alloc(sofa, GCHandleType.Pinned);
+            var hrtf = new HrtfSettings { Type = sofa is null ? 0 : 1, SofaData = _sofaData.IsAllocated ? _sofaData.AddrOfPinnedObject() : IntPtr.Zero,
+                SofaSize = sofa?.Length ?? 0, Volume = 1, Normalization = 0 };
+            int error;
+            // Steam Audio documents HRTF creation as non-thread-safe. UI validation and
+            // playback preparation may overlap; never serialize the real-time Apply calls.
+            lock (HrtfCreationGate) error = iplHRTFCreate(_context, ref audio, ref hrtf, out _hrtf);
+            if (error != 0 && sofa is not null)
+                throw new InvalidDataException(LanguageService.T("SOFAを読み込めません。SimpleFreeFieldHRIR・左右2耳・Data.Delayが0の対応ファイルを選択してください。") + $" ({error})");
+            Check(error, "create HRTF");
             var effect = new EffectSettings { Hrtf = _hrtf };
             for (int i = 0; i < channels; i++) Check(iplBinauralEffectCreate(_context, ref audio, ref effect, out _effects[i]), "create binaural effect");
         }
@@ -54,6 +68,7 @@ public sealed unsafe class SteamHeadphoneSpatializer : IHeadphoneSpatializer
         for (var i = 0; i < _effects.Length; i++) if (_effects[i] != IntPtr.Zero) iplBinauralEffectRelease(ref _effects[i]);
         if (_hrtf != IntPtr.Zero) iplHRTFRelease(ref _hrtf);
         if (_context != IntPtr.Zero) iplContextRelease(ref _context);
+        if (_sofaData.IsAllocated) _sofaData.Free();
     }
     private static void Check(int error, string action) { if (error != 0) throw new InvalidOperationException($"Steam Audio: {action} failed ({error})."); }
     [StructLayout(LayoutKind.Sequential)] private struct ContextSettings { public uint Version; public IntPtr Log, Allocate, Free; public int Simd, Flags; }
@@ -70,4 +85,5 @@ public sealed unsafe class SteamHeadphoneSpatializer : IHeadphoneSpatializer
     [DllImport("phonon", CallingConvention = CallingConvention.StdCall)] private static extern int iplBinauralEffectCreate(IntPtr context, ref AudioSettings audio, ref EffectSettings settings, out IntPtr effect);
     [DllImport("phonon", CallingConvention = CallingConvention.StdCall)] private static extern void iplBinauralEffectRelease(ref IntPtr effect);
     [DllImport("phonon", CallingConvention = CallingConvention.StdCall)] private static extern int iplBinauralEffectApply(IntPtr effect, ref EffectParameters parameters, ref AudioBuffer input, ref AudioBuffer output);
+    [DllImport("phonon", CallingConvention = CallingConvention.StdCall)] private static extern int iplBinauralEffectGetTailSize(IntPtr effect);
 }

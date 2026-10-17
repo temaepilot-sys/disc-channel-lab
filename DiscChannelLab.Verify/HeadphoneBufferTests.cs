@@ -4,7 +4,7 @@ using System.Text.Json;
 
 internal static class HeadphoneBufferTests
 {
-    public static async Task RunAsync(string folder, string? realFile = null)
+    public static async Task RunAsync(string folder, string? realFile = null, string? sofaFile = null)
     {
         var root = Path.GetFullPath(folder); Directory.CreateDirectory(root);
         Environment.SetEnvironmentVariable("DISCCHANNEL_DATA_HOME", Path.Combine(root, "profile"));
@@ -77,9 +77,13 @@ internal static class HeadphoneBufferTests
                 var disc = await service.AnalyzeAudioFilesAsync([file], CancellationToken.None); var title = disc.Playlists.Single();
                 var inspected = await service.AnalyzePlaylistAsync(disc, title, CancellationToken.None); var stream = inspected.Streams.Single();
                 var navigation = new AudioNavigationService(tools, runner, probe, log);
-                foreach (var method in Enum.GetValues<HeadphoneMethod>())
+                var renderers = new List<HeadphoneOptions> { new() { Enabled = true, Method = HeadphoneMethod.Direct },
+                    new() { Enabled = true, Method = HeadphoneMethod.SteamAudio } };
+                if (sofaFile is not null) renderers.Add(new() { Enabled = true, Method = HeadphoneMethod.SteamAudio, Hrtf = HeadphoneHrtf.Sofa, SofaPath = Path.GetFullPath(sofaFile) });
+                foreach (var options in renderers)
                 {
-                    session.SetOptions(new HeadphoneOptions { Enabled = true, Method = method });
+                    var method = options.Method + (options.Hrtf == HeadphoneHrtf.Sofa ? " SOFA" : "");
+                    session.SetOptions(options);
                     SilentWindowsOutput? sink = null;
                     AudioNavigationService.HeadphoneOutputFactory = () => sink = new SilentWindowsOutput();
                     using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));

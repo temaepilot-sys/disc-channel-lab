@@ -69,19 +69,19 @@ The launch parameters follow [Firefox's profile/instance documentation](https://
 
 ### Speaker switches
 
-Lab speaker circles and mixer Mute share the same channel state. In the 3D viewer, muted or Solo-excluded speakers and labels become dark. **Post-mix channels** stops their particles, beams and LFE field immediately, including old particles/look-ahead; unmuting resumes emission without reopening the viewer. **Input channels** intentionally retains the original recording. **Final stereo output** shows the mixed left/right outputs: muting an FL input does not hide other channels still contributing to that left output. Speaker state changes preserve the camera and other channels' particles.
+Lab speaker circles and mixer Mute share the same channel state. In the 3D viewer, muted or Solo-excluded speakers and labels become dark. **Input channels and Post-mix channels** both stop their particles, beams and LFE field immediately, including existing particles and old look-ahead, in either synchronization mode and while paused. Unmuting resumes emission during playback without reopening the viewer. Input PCM and spectra retain their original values; the speaker switches control visibility. **Final stereo output** shows the mixed left/right outputs: muting an FL input does not hide other channels still contributing to that left output. Speaker state changes preserve the camera and other channels' particles.
 
 Use **Signal** to choose what is analyzed:
 
 | Signal | Meaning |
 | --- | --- |
-| **Input channels** | Decoder PCM before the managed mixer. Mute, Solo and Master do not alter this view. |
+| **Input channels** | Decoder PCM before the managed mixer. Original levels are retained; speaker Mute / Solo controls which channels are visible. |
 | **Post-mix channels** (initial default) | Each channel’s combined left/right contribution after the active mix and Master. Faders, Mute and Solo are reflected. |
 | **Final stereo output** | The exact clipped 2ch PCM passed to the player, including pan, summation, polarity cancellation and volume. |
 
 Post-mix energy is calculated from `sample × sqrt(leftWeight² + rightWeight²) × masterGain`. It is a per-channel contribution, not a reconstructed speaker signal. Equal-power pan can change the left/right balance without changing that combined energy; a polarity sign alone also does not change an individual channel’s energy. Select **Final stereo output** to inspect those interactions. The display keeps original channel positions in Input/Post.
 
-The managed multichannel path preserves the decoded channels. When the player has already converted a playback path to stereo, the viewer receives FL/FR; it cannot reconstruct original channels from that stereo signal. The viewer analyzes what is actually playing, so turn on the player’s mixer playback option to hear and visualize edited mixer settings. In the standard mix, LFE is muted by default; **Input channels** can still show its recorded content.
+The managed multichannel path preserves the decoded channels. When the player has already converted a playback path to stereo, the viewer receives FL/FR; it cannot reconstruct original channels from that stereo signal. Enable the player's mixer playback option to hear and visualize edited mixer settings. In the standard mix, LFE contributes no output by default; Input retains its original spectrum, while an explicit Mute / Solo exclusion or zero mixer fader also hides that channel's particles.
 
 Both synchronization modes use moving particles emitted from the speakers. Past particles remain as a visual trail, not additional audio. Changing the mixer refreshes the look-ahead and clears incompatible listener-mode trails. The synthetic demo is independent of the player mixer.
 

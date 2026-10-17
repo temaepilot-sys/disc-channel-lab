@@ -589,7 +589,33 @@ function tick(seconds) { for (let i = 0; i < Math.ceil(seconds * 60); i++) { now
   livePayload.speakerStates[0]={code:'FL',muted:false,solo:false,enabled:false};
   livePayload.speakerStates[2]={code:'FC',muted:true,solo:false,enabled:false};
   element('analysis-mode').value='input'; element('analysis-mode').onchange(); await pollLive(); tick(.1);
-  assert(Array.from({length:renderer.count},(_,p)=>renderer.data[p*stride+14]).includes(2),'Input still shows the original recording while the speaker is muted');
+  assert(Array.from({length:renderer.count},(_,p)=>renderer.data[p*stride+14]).every(c=>c!==0&&c!==2&&c!==3),'Input must hide muted and Solo-excluded channels just like Post');
+  assert.equal(vm.runInContext('liveState.input[32]',sandbox),.8,'Hiding Input particles does not modify original spectral analysis');
+  for (const signal of ['input','post']) for (const sync of ['speaker','listener']) {
+    livePayload.speakerStates=switchCodes.map(code=>({code,muted:false,solo:false,enabled:true}));
+    livePayload.playing=true;
+    livePayload.lookahead={revision:7,signal,channels:switchCodes,times:[0,1,2,3,4,5,6,7,8,9,10],values:new Array(11*96).fill(.8)};
+    element('analysis-mode').value=signal; element('analysis-mode').onchange(); await pollLive();
+    element('sync-reference').value=sync; element('sync-reference').onchange(); tick(.12);
+    const visibleChannels=()=>Array.from({length:renderer.count},(_,p)=>renderer.data[p*stride+14]);
+    assert(visibleChannels().includes(2)&&visibleChannels().includes(3),`${signal}/${sync}: Center and LFE are visible before Mute`);
+    const preservedCamera=JSON.stringify(renderer.camera);
+    livePayload.speakerStates[2]={code:'FC',muted:true,solo:false,enabled:false};
+    livePayload.speakerStates[3]={code:'LFE',muted:true,solo:false,enabled:false};
+    await pollLive();
+    assert(visibleChannels().every(c=>c!==2&&c!==3),`${signal}/${sync}: Mute immediately removes existing Center/LFE particles`);
+    assert.equal(JSON.stringify(renderer.camera),preservedCamera);
+    tick(.15);
+    assert(visibleChannels().every(c=>c!==2&&c!==3),`${signal}/${sync}: old spectra and forecasts cannot create muted particles`);
+    renderer.lightLevels.fill(0); renderer.lightLevels.fill(.8,32,48); renderer.speakerBeams=true;
+    renderer.beamMesh.build(renderer,renderer.cameraPose().eye);
+    assert.equal(renderer.beamMesh.vertexCount,0,`${signal}/${sync}: muted beams stay off`);
+    livePayload.speakerStates=switchCodes.map(code=>({code,muted:false,solo:false,enabled:true})); await pollLive(); tick(.12);
+    assert(visibleChannels().includes(2)&&visibleChannels().includes(3),`${signal}/${sync}: unmuting restores Center and LFE`);
+    livePayload.playing=false; await pollLive();
+    livePayload.speakerStates[2]={code:'FC',muted:true,solo:false,enabled:false}; await pollLive();
+    assert(visibleChannels().every(c=>c!==2),`${signal}/${sync}: Mute also removes paused particles`);
+  }
   element('analysis-mode').value='output'; element('analysis-mode').onchange(); await pollLive(); tick(.1);
   assert(renderer.speakers.every(s=>s.enabled),'Final stereo is not suppressed by the FL input switch');
   const result = { mode: 'Simulated APIs; GPU/audio-device validation still required', passed: ['Demo packet parsing', 'Explicit channels', 'Audio output clock compensation', 'Particles generated', 'Pause freezes time and particles', 'Seek clears old particles', 'Resume', 'All six camera matrices finite', 'Particle cap', 'Stop reset', 'Natural end'], particlesAt8Seconds: running.particles, drawCalls };
@@ -597,7 +623,7 @@ function tick(seconds) { for (let i = 0; i < Math.ceil(seconds * 60); i++) { now
   result.passed.push('Keyboard tilt reaches both poles without collapsed projection', 'Listener camera stays at its rear viewing position', 'Continuous keyboard rotation beyond 360 degrees', 'Keyboard release and focus respect controls', 'Camera movement works with paused audio');
   result.passed.push('Settings restored on startup without autoplay', 'Save/load all controls and exact camera', 'Settings requests retain authentication', 'Settings I/O errors preserve current state');
   result.passed.push('Hide/show UI and saved visibility leave playback unchanged');
-  result.passed.push('Speaker switches dim icons without resetting the camera', 'Muted Post particles, LFE and beams stop despite stale look-ahead', 'Unmute restores emission', 'Input preserves original audio and Final stereo preserves other-channel contributions');
+  result.passed.push('Speaker switches dim icons without resetting the camera', 'Input and Post both stop muted particles, LFE and beams in both sync modes', 'Mute also removes paused particles and unmute restores emission', 'Original Input analysis and other-channel contributions in Final stereo are preserved');
   result.passed.push('Legacy settings default to listener sync and 2x speed', 'Particles begin at speakers using future spectra', 'Bass and treble arrive at the source timestamp', 'Speed 0.5x through 4x preserves arrival timing', 'Missing/stale forecast rejected', 'Mixer forecast revisions clear old trails', 'Sync reference and speed settings round-trip', 'Speaker sync keeps source-timed emission');
   result.passed.push('Listener-only brightness and adjustable size emphasis', 'Smooth local falloff without new stationary particles', 'Listener vibration remains bounded and freezes on pause', 'Emphasis preserves timing and transparency');
   result.passed.push('Listener preset looks toward the center from behind', 'Central bass, treble and LFE fit the listener view');

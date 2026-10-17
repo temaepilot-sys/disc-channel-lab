@@ -307,7 +307,7 @@ class SpaceRenderer {
     this.buildScene();
   }
   channelSuppressed(channel) {
-    return liveMode && $('analysis-mode').value === 'post' && this.speakers[channel]?.enabled === false;
+    return liveMode && $('analysis-mode').value !== 'output' && this.speakers[channel]?.enabled === false;
   }
   setSpeakerStates(states) {
     let changed = false;
@@ -323,8 +323,8 @@ class SpaceRenderer {
     }
     if (!changed) return;
     this.buildScene();
-    // Remove only muted Post particles, including particles emitted from old look-ahead.
-    // Input remains a view of the original, unmuted recording.
+    // Speaker switches gate both Input and Post visuals, including existing look-ahead particles.
+    // Input PCM/spectra remain original; only visibility is gated. Final stereo is an aggregate.
     for (let p = 0; p < this.count;) {
       if (this.channelSuppressed(this.data[p * PARTICLE_STRIDE + 14])) {
         this.count--;
@@ -418,6 +418,7 @@ class SpaceRenderer {
     return { eye, target: this.listenerView ? sub(eye, z) : c.target, right: [Math.cos(c.yaw), 0, -Math.sin(c.yaw)] };
   }
   emit(channel, band, intensity, fan = Math.random() * 2 - 1) {
+    if (this.channelSuppressed(channel)) return;
     if (this.count >= this.max) return;
     const s = this.speakers[channel], hz = this.info.centers[band], f = clamp(Math.log(hz / 20) / Math.log(1000), 0, 1), col = color(hz);
     // Height, speed and lifetime illustrate frequency; they are not acoustic propagation physics.
@@ -706,7 +707,7 @@ function applyLive(state) {
     : renderer.syncReference === 'listener' && !state.lookahead?.times?.length
     ? 'Preparing look-ahead. If this persists, restart the updated player and playback.'
     : 'Use DiscChannelLab for playback, seeking and volume.';
-  $('source-mode').textContent = mode === 'input' ? 'Input · Unaffected by Mute / Solo / Volume' : mode === 'post' ? (state.head ? 'Mono sum of ear contributions per source · Includes Mute / Solo / Master' : 'Post-mix channels · Includes Mute / Solo / Master') : 'Final stereo PCM · Includes mix, volume and clipping';
+  $('source-mode').textContent = mode === 'input' ? 'Input · Original levels; speaker Mute / Solo controls visibility' : mode === 'post' ? (state.head ? 'Mono sum of ear contributions per source · Includes Mute / Solo / Master' : 'Post-mix channels · Includes Mute / Solo / Master') : 'Final stereo PCM · Includes mix, volume and clipping';
   $('timeline').max = Math.max(1, state.duration);
   $('state').textContent = !state.connected ? 'Waiting for player connection' : playing ? (state.hasData ? 'Following DiscChannelLab' : 'Waiting for player audio') : 'Player stopped / paused';
 }

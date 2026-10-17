@@ -6,6 +6,14 @@ namespace Disc2Flac;
 
 public static class DvdVideoReader
 {
+    // Prefer the explicit filesystem directory: DVD navigation through a volume
+    // root can stall on mounted sources. FFmpeg still interprets titles/cells.
+    public static string InputPath(string root)
+    {
+        var folder = Path.Combine(root, "VIDEO_TS");
+        return Directory.Exists(folder) ? folder : root;
+    }
+
     public static IReadOnlyList<PlaylistInfo> ReadAll(string root, FfprobeService probe, Action<string>? log = null,
         CancellationToken token = default)
     {

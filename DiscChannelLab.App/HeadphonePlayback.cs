@@ -65,7 +65,7 @@ public sealed partial class AudioNavigationService
                             if (playlist.ChapterStarts[i] < endTicks) last = i + 1;
                         }
                         skip = startTicks - playlist.ChapterStarts[first - 1];
-                        arguments.AddRange(["-f", "dvdvideo", "-title", playlist.DvdVideoTitle.ToString(), "-chapter_start", first.ToString(), "-chapter_end", last.ToString(), "-i", disc.Root]);
+                        arguments.AddRange(["-f", "dvdvideo", "-title", playlist.DvdVideoTitle.ToString(), "-chapter_start", first.ToString(), "-chapter_end", last.ToString(), "-i", DvdVideoReader.InputPath(disc.Root)]);
                     }
                     await Decode(arguments, stream, skip, endTicks - startTicks, feed);
                 }
@@ -105,6 +105,7 @@ public sealed partial class AudioNavigationService
                 var info = new ProcessStartInfo(paths.Ffmpeg) { UseShellExecute = false, CreateNoWindow = true,
                     RedirectStandardInput = feed is not null, RedirectStandardOutput = true, RedirectStandardError = true };
                 foreach (var argument in arguments) info.ArgumentList.Add(argument);
+                log.Write($"NATIVE DECODE codec={source.Codec} rate={source.SampleRate} layout={source.ChannelLayout} " + string.Join(' ', arguments));
                 using var decoder = new Process { StartInfo = info };
                 if (!decoder.Start()) throw new IOException("Cannot start audio decoder.");
                 using var cancellation = token.Register(() => { try { if (!decoder.HasExited) decoder.Kill(entireProcessTree: true); } catch (InvalidOperationException) { } });
@@ -157,15 +158,19 @@ public sealed partial class AudioNavigationService
                 var input = channels.Select(_ => new float[HeadphoneRenderer.BlockSize]).ToArray();
                 var stereo = new float[HeadphoneRenderer.BlockSize * 2];
                 bool announced = false;
+                var delivery = new PlaybackDeliveryStats();
                 using var observer = new PreviewAudioObserver(channels, startTicks, visualization, mixedLevels, playbackPosition, transport, output.BufferMilliseconds);
                 output.Prepare(token);
                 transport?.Attach(output);
                 try
                 {
+                    long readyAt = Stopwatch.GetTimestamp(), pausedBeforeRead = transport?.PauseTicks ?? 0;
                     foreach (var block in pcm.ReadAll(token, () => transport?.Apply(output, token)))
                     {
+                        delivery.Record(PlaybackDeliveryStats.Stage.Decode, readyAt + (transport?.PauseTicks ?? 0) - pausedBeforeRead, Stopwatch.GetTimestamp());
                         try { Render(block, HeadphoneRenderer.BlockSize); }
                         finally { pcm.Recycle(block); }
+                        readyAt = Stopwatch.GetTimestamp(); pausedBeforeRead = transport?.PauseTicks ?? 0;
                     }
                     // Preserve the final HRIR / delay-line decay without discarding partial source blocks.
                     var silence = pcm.Rent();
@@ -180,9 +185,14 @@ public sealed partial class AudioNavigationService
                 finally
                 {
                     transport?.Detach();
+                    // Close/fade the audio stream before joining optional observers or
+                    // writing logs. Waiting first lets the device run dry and can replay
+                    // the last sample's release after a silent gap.
+                    output.Dispose();
                     observer.Dispose();
                     session.ReportOutput(output.BufferMilliseconds, renderer.ClippedSamples, output.EmptyBufferCount);
                     log.Write($"{(spatial ? "HEADPHONES" : "STEREO PCM")} OUTPUT frames={output.SubmittedFrames} empty-buffer-events={output.EmptyBufferCount} clipped-samples={renderer.ClippedSamples} observer-drops={observer.DroppedPackets} observer-errors={observer.Errors}");
+                    log.Write(delivery.ToString() + $" pause-apply-ms={transport?.PauseAppliedMilliseconds:0.0} resume-apply-ms={transport?.ResumeAppliedMilliseconds:0.0}");
                 }
 
                 void Render(byte[] bytes, int frames)
@@ -195,14 +205,23 @@ public sealed partial class AudioNavigationService
                             var value = frame < frames ? BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan((frame * channels.Length + channel) * 4, 4))) : 0;
                             input[channel][frame] = float.IsFinite(value) ? value : 0;
                         }
+                    long time = Stopwatch.GetTimestamp();
                     output.WaitForSpace(frames, token);
+                    long ready = Stopwatch.GetTimestamp();
+                    delivery.Record(PlaybackDeliveryStats.Stage.DeviceSpace, time, ready);
                     var before = output.SubmittedFrames;
                     // The latest pose is sampled AFTER waiting for the output device, never in the decoder/lookahead.
                     renderer.Render(input, stereo, session.Pose, session.Options, liveMix(), volume());
+                    long rendered = Stopwatch.GetTimestamp();
+                    delivery.Record(PlaybackDeliveryStats.Stage.Render, ready, rendered);
                     output.Write(stereo, frames);
                     transport?.Sample(output);
+                    long written = Stopwatch.GetTimestamp();
+                    delivery.Record(PlaybackDeliveryStats.Stage.Write, rendered, written);
+                    delivery.Written(written, transport?.PauseTicks ?? 0);
                     if (!announced && output.HasStarted) { announced = true; started?.Invoke(startTicks); }
                     observer.Capture(input, renderer, stereo, frames, before, output.PlayedFrames, output.EmptyBufferCount);
+                    delivery.Record(PlaybackDeliveryStats.Stage.Observe, written, Stopwatch.GetTimestamp());
                 }
             }
             catch { stop.Cancel(); throw; }

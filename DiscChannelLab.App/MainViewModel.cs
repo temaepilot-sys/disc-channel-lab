@@ -387,7 +387,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
         _editStore = editStore ?? new TrackEditsStore(_log);
         _isoMount = new IsoMountService(runner);
         if (string.IsNullOrWhiteSpace(_outputFolder)) _outputFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Music");
-        _log.Write("Application Start");
+        _log.Write($"Application Start path={AppContext.BaseDirectory} runtime={Environment.Version} dvd-input=VIDEO_TS");
         LanguageService.Instance.LanguageChanged += LanguageChanged;
         HeadphoneSession.Current.PropertyChanged += HeadphoneOptionsChanged;
         RefreshDrives();

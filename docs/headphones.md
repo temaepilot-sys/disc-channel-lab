@@ -85,6 +85,8 @@ Ordinary **2ch Stereo** playback of stereo files and supported multichannel layo
 
 ## Playback transitions
 
+DVD-Video input explicitly points FFmpeg at the readable `VIDEO_TS` directory. Some mounted volumes stalled when their drive root was used, starving both Stereo and HRTF even without a viewer. Probing, preview, inspection and conversion share this input rule; stream IDs, chapters and decoded samples are preserved. No protection-removal step is added.
+
 **Pause → Play retains the decoder, DSP state and output device** on the native Stereo/Direct/HRTF path. The device clock freezes while paused; resume continues the retained samples without decoding or seeking again. Stop, a seek, a different track, or changing the headphone renderer/model discards that session. Those operations still require source preparation; SACD extraction or disc access can add delay. Paused sessions protect their in-use cache until stopped.
 
 New playback starts and seeks use an 8 ms raised-cosine fade from silence, after headphone rendering. Stopping an already paused device resets its queue without briefly resuming audio. Otherwise, stopping releases the last submitted stereo sample smoothly to zero before the device closes; it does not replay queued decoder blocks. Shutdown has a timeout, and the Windows endpoint buffer is explicitly reset on close. These short transport fades prevent abrupt waveform cuts; they do not alter stored audio, FLAC exports or steady playback levels.
@@ -94,6 +96,8 @@ Native Stereo, Direct and HRTF also run a short **silent device guard before the
 `headphone-restart-tests <output-folder>` checks repeated loud-to-silent renderer replacement, consecutive 5.1 FLAC tracks, guards at different device latencies, cancellation and source-clock alignment. Together with `headphone-buffer-tests`, it verifies the PCM and silent Windows output path without playing audible test tones.
 
 `playback-transport-tests <output-folder>` exercises the actual view model and silent Windows output through repeated Pause/Play, paused seeks and Stop, with a connected viewer that never reads. It checks that resume reuses the output device and the paused clock stays frozen. `playback-observer-stress <output-folder>` deliberately delays meter/visualizer callbacks by 260 ms while adding CPU load; audio must continue even when the observation queue overflows. These are digital continuity and command-response checks, not measurements of perceived sound latency.
+
+`playback-gui-tests <output-folder> [dvd-drive]` adds the actual WPF bindings, meters and Headphones window. With no source it generates a 5.1 FLAC; with the test DVD it checks title 2's six-channel stream. It checks a frozen paused device clock, device-clock advancement after resume, and zero empty-buffer events in Stereo and HRTF. Windows receives the rendered PCM attenuated by 160 dB, exercising nonzero buffer submission without audible test playback. Delivery logs separately report decoder waits, rendering, device writes, observations and pause/resume command application. Audio closes before observer shutdown or log writing, preventing that optional work from delaying its final fade/reset.
 
 ## Viewer synchronization
 

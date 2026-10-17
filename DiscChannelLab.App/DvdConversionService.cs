@@ -64,7 +64,7 @@ public sealed class DvdConversionService(ToolPaths paths, ProcessRunner runner, 
                     firstChapterTicks = playlist.ChapterStarts[chapterRange.Start - 1];
                     arguments.AddRange(["-f", "dvdvideo", "-title", playlist.DvdVideoTitle.ToString(),
                                         "-chapter_start", chapterRange.Start.ToString(),
-                                        "-chapter_end", chapterRange.End.ToString(), "-i", disc.Root]);
+                                        "-chapter_end", chapterRange.End.ToString(), "-i", DvdVideoReader.InputPath(disc.Root)]);
                 }
                 else throw new InvalidDataException("DVD のタイトル情報がありません。");
 

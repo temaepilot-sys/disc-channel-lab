@@ -187,7 +187,7 @@ public sealed partial class FfprobeService
             var count = playlist.EffectiveChapterStarts.Count;
             var chapter = sample == 0 ? 1 : sample == 1 ? Math.Max(1, count / 2) : Math.Max(1, count);
             args.AddRange(["-f", "dvdvideo", "-title", playlist.DvdVideoTitle.ToString(),
-                "-chapter_start", chapter.ToString(), "-chapter_end", chapter.ToString(), "-i", root]);
+                "-chapter_start", chapter.ToString(), "-chapter_end", chapter.ToString(), "-i", DvdVideoReader.InputPath(root)]);
         }
         else args.AddRange(["-f", "mpeg", "-i", "pipe:0"]);
         args.AddRange(["-map", $"0:{index}", "-t", "0.2", "-c:a", "pcm_s16le", "-f", "null", "NUL"]);

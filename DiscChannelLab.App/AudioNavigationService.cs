@@ -110,7 +110,7 @@ public sealed partial class AudioNavigationService(ToolPaths paths, ProcessRunne
             }
             sourceStart = playlist.ChapterStarts[first - 1];
             inputArgs.AddRange(["-f", "dvdvideo", "-title", playlist.DvdVideoTitle.ToString(),
-                "-chapter_start", first.ToString(), "-chapter_end", last.ToString(), "-i", disc.Root]);
+                "-chapter_start", first.ToString(), "-chapter_end", last.ToString(), "-i", DvdVideoReader.InputPath(disc.Root)]);
         }
         else throw new InvalidDataException("DVD の再生元がありません。");
         var skipSamples = ConversionService.ToSample(startTicks - sourceStart, 48000);
@@ -459,7 +459,7 @@ public sealed partial class AudioNavigationService(ToolPaths paths, ProcessRunne
                 if (playlist.ChapterStarts[i] < track.EndTicks) last = i + 1;
             }
             arguments.AddRange(["-nostdin", "-f", "dvdvideo", "-title", playlist.DvdVideoTitle.ToString(),
-                "-chapter_start", first.ToString(), "-chapter_end", last.ToString(), "-i", disc.Root,
+                "-chapter_start", first.ToString(), "-chapter_end", last.ToString(), "-i", DvdVideoReader.InputPath(disc.Root),
                 "-ss", ((track.StartTicks - playlist.ChapterStarts[first - 1]) / 45000m).ToString(CultureInfo.InvariantCulture),
                 "-t", track.DurationSeconds.ToString(CultureInfo.InvariantCulture), "-map", $"0:{stream.Index}",
                 "-vn", "-sn", "-dn", "-af", "silencedetect=noise=-45dB:duration=0.8", "-f", "null", "-"]);

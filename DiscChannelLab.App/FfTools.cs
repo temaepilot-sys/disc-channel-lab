@@ -193,7 +193,7 @@ public sealed partial class FfprobeService(ToolPaths paths, ProcessRunner runner
         else if (playlist.Format == DiscFormat.DvdVideo)
             result = await runner.RunAsync(paths.Ffprobe,
                 ["-v", "error", "-f", "dvdvideo", "-title", playlist.DvdVideoTitle.ToString(),
-                 "-of", "json", "-show_streams", "-show_chapters", "-show_format", root], token);
+                 "-of", "json", "-show_streams", "-show_chapters", "-show_format", DvdVideoReader.InputPath(root)], token);
         else
             result = await runner.RunAsync(paths.Ffprobe,
                 ["-v", "error", "-of", "json", "-show_streams", "-show_chapters", "-show_format", "-playlist", playlist.Id.ToString(), BlurayInput(root)], token);
@@ -231,7 +231,7 @@ public sealed partial class FfprobeService(ToolPaths paths, ProcessRunner runner
     {
         var result = await runner.RunAsync(paths.Ffprobe,
             ["-v", "error", "-f", "dvdvideo", "-title", title.ToString(),
-             "-of", "json", "-show_streams", "-show_chapters", "-show_format", root], token);
+             "-of", "json", "-show_streams", "-show_chapters", "-show_format", DvdVideoReader.InputPath(root)], token);
         using var document = JsonDocument.Parse(result.Output);
         var json = document.RootElement;
         var duration = json.TryGetProperty("format", out var format) ? ParseTicks(String(format, "duration")) ?? 0 : 0;
@@ -249,7 +249,7 @@ public sealed partial class FfprobeService(ToolPaths paths, ProcessRunner runner
     {
         var result = await runner.RunAsync(paths.Ffmpeg,
             ["-hide_banner", "-nostdin", "-v", "error", "-progress", "pipe:1",
-             "-f", "dvdvideo", "-title", title.ToString(), "-i", root,
+             "-f", "dvdvideo", "-title", title.ToString(), "-i", DvdVideoReader.InputPath(root),
              "-map", "0:a:0", "-t", "0.25", "-f", "null", "NUL"], token);
         return result.Output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
             .Any(line => line.StartsWith("out_time_us=", StringComparison.Ordinal) &&

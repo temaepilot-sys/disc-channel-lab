@@ -10,6 +10,11 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Threading;
 
+if (args.Length is 2 or 3 && args[0] == "playback-gui-tests")
+{
+    try { PlaybackGuiTests.Run(args[1], args.Length == 3 ? args[2] : null); return 0; }
+    catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
+}
 if (args is ["playback-observer-stress", var playbackObserverOutput])
 {
     try { await HeadphoneBufferTests.IsolationAsync(playbackObserverOutput); return 0; }

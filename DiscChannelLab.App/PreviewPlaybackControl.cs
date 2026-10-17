@@ -8,6 +8,10 @@ public sealed class PreviewPlaybackControl : IDisposable
     readonly AutoResetEvent wake = new(false);
     int attached, requestedPause, paused, started;
     long playedFrames, sampledAt;
+    long requestedAt, pauseTicks;
+    public long PauseTicks => Interlocked.Read(ref pauseTicks);
+    public double PauseAppliedMilliseconds { get; private set; }
+    public double ResumeAppliedMilliseconds { get; private set; }
     public bool CanPause => Volatile.Read(ref attached) == 1;
     public bool IsPaused => Volatile.Read(ref requestedPause) == 1;
     public bool DevicePaused => Volatile.Read(ref paused) == 1;
@@ -18,10 +22,11 @@ public sealed class PreviewPlaybackControl : IDisposable
     public bool Pause()
     {
         if (!CanPause) return false;
+        Interlocked.Exchange(ref requestedAt, Stopwatch.GetTimestamp());
         Volatile.Write(ref requestedPause, 1); Signal(); return true;
     }
     void Signal() { try { wake.Set(); } catch (ObjectDisposedException) { } }
-    public void Resume() { Volatile.Write(ref requestedPause, 0); Signal(); }
+    public void Resume() { Interlocked.Exchange(ref requestedAt, Stopwatch.GetTimestamp()); Volatile.Write(ref requestedPause, 0); Signal(); }
     internal void Attach(IHeadphoneOutput output) { Sample(output); Volatile.Write(ref attached, output.SupportsPause ? 1 : 0); }
     internal void Sample(IHeadphoneOutput output)
     {
@@ -33,13 +38,16 @@ public sealed class PreviewPlaybackControl : IDisposable
     {
         if (!IsPaused) return;
         output.Pause(); Sample(output); Volatile.Write(ref paused, 1);
+        long pauseAt = Stopwatch.GetTimestamp();
+        PauseAppliedMilliseconds = Stopwatch.GetElapsedTime(Interlocked.Read(ref requestedAt), pauseAt).TotalMilliseconds;
         try
         {
             while (IsPaused) { token.ThrowIfCancellationRequested(); wake.WaitOne(10); }
             token.ThrowIfCancellationRequested();
             output.Resume(); Sample(output);
+            ResumeAppliedMilliseconds = Stopwatch.GetElapsedTime(Interlocked.Read(ref requestedAt)).TotalMilliseconds;
         }
-        finally { Volatile.Write(ref paused, 0); }
+        finally { Interlocked.Add(ref pauseTicks, Stopwatch.GetTimestamp() - pauseAt); Volatile.Write(ref paused, 0); }
     }
     internal void Detach() { Volatile.Write(ref attached, 0); Signal(); }
     public void Dispose() { Volatile.Write(ref attached, 0); wake.Dispose(); }

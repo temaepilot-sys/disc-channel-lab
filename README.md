@@ -195,7 +195,7 @@ Existing selected-track export, edited boundaries, tags and disc/title folder or
 ## Requirements
 
 - Windows x64.
-- .NET 10 SDK to build; .NET 10 Desktop Runtime to run the public player. The viewer also needs ASP.NET Core Runtime 10 (x64) and Microsoft Edge with WebGL.
+- .NET 10 SDK to build; .NET 10 Desktop Runtime to run the public player. The viewer also needs ASP.NET Core Runtime 10 (x64) and a supported Firefox- or Chromium-based browser with WebGL. Choose a detected browser when opening the viewer; it uses a separate viewer profile.
 - An FFmpeg installation supplied by the user. `ffmpeg.exe` and `ffprobe.exe` are required; `ffplay.exe` is required for ordinary preview playback. Direct/HRTF headphone playback uses Windows audio output. Place them in a `tools` folder beside the app or make them available on `PATH`.
 
 For supported multichannel stereo playback, Input/Post/Output meters are measured together from PCM in the app. Other playback paths use FFmpeg's `astats` and `ametadata` filters; those meters remain unavailable if the filters are missing.

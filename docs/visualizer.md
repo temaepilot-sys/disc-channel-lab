@@ -53,11 +53,23 @@ For a separately built viewer, select its `DiscChannelLab.Visualizer.exe` when p
 
 ### Requirements
 
-- Windows x64, Microsoft Edge with WebGL support.
+- Windows x64 and a supported Firefox- or Chromium-based browser with WebGL support.
 - .NET 10 SDK to build. The public output is framework-dependent: install both the **.NET 10 Desktop Runtime** and **ASP.NET Core Runtime 10**, x64, to run the player and viewer. Check that both runtimes are installed when moving the public build to another PC.
 - DiscChannelLab uses the user’s FFmpeg tools for disc playback. The viewer itself needs no FFmpeg installation or bundled codec.
 
+## Browser choice
+
+Opening **3D Viewer** detects installed browsers and shows a chooser. Nothing is selected automatically on first use. Your last explicit choice is remembered in `SpaceSketch/BrowserSettings.json`, and the chooser appears again on the next viewer launch. **Detect again** rescans installations; **Browse…** can select the actual browser executable from a portable installation. If the saved browser is missing, choose another yourself; the viewer never silently falls back to Edge, Chrome or the system default. Cancel closes the launcher without opening a browser.
+
+Firefox, LibreWolf, Waterfox, Floorp and Zen use a separate Firefox-style viewer profile. Edge, Chrome, Chromium, Brave, Vivaldi and Opera use a separate Chromium-style viewer profile. Profiles live under `SpaceSketch/cache/browser-profiles`, separate for each browser installation. The viewer does not open your normal signed-in browser profile or change the Windows default browser. Firefox account services are disabled in its viewer profile; Chromium is started with sync disabled. Startup welcome/default-browser prompts and background services are suppressed where supported. Browser-specific behavior and policies can change; this is not a network firewall or a guarantee that the browser makes no background requests.
+
+The launch parameters follow [Firefox's profile/instance documentation](https://firefox-source-docs.mozilla.org/browser/CommandLineParameters.html) and [Chromium's sync switch](https://chromium.googlesource.com/chromium/src/+/HEAD/components/sync/base/command_line_switches.h). Browser selection does not change the player's audio engine or the local PCM link.
+
 ## What the mixer changes
+
+### Speaker switches
+
+Lab speaker circles and mixer Mute share the same channel state. In the 3D viewer, muted or Solo-excluded speakers and labels become dark. **Post-mix channels** stops their particles, beams and LFE field immediately, including old particles/look-ahead; unmuting resumes emission without reopening the viewer. **Input channels** intentionally retains the original recording. **Final stereo output** shows the mixed left/right outputs: muting an FL input does not hide other channels still contributing to that left output. Speaker state changes preserve the camera and other channels' particles.
 
 Use **Signal** to choose what is analyzed:
 

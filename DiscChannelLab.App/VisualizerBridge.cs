@@ -21,7 +21,9 @@ public sealed record PreviewPcmTap(Func<bool> Enabled, Action<PreviewPcmChunk> P
 }
 
 public sealed record VisualizerClock(int Version, int Epoch, string Name, string Codec, int SourceSampleRate,
-    double Position, double Duration, bool Playing, long ClockMilliseconds, HeadPose? Head = null, string? HeadphoneRenderer = null, HeadphoneScene? Scene = null);
+    double Position, double Duration, bool Playing, long ClockMilliseconds, HeadPose? Head = null, string? HeadphoneRenderer = null, HeadphoneScene? Scene = null,
+    SpeakerPlaybackState[]? SpeakerStates = null);
+public sealed record SpeakerPlaybackState(string Code, bool Muted, bool Solo, bool Enabled);
 public sealed record HeadphoneSpeaker(string Code, double X, double Y, double Z);
 public sealed record HeadphoneScene(bool RotateWorld, double FrontAngle, HeadphoneSpeaker[] Speakers);
 
@@ -57,17 +59,19 @@ public sealed class VisualizerBridge : IDisposable
         _viewer?.Dispose();
         var start = new ProcessStartInfo(executable) { UseShellExecute = false };
         start.ArgumentList.Add("--live-pipe"); start.ArgumentList.Add(PipeName);
+        start.ArgumentList.Add("--language"); start.ArgumentList.Add(LanguageService.Instance.IsJapanese ? "ja" : "en");
         _viewer = Process.Start(start) ?? throw new IOException("3D viewer を起動できません。");
     }
 
-    public void PublishClock(int epoch, string name, string codec, int sampleRate, double position, double duration, bool playing, IReadOnlyCollection<string>? channels = null)
+    public void PublishClock(int epoch, string name, string codec, int sampleRate, double position, double duration, bool playing, IReadOnlyCollection<string>? channels = null,
+        SpeakerPlaybackState[]? speakerStates = null)
     {
         if (!_connected) return;
         var session = HeadphoneSession.Current;
         var options = session.Options;
         _messages.Writer.TryWrite(new VisualizerClock(1, epoch, name, codec, sampleRate, position, duration, playing, Environment.TickCount64,
             options.Enabled ? session.Pose : null, options.Enabled ? options.Method.ToString() : null,
-            options.Enabled ? HeadphoneGeometry.Scene(channels ?? ["FL", "FR", "FC", "LFE", "SL", "SR"], options) : null));
+            options.Enabled ? HeadphoneGeometry.Scene(channels ?? ["FL", "FR", "FC", "LFE", "SL", "SR"], options) : null, speakerStates));
     }
     public void PublishPcm(int epoch, PreviewPcmChunk frame)
     {

@@ -6,6 +6,11 @@ using System.Text.Json;
 using Disc2Flac;
 using DiscChannelLab.Visualizer;
 
+if (args is ["--browser-tests", var browserTestFolder])
+{
+    BrowserTests.Run(browserTestFolder);
+    return;
+}
 if (args.Length == 2 && args[0] == "--write-demo")
 {
     string path = Path.GetFullPath(args[1]);
@@ -59,10 +64,13 @@ using (var destination = new MemoryStream())
 // Exercise the real receiver parser and STFT with actual mixer packets.
 using (var receiver = new LiveReceiver(null, settings, Console.WriteLine))
 {
-    receiver.Consume(VisualizerBridge.Encode(new VisualizerClock(1, 7, "Synthetic 5.1", "PCM", 48000, .5, 1, false, Environment.TickCount64)));
+    var speakerStates = codes.Select(code => new SpeakerPlaybackState(code, code == "FC", false, code != "FC")).ToArray();
+    receiver.Consume(VisualizerBridge.Encode(new VisualizerClock(1, 7, "Synthetic 5.1", "PCM", 48000, .5, 1, false, Environment.TickCount64, SpeakerStates: speakerStates)));
     foreach (var frame in tapped.Frames) receiver.Consume(VisualizerBridge.Encode((7, frame)));
     using var snapshot = JsonDocument.Parse(JsonSerializer.Serialize(receiver.Snapshot()));
     var data = snapshot.RootElement;
+    var centerState = data.GetProperty("speakerStates").EnumerateArray().Single(s => s.GetProperty("code").GetString() == "FC");
+    Check(centerState.GetProperty("muted").GetBoolean() && !centerState.GetProperty("enabled").GetBoolean(), "Speaker Mute state survives the player protocol and receiver snapshot");
     Check(data.GetProperty("hasData").GetBoolean(), "Timestamped live STFT frame available");
     var input = data.GetProperty("input").EnumerateArray().Select(x => x.GetSingle()).ToArray();
     var post = data.GetProperty("post").EnumerateArray().Select(x => x.GetSingle()).ToArray();
@@ -207,7 +215,8 @@ if (args.Length == 2 && args[0] == "--host")
         Check(bridge.IsConnected, "Separate viewer process connects to the player's pipe");
         var script = await client.GetStringAsync("/app.js");
         Check(script.Contains("uniform mediump float uPoint") && script.Contains("function enterLive"), "Published assets include the shader fix and live controls");
-        bridge.PublishClock(21, "Published host integration", "PCM", 48000, .25, 1, false);
+        bridge.PublishClock(21, "Published host integration", "PCM", 48000, .25, 1, false, codes,
+            codes.Select(code => new SpeakerPlaybackState(code, code == "FC", false, code != "FC")).ToArray());
         foreach (var frame in tapped.Frames) { bridge.PublishPcm(21, frame); await Task.Delay(10); }
         using var response = await client.PostAsync("/api/live", null);
         response.EnsureSuccessStatusCode();
@@ -215,6 +224,8 @@ if (args.Length == 2 && args[0] == "--host")
         var data = snapshot.RootElement;
         Check(data.GetProperty("configured").GetBoolean() && data.GetProperty("connected").GetBoolean() && data.GetProperty("hasData").GetBoolean(), "Published HTTP API exposes live analysis from actual IPC");
         Check(data.GetProperty("channels").GetArrayLength() == 6 && data.GetProperty("output").GetArrayLength() == 32, "Browser receives original channels and final stereo spectrum");
+        Check(data.GetProperty("speakerStates").EnumerateArray().Single(s => s.GetProperty("code").GetString() == "FC").GetProperty("muted").GetBoolean(),
+            "Published browser API exposes the muted speaker state received from the player");
         using var end = await client.PostAsync("/api/quit", null);
         await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
         Check(process.ExitCode == 0, "Published host closes cleanly");

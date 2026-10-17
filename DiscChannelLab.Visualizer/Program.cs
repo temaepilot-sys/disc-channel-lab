@@ -17,6 +17,14 @@ void Log(string message) => File.AppendAllText(log, $"{DateTime.Now:O} {message}
 
 try
 {
+    ViewerBrowser? browser = null;
+    if (!args.Contains("--headless"))
+    {
+        var language = Array.IndexOf(args, "--language");
+        browser = await BrowserSelectionDialog.ChooseAsync(Path.Combine(home, "BrowserSettings.json"),
+            language >= 0 && language + 1 < args.Length && args[language + 1] == "ja");
+        if (browser is null) return 0;
+    }
     var settingsPath = Path.Combine(home, "AudioVisualizationSettings.json");
     var jsonOptions = new JsonSerializerOptions { WriteIndented = true };
     var settings = File.Exists(settingsPath)
@@ -101,19 +109,10 @@ try
     string page = address + "/#" + secret;
     File.WriteAllText(Path.Combine(cache, "endpoint.json"), JsonSerializer.Serialize(new { url = page, address, token = secret, pid = Environment.ProcessId }));
     Log("Started local visualizer");
-    if (!args.Contains("--headless"))
+    if (browser is not null)
     {
-        string edge = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Microsoft/Edge/Application/msedge.exe");
-        if (File.Exists(edge))
-        {
-            var start = new ProcessStartInfo(edge) { UseShellExecute = false };
-            start.ArgumentList.Add("--app=" + page);
-            start.ArgumentList.Add("--user-data-dir=" + Path.Combine(cache, "browser"));
-            start.ArgumentList.Add("--no-first-run");
-            start.ArgumentList.Add("--window-size=1360,900");
-            Process.Start(start)?.Dispose();
-        }
-        else Process.Start(new ProcessStartInfo(page) { UseShellExecute = true })?.Dispose();
+        BrowserLauncher.PrepareProfile(browser, cache);
+        Process.Start(BrowserLauncher.CreateStartInfo(browser, page, cache))?.Dispose();
     }
     _ = Task.Run(async () =>
     {

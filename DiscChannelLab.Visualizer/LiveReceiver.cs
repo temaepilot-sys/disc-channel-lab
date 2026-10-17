@@ -6,7 +6,9 @@ using System.Text.Json;
 namespace DiscChannelLab.Visualizer;
 
 public sealed record PlayerClock(int Version, int Epoch, string Name, string Codec, int SourceSampleRate,
-    double Position, double Duration, bool Playing, long ClockMilliseconds, HeadPoseValue? Head = null, string? HeadphoneRenderer = null, HeadphoneSceneValue? Scene = null);
+    double Position, double Duration, bool Playing, long ClockMilliseconds, HeadPoseValue? Head = null, string? HeadphoneRenderer = null, HeadphoneSceneValue? Scene = null,
+    SpeakerPlaybackStateValue[]? SpeakerStates = null);
+public sealed record SpeakerPlaybackStateValue(string Code, bool Muted, bool Solo, bool Enabled);
 public sealed record HeadPoseValue(double Yaw, double Pitch, double Roll);
 public sealed record HeadphoneSpeakerValue(string Code, double X, double Y, double Z);
 public sealed record HeadphoneSceneValue(bool RotateWorld, double FrontAngle, HeadphoneSpeakerValue[] Speakers);
@@ -78,6 +80,9 @@ public sealed class LiveReceiver(string? pipeName, VisualizationSettings setting
                 throw new InvalidDataException("Unsupported link protocol or invalid playback position.");
             if (next.Head is { } head && (!double.IsFinite(head.Yaw) || !double.IsFinite(head.Pitch) || !double.IsFinite(head.Roll)))
                 throw new InvalidDataException("Invalid head orientation.");
+            if (next.SpeakerStates is { } states && (states.Length > 8 || states.Any(s => s is null) || states.Select(s => s.Code).Distinct().Count() != states.Length ||
+                states.Any(s => s.Code is not ("FL" or "FR" or "FC" or "LFE" or "SL" or "SR" or "BL" or "BR" or "BC" or "FLC" or "FRC" or "TFL" or "TFR"))))
+                throw new InvalidDataException("Invalid speaker playback states.");
             if (next.Scene is { } scene && (scene.Speakers is null || scene.Speakers.Length > 8 || !double.IsFinite(scene.FrontAngle) ||
                 scene.FrontAngle is < 15 or > 90 || scene.Speakers.Any(p => !double.IsFinite(p.X) || !double.IsFinite(p.Y) || !double.IsFinite(p.Z) ||
                     p.X * p.X + p.Y * p.Y + p.Z * p.Z is < .99 or > 1.01)))
@@ -195,6 +200,7 @@ public sealed class LiveReceiver(string? pipeName, VisualizationSettings setting
                 position, duration = clock?.Duration ?? 0, name = clock?.Name ?? "DiscChannelLab", codec = clock?.Codec ?? "",
                 sourceSampleRate = clock?.SourceSampleRate ?? 48000, sampleRate = 48000, channels,
                 head = clock?.Head, headphoneRenderer = clock?.HeadphoneRenderer, scene = clock?.Scene,
+                speakerStates = clock?.SpeakerStates?.Select(s => new { code = s.Code, muted = s.Muted, solo = s.Solo, enabled = s.Enabled }).ToArray(),
                 bandCount = settings.BandCount, centers = settings.Centers, dispersion = settings.Centers.Select(DispersionAngleMapper.Map).ToArray(),
                 input = values.Take(width).ToArray(), post = values.Skip(width).Take(width).ToArray(), output = values.Skip(width * 2).Take(settings.BandCount * 2).ToArray(),
                 fastInput = fastValues.Take(width).ToArray(), fastPost = fastValues.Skip(width).Take(width).ToArray(),

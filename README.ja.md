@@ -193,7 +193,7 @@ dotnet run --project DiscChannelLab.Verify -- flac-sample-tests C:\test\flac-tes
 ## 動作に必要なもの
 
 - Windows x64。
-- ビルドには .NET 10 SDK、公開用本体の実行には .NET 10 Desktop Runtime。ビューアーにはx64のASP.NET Core Runtime 10とWebGL対応Microsoft Edgeも必要です。
+- ビルドには .NET 10 SDK、公開用本体の実行には .NET 10 Desktop Runtime。ビューアーにはx64のASP.NET Core Runtime 10と、WebGL対応のFirefox系またはChromium系ブラウザーも必要です。起動時に検出したブラウザーから選択し、ビューアー専用のプロファイルを使用します。
 - 利用者が用意した FFmpeg。変換には `ffmpeg.exe` と `ffprobe.exe`、通常試聴には `ffplay.exe` が必要です。Direct／HRTF試聴はWindows音声出力を使用します。アプリと同じ場所の `tools` フォルダーに置くか、`PATH` に追加してください。
 
 対応するマルチチャンネルのステレオ試聴では、入力・調整後・出力のピークをアプリ内の同じPCM区間から計測します。それ以外の再生経路は FFmpeg の `astats` と `ametadata` フィルターを使い、これらがない場合はメーターを更新できません。
@@ -212,7 +212,7 @@ python fetch-steamaudio.py
 ./build.ps1
 ```
 
-ビルド時に`artifacts/public-win-x64/SpaceSketch`へビューアーも作成します。本体の「3D Viewer」から起動できます。ビューアーの実行には、Desktop Runtimeに加えてx64のASP.NET Core Runtime 10とMicrosoft Edgeが必要です。
+ビルド時に`artifacts/public-win-x64/SpaceSketch`へビューアーも作成します。本体の「3D Viewer」から起動できます。ビューアーの実行には、Desktop Runtimeに加えてx64のASP.NET Core Runtime 10と、WebGL対応のFirefox系またはChromium系ブラウザーが必要です。
 
 `artifacts/public-win-x64` に .NET ランタイムと FFmpeg を含まない複数ファイル構成のアプリができます。.NET 10 Desktop Runtime と FFmpeg を別途用意して `DiscChannelLab.exe` を実行してください。
 

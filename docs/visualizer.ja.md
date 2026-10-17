@@ -53,11 +53,21 @@ LFEは**リスナーの足元中央から水平360°全周**へ放射し、Sprea
 
 ### 動作条件
 
-- Windows x64、WebGLが使えるMicrosoft Edge。
+- Windows x64と、WebGLが使えるFirefox系またはChromium系の対応ブラウザー。
 - ビルドには.NET 10 SDK。公開用ビルドの実行には、x64の**.NET 10 Desktop Runtime**と**ASP.NET Core Runtime 10**が必要です。別のPCへ持ち出す場合は両方の導入を確認してください。
 - 本体のディスク再生には利用者が用意したFFmpegを使います。ビューアー自体にはFFmpegや追加のコーデックは不要です。
 
+## ブラウザーの選択
+
+**3D Viewer**を開くと、インストール済みブラウザーを検出して選択画面を表示します。初回は自動選択せず、ユーザーが選んだブラウザーを`SpaceSketch/BrowserSettings.json`へ記憶します。次回も選択画面で変更できます。「再検出」で再スキャン、「参照」でポータブル版のブラウザー本体のEXEも指定できます。前回のブラウザーがなくなった場合も、Edge・Chrome・Windowsの既定ブラウザーへ勝手に切り替えません。キャンセル時はブラウザーを開かず終了します。
+
+Firefox・LibreWolf・Waterfox・Floorp・Zenと、Chromium系のEdge・Chrome・Chromium・Brave・Vivaldi・Operaを検出対象とします。起動には`SpaceSketch/cache/browser-profiles`内のブラウザーごとに分けた専用プロファイルを使い、普段のログイン済みプロファイルは開きません。Windowsの既定ブラウザーも変更しません。Firefoxでは専用プロファイルのアカウント機能を無効化し、Chromium系では同期を無効にする起動引数を渡します。初回案内・既定ブラウザー確認・バックグラウンド機能も対応範囲で抑制します。ブラウザーや管理ポリシーによって挙動は異なり、ブラウザー自身の通信を完全に遮断する機能ではありません。
+
+起動方法は[Firefox公式のプロファイル・別インスタンス指定](https://firefox-source-docs.mozilla.org/browser/CommandLineParameters.html)と[Chromiumの同期無効化引数](https://chromium.googlesource.com/chromium/src/+/HEAD/components/sync/base/command_line_switches.h)を参照しています。ブラウザーを変更しても、本体の再生方式やローカル音声連携は変わりません。
+
 ## ミキサーの反映範囲
+
+Labのスピーカーの丸とミキサーのMuteは同じチャンネル状態を操作します。3Dビューでも、MuteやSoloで抑制されたスピーカーとラベルを暗くします。**Post-mix channels**では古い粒子や先読みデータが残っていても、そのチャンネルの粒子・ビーム・LFEの床面表現を止めます。解除するとビューを開き直さず再開します。カメラや他チャンネルの粒子は保ちます。**Input channels**は収録された元の音声を表示します。**Final stereo output**は合成後の左右出力なので、FL入力のMuteだけで、Centerなどから左出力に残る音まで非表示にはしません。
 
 **Signal**で解析対象を選びます。
 

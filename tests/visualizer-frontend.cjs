@@ -46,6 +46,7 @@ function element(id) { if (!elements.has(id)) elements.set(id, new Element(id));
 for (const id of ['grid', 'names', 'lfe']) element(id).checked = true;
 element('density').value = '1.3'; element('tail').value = '1'; element('volume').value = '25'; element('view').value = 'orbit';
 element('analysis-mode').value = 'post';
+element('sync-reference').options = [{disabled: false}, {disabled: false}];
 element('spread').value = '20'; element('particle-size').value = '1'; element('transparency').value = '0';
 element('notice').hidden = true;
 const audioSources = [];
@@ -563,11 +564,40 @@ function tick(seconds) { for (let i = 0; i < Math.ceil(seconds * 60); i++) { now
   renderer.lightLevels.fill(1); renderer.draw(pulseTime); assert.equal(renderer.vertices[6],sourceTimedAlpha, 'Speaker sync keeps its original particle brightness');
   renderer.syncReference='listener'; adjust('transparency',100); renderer.draw(pulseTime); assert.equal(renderer.vertices[6],0);
   adjust('transparency',0);
+  // Channel switches must update an existing scene without a seek, geometry reset or PCM look-ahead refresh.
+  const switchCodes = ['FL','FR','FC','LFE','SL','SR'];
+  livePayload = {configured:true, connected:true, playing:true, hasData:true, epoch:90, revision:90,
+    position:1, duration:100, name:'Speaker switches', codec:'PCM', sourceSampleRate:48000,
+    channels:switchCodes, bandCount:16, centers:Array.from({length:16},(_,i)=>20*1000**((i+.5)/16)), dispersion:new Array(16).fill(30),
+    input:new Array(96).fill(.8), post:new Array(96).fill(.8), output:new Array(32).fill(.8),
+    speakerStates:switchCodes.map(code=>({code,muted:false,solo:false,enabled:true}))};
+  element('analysis-mode').value='post'; await element('follow').onclick(); await pollLive();
+  element('sync-reference').value='speaker'; element('sync-reference').onchange(); tick(.12);
+  assert(Array.from({length:renderer.count},(_,p)=>renderer.data[p*stride+14]).includes(2), 'Center has particles before Mute');
+  const switchCamera = JSON.stringify(renderer.camera);
+  livePayload.speakerStates[2]={code:'FC',muted:true,solo:false,enabled:false};
+  livePayload.speakerStates[3]={code:'LFE',muted:true,solo:false,enabled:false};
+  await pollLive(); tick(.1);
+  assert(!renderer.speakers[2].enabled && renderer.speakers[2].muted && renderer.speakers[2].label.style.opacity==='.4', 'Muted speaker icon and label become dark');
+  assert(Array.from({length:renderer.count},(_,p)=>renderer.data[p*stride+14]).every(c=>c!==2&&c!==3), 'Post removes muted particles and blocks stale PCM emissions, including LFE');
+  assert.equal(JSON.stringify(renderer.camera),switchCamera,'Mute does not reset the camera');
+  renderer.lightLevels.fill(0); renderer.lightLevels.fill(.8,32,48); renderer.speakerBeams=true;
+  renderer.beamMesh.build(renderer, renderer.cameraPose().eye);
+  assert.equal(renderer.beamMesh.vertexCount,0,'Muted channels cannot retain old beams');
+  livePayload.speakerStates[2]={code:'FC',muted:false,solo:false,enabled:true}; await pollLive(); tick(.1);
+  assert(Array.from({length:renderer.count},(_,p)=>renderer.data[p*stride+14]).includes(2),'Unmute restores emission without restarting playback');
+  livePayload.speakerStates[0]={code:'FL',muted:false,solo:false,enabled:false};
+  livePayload.speakerStates[2]={code:'FC',muted:true,solo:false,enabled:false};
+  element('analysis-mode').value='input'; element('analysis-mode').onchange(); await pollLive(); tick(.1);
+  assert(Array.from({length:renderer.count},(_,p)=>renderer.data[p*stride+14]).includes(2),'Input still shows the original recording while the speaker is muted');
+  element('analysis-mode').value='output'; element('analysis-mode').onchange(); await pollLive(); tick(.1);
+  assert(renderer.speakers.every(s=>s.enabled),'Final stereo is not suppressed by the FL input switch');
   const result = { mode: 'Simulated APIs; GPU/audio-device validation still required', passed: ['Demo packet parsing', 'Explicit channels', 'Audio output clock compensation', 'Particles generated', 'Pause freezes time and particles', 'Seek clears old particles', 'Resume', 'All six camera matrices finite', 'Particle cap', 'Stop reset', 'Natural end'], particlesAt8Seconds: running.particles, drawCalls };
   result.passed.push('Shared shader uniform precision matches', 'Live mode produces no duplicate audio', 'Output mode has two channels', 'Muted Post / visible Input', 'Live pause and seek', 'Disconnected player stops', 'Return to demo mode');
   result.passed.push('Keyboard tilt reaches both poles without collapsed projection', 'Listener camera stays at its rear viewing position', 'Continuous keyboard rotation beyond 360 degrees', 'Keyboard release and focus respect controls', 'Camera movement works with paused audio');
   result.passed.push('Settings restored on startup without autoplay', 'Save/load all controls and exact camera', 'Settings requests retain authentication', 'Settings I/O errors preserve current state');
   result.passed.push('Hide/show UI and saved visibility leave playback unchanged');
+  result.passed.push('Speaker switches dim icons without resetting the camera', 'Muted Post particles, LFE and beams stop despite stale look-ahead', 'Unmute restores emission', 'Input preserves original audio and Final stereo preserves other-channel contributions');
   result.passed.push('Legacy settings default to listener sync and 2x speed', 'Particles begin at speakers using future spectra', 'Bass and treble arrive at the source timestamp', 'Speed 0.5x through 4x preserves arrival timing', 'Missing/stale forecast rejected', 'Mixer forecast revisions clear old trails', 'Sync reference and speed settings round-trip', 'Speaker sync keeps source-timed emission');
   result.passed.push('Listener-only brightness and adjustable size emphasis', 'Smooth local falloff without new stationary particles', 'Listener vibration remains bounded and freezes on pause', 'Emphasis preserves timing and transparency');
   result.passed.push('Listener preset looks toward the center from behind', 'Central bass, treble and LFE fit the listener view');

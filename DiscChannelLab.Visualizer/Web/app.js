@@ -186,6 +186,7 @@ class SpeakerBeamMesh {
     if (!scene.speakerBeams || scene.beamStrength <= 0 || scene.particleOpacity <= 0) return;
     const vertices = this.vertices;
     for (const item of this.items) {
+      if (scene.channelSuppressed(item.channel)) continue;
       const k = item.channel * scene.info.bandCount + item.band;
       const intensity = clamp(scene.lightLevels[k] || 0, 0, 1);
       if (intensity <= .005) continue;
@@ -299,10 +300,41 @@ class SpaceRenderer {
         : [Math.sin(angle) * Math.cos(elevation) * 3.5, headCenter[1] + Math.sin(elevation) * 3.5, -Math.cos(angle) * Math.cos(elevation) * 3.5];
       const label = document.createElement('div'); label.className = 'channel-label' + (code === 'LFE' ? ' lfe' : ''); label.textContent = code; $('labels').append(label);
       const direction = norm(sub([0, 1.05, 0], position)), side = norm(cross(direction, [0, 1, 0])), up = norm(cross(side, direction));
-      return { code, position, direction, side, up, label, azimuth: Math.atan2(-position[2], -position[0]), radius: Math.hypot(position[0], position[2]) };
+      return { code, position, direction, side, up, label, enabled: true, muted: false,
+        azimuth: Math.atan2(-position[2], -position[0]), radius: Math.hypot(position[0], position[2]) };
     });
     this.beamMesh.configure(this.speakers, info);
     this.buildScene();
+  }
+  channelSuppressed(channel) {
+    return liveMode && $('analysis-mode').value === 'post' && this.speakers[channel]?.enabled === false;
+  }
+  setSpeakerStates(states) {
+    let changed = false;
+    for (const speaker of this.speakers) {
+      // Final stereo speakers are outputs, not the FL/FR inputs: a muted input may still
+      // leave Center or Surround contributions audible in those outputs.
+      const state = $('analysis-mode').value === 'output' ? null : states?.find(s => s.code === speaker.code);
+      const enabled = state?.enabled !== false, muted = !!state?.muted;
+      changed ||= speaker.enabled !== enabled || speaker.muted !== muted;
+      speaker.enabled = enabled; speaker.muted = muted;
+      speaker.label.style.opacity = enabled ? '1' : '.4';
+      speaker.label.title = muted ? 'Mute' : enabled ? speaker.code : 'Suppressed by mixer / Solo';
+    }
+    if (!changed) return;
+    this.buildScene();
+    // Remove only muted Post particles, including particles emitted from old look-ahead.
+    // Input remains a view of the original, unmuted recording.
+    for (let p = 0; p < this.count;) {
+      if (this.channelSuppressed(this.data[p * PARTICLE_STRIDE + 14])) {
+        this.count--;
+        this.data.copyWithin(p * PARTICLE_STRIDE, this.count * PARTICLE_STRIDE, (this.count + 1) * PARTICLE_STRIDE);
+      } else p++;
+    }
+    for (let c = 0; c < this.speakers.length; c++) if (this.channelSuppressed(c)) {
+      const from = c * this.info.bandCount, to = from + this.info.bandCount;
+      this.budgets.fill(0, from, to); this.bands.fill(0, from, to); this.lightLevels.fill(0, from, to);
+    }
   }
   line(a, b, c = [.2, .33, .43], alpha = .45) { this.lines.push(...a, ...c, alpha, 1, ...b, ...c, alpha, 1); }
   circle(center, radius, color, alpha, plane = 'floor', steps = 80) {
@@ -320,7 +352,7 @@ class SpaceRenderer {
       for (let r = 1; r <= 5; r++) this.circle([0, .005, 0], r, [.2, .39, .46], .2);
     }
     for (const s of this.speakers) {
-      const col = s.code === 'LFE' ? [.48, .3, .24] : [.32, .49, .56];
+      const col = s.enabled === false ? [.18, .20, .23] : [.85, .48, .18];
       if (s.code === 'LFE') {
         this.circle(s.position, .3, col, .65);
         this.circle(s.position, .12, col, .65);
@@ -523,6 +555,7 @@ class SpaceRenderer {
     this.updateLightLevels(lightValues, dt);
     const density = Number($('density').value), step = Math.min(dt, .08);
     for (let c = 0; c < this.speakers.length; c++) for (let b = 0; b < clip.bandCount; b++) {
+      if (this.channelSuppressed(c)) { this.budgets[c * clip.bandCount + b] = 0; continue; }
       const k = c * clip.bandCount + b, intensity = this.bands[k];
       if (this.syncReference === 'listener' && this.speakers[c].code !== 'LFE') {
         // Same emitter, geometry and decay as Speaker mode. Only the sampled audio time differs.
@@ -574,7 +607,7 @@ class SpaceRenderer {
     const lfe = this.speakers.findIndex(s => s.code === 'LFE');
     if ($('lfe').checked && lfe >= 0 && this.bands.length && this.count) {
       let level = 0; for (let b = 0; b < this.info.bandCount; b++) if (this.info.centers[b] <= 160) level = Math.max(level, this.bands[lfe * this.info.bandCount + b]);
-      for (let r = 0; r < 4; r++) { const radius = ((time * .8 + r * 1.5) % 6); this.circle([0, .025, 0], radius, [.85, .23, .08], level * .2 * (1 - radius / 7), 'floor', 90); }
+      if (!this.channelSuppressed(lfe)) for (let r = 0; r < 4; r++) { const radius = ((time * .8 + r * 1.5) % 6); this.circle([0, .025, 0], radius, [.85, .23, .08], level * .2 * (1 - radius / 7), 'floor', 90); }
       if (this.lines.length) { const rings = new Float32Array(this.lines); gl.bufferData(gl.ARRAY_BUFFER, rings, gl.DYNAMIC_DRAW); gl.drawArrays(gl.LINES, 0, rings.length / 8); }
     }
     this.beamMesh.build(this, rotateWorld ? pointInRoom(pose.eye, liveState.head) : pose.eye);
@@ -617,7 +650,7 @@ try { renderer = new SpaceRenderer($('scene')); }
 catch (e) {
   // A graphics failure must not prevent demo audio playback.
   error('Could not start 3D rendering. Demo playback is still available.\n' + e.message);
-  renderer = { count: 0, bands: new Float32Array(0), clear() {}, setClip() {}, advance() {}, draw() {}, view() {}, rotate() {}, buildScene() {}, setSpread() {}, setSyncReference() {}, setParticleSpeed() {} };
+  renderer = { count: 0, bands: new Float32Array(0), clear() {}, setClip() {}, setSpeakerStates() {}, advance() {}, draw() {}, view() {}, rotate() {}, buildScene() {}, setSpread() {}, setSyncReference() {}, setParticleSpeed() {} };
 }
 
 function enterLive() {
@@ -664,6 +697,7 @@ function applyLive(state) {
     if (forecastReset || (reset && (state.playing || Math.abs(state.position - previousPosition) > .2)) || Math.abs(state.position - previousPosition) > .5) renderer.clear();
     if (reset || Math.abs(state.position - previousPosition) > .5) lastVisualTime = state.position;
   }
+  renderer.setSpeakerStates(state.speakerStates);
   playing = state.connected && state.playing;
   $('filename').textContent = state.name;
   $('format').textContent = `${state.codec || 'DiscChannelLab'} · ${(state.sourceSampleRate / 1000).toFixed(1)} kHz · ${state.channels.length ? state.channels.join(' / ') : 'Waiting for audio'}`;

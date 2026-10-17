@@ -183,7 +183,26 @@ internal static class HeadphoneUiTests
                 ClickSpeaker("FL");
                 Check(model.SelectedPreviewMode == PreviewAudioMode.Stereo && model.ExperimentalMixerEnabled && model.MixerStrips.Single(s => s.Code == "FL").Muted,
                     "Speaker Mute also works in ordinary stereo without changing the chosen playback mode");
-                ClickSpeaker("FL"); previewMode.SelectedValue = PreviewAudioMode.HeadphonesHrtf; Pump(Task.Delay(80));
+                using (var pipe = new System.IO.Pipes.NamedPipeClientStream(".", model.Visualization.PipeName, System.IO.Pipes.PipeDirection.In, System.IO.Pipes.PipeOptions.Asynchronous))
+                using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5)))
+                {
+                    model.Visualization.Start(); Pump(pipe.ConnectAsync(timeout.Token));
+                    for (int n = 0; n < 100 && !model.Visualization.IsConnected; n++) Pump(Task.Delay(10));
+                    JsonElement ReadSpeakerState()
+                    {
+                        var header = new byte[4]; Pump(pipe.ReadExactlyAsync(header.AsMemory(), timeout.Token).AsTask());
+                        var payload = new byte[BitConverter.ToInt32(header)]; Pump(pipe.ReadExactlyAsync(payload.AsMemory(), timeout.Token).AsTask());
+                        using var packet = JsonDocument.Parse(payload.AsMemory(1));
+                        return packet.RootElement.GetProperty("SpeakerStates").EnumerateArray().Single(s => s.GetProperty("Code").GetString() == "FL").Clone();
+                    }
+                    model.AdvancePlaybackClock(); var mutedState = ReadSpeakerState();
+                    Check(mutedState.GetProperty("Muted").GetBoolean() && !mutedState.GetProperty("Enabled").GetBoolean(),
+                        "A Lab circle click publishes the actual muted mixer state through the real 3D pipe");
+                    ClickSpeaker("FL"); model.AdvancePlaybackClock(); var activeState = ReadSpeakerState();
+                    Check(!activeState.GetProperty("Muted").GetBoolean() && activeState.GetProperty("Enabled").GetBoolean(),
+                        "Unmute reaches the 3D pipe without restarting playback or changing preview mode");
+                }
+                previewMode.SelectedValue = PreviewAudioMode.HeadphonesHrtf; Pump(Task.Delay(80));
                 lab.UpdateLayout();
                 var visual = (FrameworkElement)lab.Content;
                 ((Grid)visual).Background = lab.Background;

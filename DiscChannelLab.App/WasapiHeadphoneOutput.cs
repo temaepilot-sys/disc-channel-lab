@@ -11,6 +11,7 @@ public sealed class WasapiHeadphoneOutput : IHeadphoneOutput
     private readonly IMMDeviceEnumerator _enumerator = null!;
     private readonly AutoResetEvent _event = new(false);
     private bool _started;
+    private bool _initialized;
     private bool _disposed;
     public uint BufferFrames { get; }
     public long SubmittedFrames { get; private set; }
@@ -32,6 +33,7 @@ public sealed class WasapiHeadphoneOutput : IHeadphoneOutput
         var format = new WaveFormat { Tag = 3, Channels = 2, Rate = 48000, AverageBytes = 384000, BlockAlign = 8, Bits = 32 };
         // A small scheduling margin for shared-mode device periods, without queuing rendered audio far ahead.
         Marshal.ThrowExceptionForHR(_client.Initialize(0, 0x00040000 | 0x80000000 | 0x08000000, 300000, 0, ref format, IntPtr.Zero));
+        _initialized = true;
         Marshal.ThrowExceptionForHR(_client.GetBufferSize(out var size)); BufferFrames = size;
         if (size < HeadphoneRenderer.BlockSize) throw new InvalidOperationException("Audio endpoint buffer is too small.");
         Marshal.ThrowExceptionForHR(_client.SetEventHandle(_event.SafeWaitHandle.DangerousGetHandle()));
@@ -70,6 +72,9 @@ public sealed class WasapiHeadphoneOutput : IHeadphoneOutput
         if (_disposed) return;
         _disposed = true;
         if (_started) _client.Stop();
+        // Stop only pauses the endpoint. Reset explicitly drops all queued samples before
+        // releasing it, including a canceled startup that never reached Start().
+        if (_initialized) _client.Reset();
         if (_render is not null) Marshal.ReleaseComObject(_render);
         if (_client is not null) Marshal.ReleaseComObject(_client);
         if (_device is not null) Marshal.ReleaseComObject(_device);

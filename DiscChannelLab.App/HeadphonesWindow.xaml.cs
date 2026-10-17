@@ -99,7 +99,19 @@ public partial class HeadphonesWindow : Window
     {
         if (!_updating) _session.SetKeyboard(Yaw.Value, Pitch.Value, Roll.Value);
     }
-    private void Room_MouseDown(object sender, MouseButtonEventArgs e) => Room.Focus();
+    private void Room_MouseDown(object sender, MouseButtonEventArgs e)
+    {
+        Room.Focus();
+        if (!_model.CanUseExperimentalMixer ||
+            e.OriginalSource is not FrameworkElement { Tag: string code }) return;
+        var strip = _model.MixerStrips.FirstOrDefault(s => s.Code == code);
+        if (strip is null) return;
+        var muted = _model.ExperimentalMixerEnabled && strip.Muted;
+        _model.ExperimentalMixerEnabled = true;
+        strip.Muted = !muted;
+        e.Handled = true;
+        DrawRoom();
+    }
     private void Room_KeyDown(object sender, KeyEventArgs e)
     {
         if (e.Key == Key.Home) { _session.Recenter(); e.Handled = true; return; }
@@ -173,27 +185,46 @@ public partial class HeadphonesWindow : Window
         if (width < 20 || height < 20) return;
         Room.Children.Clear();
         var cx = width / 2; var cy = height / 2; var radius = Math.Max(40, Math.Min(width, height) / 2 - 48);
-        void Ellipse(double x, double y, double r, Brush fill, Brush? stroke = null, string? tag = null)
+        Ellipse Ellipse(double x, double y, double r, Brush fill, Brush? stroke = null, string? tag = null)
         {
             var shape = new Ellipse { Width = r * 2, Height = r * 2, Fill = fill, Stroke = stroke, StrokeThickness = 1, Tag = tag };
             Canvas.SetLeft(shape, x - r); Canvas.SetTop(shape, y - r); Room.Children.Add(shape);
+            return shape;
         }
         void Line(double x, double y, double xx, double yy, Brush color, double thick = 1, string? tag = null)
             => Room.Children.Add(new Line { X1 = x, Y1 = y, X2 = xx, Y2 = yy, Stroke = color, StrokeThickness = thick, Tag = tag });
         Ellipse(cx, cy, radius, Brushes.Transparent, new SolidColorBrush(Color.FromRgb(41, 60, 80)));
         Line(cx, cy - radius - 15, cx, cy + radius + 15, new SolidColorBrush(Color.FromRgb(26, 40, 55)));
         var channels = _model.SelectedStream is { } stream ? HeadphoneGeometry.Channels(stream) : ["FL", "FR", "FC", "LFE", "SL", "SR"];
+        var hasSolo = _model.ExperimentalMixerEnabled && _model.MixerStrips.Any(s => s.Solo);
         foreach (var code in channels)
         {
             var speaker = HeadphoneGeometry.DisplaySpeaker(code, _session.Pose, _session.Options, channels);
             var x = cx + radius * speaker.X; var y = cy - radius * speaker.Z;
             if (code == "LFE") { x = cx; y = cy + 38; }
             var meter = _model.ChannelMeters.FirstOrDefault(m => m.Code == code);
+            var strip = _model.MixerStrips.FirstOrDefault(s => s.Code == code);
+            var clickable = _model.CanUseExperimentalMixer && strip is not null;
+            var muted = _model.ExperimentalMixerEnabled && strip?.Muted == true;
+            var suppressed = muted || hasSolo && strip?.Solo != true;
             var strength = _model.IsPlaying && meter is not null ? meter.PeakPercent / 100 : 0;
-            var color = new SolidColorBrush(Color.FromRgb((byte)(45 + strength * 60), (byte)(85 + strength * 150), (byte)(105 + strength * 145)));
-            if (code != "LFE") Line(x, y, cx, cy, new SolidColorBrush(Color.FromArgb(60, 70, 170, 225)));
-            Ellipse(x, y, code == "LFE" ? 9 : 12, color, tag: code);
-            var label = new TextBlock { Text = code, Foreground = Brushes.White, FontSize = 12 };
+            var color = suppressed ? new SolidColorBrush(Color.FromRgb(49, 56, 66)) :
+                new SolidColorBrush(Color.FromRgb((byte)(176 + strength * 70), (byte)(96 + strength * 60), (byte)(34 + strength * 35)));
+            var outline = suppressed ? Brushes.SlateGray : Brushes.PeachPuff;
+            if (code != "LFE") Line(x, y, cx, cy, new SolidColorBrush(suppressed ? Color.FromArgb(35, 110, 110, 110) : Color.FromArgb(60, 240, 150, 65)));
+            var shape = Ellipse(x, y, code == "LFE" ? 9 : 12, color, outline, code);
+            var hint = !clickable ? HeadphoneText.T("Open a disc, ISO or audio file in the main window.") :
+                LanguageService.T(muted ? "クリックしてMute解除" : "クリックしてMute");
+            shape.Cursor = clickable ? Cursors.Hand : Cursors.Arrow;
+            shape.ToolTip = $"{code} · {hint}";
+            System.Windows.Automation.AutomationProperties.SetName(shape, $"{code} · {(muted ? "Mute" : "On")}");
+            if (muted)
+            {
+                Line(x - 6, y + 6, x + 6, y - 6, Brushes.LightGray, 2);
+                Room.Children[^1].IsHitTestVisible = false;
+            }
+            var label = new TextBlock { Text = code, Foreground = suppressed ? Brushes.SlateGray : Brushes.PeachPuff,
+                FontSize = 12, Tag = code, ToolTip = shape.ToolTip, Cursor = shape.Cursor };
             Canvas.SetLeft(label, x - 9); Canvas.SetTop(label, code == "LFE" ? y + 13 : y - 29); Room.Children.Add(label);
         }
         var yaw = _session.Options.UseTracker ? _session.Pose.Yaw * Math.PI / 180 : 0;

@@ -57,6 +57,8 @@
                     </WrapPanel>
                     <TextBlock Text="{local:Loc Key='部屋の図をクリック：← → 左右・↑ ↓ 上下・Q / E 傾き。Shiftで微調整。Homeで正面へ。'}"
                                FontSize="12" Foreground="{DynamicResource MutedBrush}"/>
+                    <TextBlock Text="{local:Loc Key='スピーカーの丸をクリック：Mute／解除（ミキサーと連動）。'}"
+                               FontSize="12" Margin="0,4,0,0" Foreground="{DynamicResource MutedBrush}"/>
                     <TextBlock x:Name="TrackingStatus" Margin="0,5,0,0"/>
                     <TextBlock Text="{local:Loc Key='ミキサーのレベル・Mute・Solo・極性反転を使用します。ヘッドフォンの左右配分は各スピーカーの方向で決まります。'}"
                                FontSize="12" Margin="0,8,0,0" Foreground="{DynamicResource MutedBrush}"/>

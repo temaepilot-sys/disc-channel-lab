@@ -134,7 +134,7 @@ public sealed partial class AudioNavigationService
                 token.ThrowIfCancellationRequested();
                 using var scheduling = new HeadphoneAudioThread.Scheduling();
                 using var renderer = new HeadphoneRenderer(channels, session.Options);
-                using var output = HeadphoneOutputFactory();
+                using var output = new HeadphonePlaybackOutput(HeadphoneOutputFactory());
                 session.ReportOutput(output.BufferMilliseconds, 0);
                 log.Write($"HEADPHONES {session.Options.Method}, 48000 Hz float, {channels.Length}ch, endpoint buffer {output.BufferMilliseconds:0.0} ms, " +
                     $"raw prebuffer {pcm.Count * HeadphoneRenderer.BlockSize * 1000d / 48000:0.0} ms, MMCSS={scheduling.IsRegistered}");

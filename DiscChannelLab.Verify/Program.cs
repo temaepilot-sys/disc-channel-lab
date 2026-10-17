@@ -10,6 +10,11 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Threading;
 
+if (args is ["headphone-click-tests", var clickOutput])
+{
+    try { await HeadphoneClickTests.RunAsync(clickOutput); return 0; }
+    catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
+}
 if (args.Length is 2 or 3 && args[0] == "headphone-buffer-tests")
 {
     try { await HeadphoneBufferTests.RunAsync(args[1], args.Length == 3 ? args[2] : null); return 0; }

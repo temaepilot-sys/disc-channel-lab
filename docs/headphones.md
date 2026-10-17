@@ -34,6 +34,8 @@ A lone BL/BR surround pair uses ±110°, just like SL/SR in a 5.1 layout. BL/BR 
 
 **Front L/R angle** adjusts FL/FR to ±15–90° during playback. Wider angles make L/R easier to distinguish. Direct approaches one-ear routing at ±90°; HRTF retains the contribution arriving at the opposite ear. **Standard ±30°** restores the recommended front placement. Both renderers, the room diagram and the viewer use the same setting.
 
+Click an orange speaker circle or its channel label in the Lab room diagram to **Mute / unmute** that channel, including LFE. Muted speakers become dark with a diagonal line; other channels suppressed by Solo are dimmed. The switch shares the active mixer's Mute state and automatically enables that mixer if bypassed. It works in Stereo, Direct and HRTF without changing the playback mode. Muting clears that channel's Solo, without changing other channels' Solo or linked fader levels. Speaker switches require a loaded, supported layout. The room remains focused for arrow-key controls.
+
 ## Keyboard and opentrack
 
 Click the room diagram first. Keyboard/manual operation keeps the listener facing forward and rotates the surroundings in the opposite direction.
@@ -59,6 +61,10 @@ Headphone left/right routing comes from speaker direction. The mixer's Pan contr
 For an A/B comparison, use **Mark position**, pause, change renderer, then **Play from mark**. The mark belongs to the current track. Match perceived loudness with the two comparison trims; there is no automatic loudness matching.
 
 Audio is decoded to 48 kHz float PCM and rendered in 256-sample blocks to Windows' default shared-mode output device. A bounded queue holds roughly 171–341 ms of unprocessed PCM. SACD extraction and startup prebuffering complete before the output device opens. DSP and Windows output run together on one dedicated MMCSS audio thread, and the approximately 30 ms device buffer is primed before playback starts. Read-ahead does not pre-render head direction, faders or volume; they remain applied immediately before output. The diagnostic **empty buffer events** counter is separate from clipping and helps identify scheduling/underrun problems. Pose is sampled after waiting for device space; orientation smoothing defaults to 8 ms. The reported device buffer is not total measured end-to-end latency. No automatic normalization or limiter is added. Final finite-value protection and clipping to ±1 are applied, and clipped samples are counted. Reduce Master or increase headroom if the count rises.
+
+## Playback transitions
+
+Playback starts, seeks and resumes use an 8 ms raised-cosine fade from silence, after headphone rendering. Stopping releases the last submitted stereo sample smoothly to zero before the device closes; it does not replay queued decoder blocks. Shutdown has a timeout, and the Windows endpoint buffer is explicitly reset on close. These short transport fades prevent abrupt waveform cuts; they do not alter stored audio, FLAC exports or steady playback levels.
 
 ## Viewer synchronization
 
@@ -92,3 +98,5 @@ dotnet run --project DiscChannelLab.Verify -c Release -- headphone-ui-tests veri
 ```
 
 `headphone-buffer-tests` checks bounded startup buffering, cancellation and a failed output device, and measures actual Windows buffer continuity while processing multichannel FLAC through both renderers. Its Windows output receives silence; it can optionally analyze an existing audio file without modifying it.
+
+`headphone-click-tests <output-folder>` records rendered PCM to verify smooth starts and stops, cancellation while priming, fresh state after restart, bounded shutdown, and FLAC seeks through Direct and HRTF. It does not send audible sound to the device.

@@ -108,6 +108,30 @@ internal static class HeadphoneUiTests
                 ((Button)lab.FindName("ResetPlacementButton")).RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
                 Check(HeadphoneSession.Current.Options.FrontAngle == 30, "Standard placement button restores 30 degrees per front speaker");
                 var room = (Canvas)lab.FindName("Room");
+                System.Windows.Shapes.Ellipse Speaker(string code) => room.Children.OfType<System.Windows.Shapes.Ellipse>().Single(s => Equals(s.Tag, code));
+                void ClickSpeaker(string code) => Speaker(code).RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left) { RoutedEvent = Mouse.MouseDownEvent });
+                var orange = ((SolidColorBrush)Speaker("FL").Fill).Color;
+                Check(orange.R > orange.G && orange.G > orange.B && Speaker("FL").Cursor == Cursors.Hand,
+                    "Available speakers use orange circles with a clickable cursor");
+                var centerStrip = model.MixerStrips.Single(s => s.Code == "FC");
+                centerStrip.Solo = true; ClickSpeaker("FC");
+                Check(centerStrip.Muted && !centerStrip.Solo && model.MixerStrips.Where(s => s.Code != "FC").All(s => !s.Muted),
+                    "Clicking a speaker mutes only that mixer channel and clears its Solo");
+                Check(((SolidColorBrush)Speaker("FC").Fill).Color.R < orange.R && ((string)Speaker("FC").ToolTip).Contains("unmute"),
+                    "Muted speakers become dark and offer an unmute tooltip");
+                ClickSpeaker("FC");
+                Check(!centerStrip.Muted && ((SolidColorBrush)Speaker("FC").Fill).Color == orange,
+                    "Clicking again unmutes the channel and restores the orange speaker");
+                centerStrip.Muted = true; Pump(Task.Delay(80));
+                Check(((string)Speaker("FC").ToolTip).Contains("unmute"), "Mixer Mute changes are reflected back in the room diagram");
+                ClickSpeaker("FC");
+                ClickSpeaker("LFE");
+                Check(model.MixerStrips.Single(s => s.Code == "LFE").Muted, "The LFE circle also toggles its real mixer channel");
+                ClickSpeaker("LFE");
+                model.ExperimentalMixerEnabled = false; ClickSpeaker("FL");
+                Check(model.ExperimentalMixerEnabled && model.MixerStrips.Single(s => s.Code == "FL").Muted,
+                    "A speaker click enables a bypassed headphone mixer so Mute takes effect");
+                ClickSpeaker("FL");
                 void Key(Key key) => room.RaiseEvent(new KeyEventArgs(Keyboard.PrimaryDevice, PresentationSource.FromVisual(room)!, Environment.TickCount, key) { RoutedEvent = Keyboard.PreviewKeyDownEvent });
                 Key(System.Windows.Input.Key.Right); Key(System.Windows.Input.Key.Up); Key(System.Windows.Input.Key.E);
                 Check(HeadphoneSession.Current.Pose == new HeadPose(5, 5, 5), "Real room keyboard events change yaw, pitch and roll");
@@ -142,14 +166,24 @@ internal static class HeadphoneUiTests
                 Pump(Task.Delay(170));
                 Check(model.IsPlaying && model.PreviewSeconds >= .3 && !mode.IsEnabled && !enable.IsEnabled && !previewMode.IsEnabled,
                     "Play from mark starts the chosen renderer at the saved position and locks mode selection during playback");
+                ClickSpeaker("FL");
+                Check(model.IsPlaying && model.MixerStrips.Single(s => s.Code == "FL").Muted,
+                    "Speaker Mute remains available during HRTF playback without restarting it");
+                ClickSpeaker("FL");
                 lab.Close(); lab = null;
                 Check(model.IsPlaying && main.IsVisible, "Comparison window remains modeless and can close during playback");
                 model.StopPlayback(); Pump(Task.Delay(150));
                 lab = new HeadphonesWindow(model) { Owner = main, ShowActivated = false, ShowInTaskbar = false, Opacity = 0 }; lab.Show(); Pump(Task.Delay(80));
                 Check(((ComboBox)lab.FindName("MethodCombo")).IsEnabled, "Renderer selector unlocks after stopping");
-                ((Button)lab.FindName("PlayButton")).RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent)); Pump(Task.Delay(100));
+                ((Button)lab.FindName("PlayButton")).RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+                for (int i = 0; i < 100 && (!model.IsPlaying || model.PreviewSeconds <= .02); i++) Pump(Task.Delay(20));
                 ((Button)lab.FindName("PlayButton")).RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent)); Pump(Task.Delay(100));
                 Check(!model.IsPlaying && model.PreviewSeconds > 0, "Comparison Play / Pause preserves the playback position");
+                previewMode.SelectedValue = PreviewAudioMode.Stereo; Pump(Task.Delay(80));
+                ClickSpeaker("FL");
+                Check(model.SelectedPreviewMode == PreviewAudioMode.Stereo && model.ExperimentalMixerEnabled && model.MixerStrips.Single(s => s.Code == "FL").Muted,
+                    "Speaker Mute also works in ordinary stereo without changing the chosen playback mode");
+                ClickSpeaker("FL"); previewMode.SelectedValue = PreviewAudioMode.HeadphonesHrtf; Pump(Task.Delay(80));
                 lab.UpdateLayout();
                 var visual = (FrameworkElement)lab.Content;
                 ((Grid)visual).Background = lab.Background;

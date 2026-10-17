@@ -55,6 +55,9 @@ public sealed class LanguageService : INotifyPropertyChanged
 
     private static readonly Dictionary<string, string> English = new(StringComparer.Ordinal)
     {
+        ["スピーカーの丸をクリック：Mute／解除（ミキサーと連動）。"] = "Click a speaker circle to mute / unmute (linked to the mixer).",
+        ["クリックしてMute"] = "Click to mute",
+        ["クリックしてMute解除"] = "Click to unmute",
         ["ヘッドフォン再生を有効にする"] = "Enable headphone rendering",
         ["再生方式"] = "Renderer",
         ["Direct — 角度・パン・緩やかなフィルター"] = "Direct — angle, pan and gentle filtering",

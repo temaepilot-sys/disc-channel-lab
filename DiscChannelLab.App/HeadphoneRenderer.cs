@@ -87,7 +87,7 @@ public sealed class DirectHeadphoneSpatializer : IHeadphoneSpatializer
     public void Dispose() { }
 }
 
-public sealed class HeadphoneRenderer : IDisposable
+public sealed class HeadphoneRenderer : IPreviewPcmRenderer
 {
     public const int SampleRate = 48000, BlockSize = 256;
     private readonly string[] _channels;
@@ -103,6 +103,7 @@ public sealed class HeadphoneRenderer : IDisposable
     private readonly float[] _envelope = new float[BlockSize];
     public IReadOnlyList<float[]> ChannelLeft => _left;
     public IReadOnlyList<float[]> ChannelRight => _right;
+    public float PostSample(int channel, int frame) => (_left[channel][frame] + _right[channel][frame]) * .70710678f;
     public long ClippedSamples { get; private set; }
     public int TailBlocks => Math.Max(4, (_engine.TailSamples + BlockSize - 1) / BlockSize);
     public HeadphoneRenderer(string[] channels, HeadphoneOptions options)

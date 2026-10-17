@@ -17,6 +17,9 @@ void Log(string message) => File.AppendAllText(log, $"{DateTime.Now:O} {message}
 
 try
 {
+    // The companion's analysis and HTTP work yield CPU priority to playback.
+    try { Process.GetCurrentProcess().PriorityClass = ProcessPriorityClass.BelowNormal; }
+    catch (System.ComponentModel.Win32Exception) { }
     ViewerBrowser? browser = null;
     if (!args.Contains("--headless"))
     {
@@ -44,7 +47,8 @@ try
     string? pipeName = pipeArgument >= 0 && pipeArgument + 1 < args.Length ? args[pipeArgument + 1] : null;
     if (pipeName is not null && (!pipeName.StartsWith("DiscChannelLab.SpaceSketch.v1.", StringComparison.Ordinal) || pipeName.Length > 160 || pipeName.Any(c => !(char.IsAsciiLetterOrDigit(c) || c == '.'))))
         throw new ArgumentException("Invalid link pipe name.");
-    using var live = new LiveReceiver(pipeName, settings, Log);
+    var initialPreferences = preferences.Load() ?? new ViewerPreferences();
+    using var live = new LiveReceiver(pipeName, settings, Log, initialPreferences.SyncReference == "listener");
     live.Start();
     var gate = new SemaphoreSlim(1, 1);
     byte[]? demo = null;
@@ -78,7 +82,14 @@ try
             return Results.Stream(Assembly.GetExecutingAssembly().GetManifestResourceStream(resource)!, mime);
         });
     app.MapPost("/api/heartbeat", () => { heartbeat = Environment.TickCount64; connected = true; return Results.Ok(); });
-    app.MapPost("/api/live", (HttpContext context) => Results.Json(live.Snapshot(context.Request.Query["signal"].ToString())));
+    app.MapPost("/api/live", (HttpContext context) =>
+    {
+        if (context.Request.Query["ahead"] is var ahead && ahead.Count > 0)
+            live.SetForecastEnabled(ahead.ToString() != "0");
+        var horizon = double.TryParse(context.Request.Query["horizon"], System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out var seconds) ? seconds : 8.2;
+        return Results.Json(live.Snapshot(context.Request.Query["signal"].ToString(), horizon));
+    });
     app.MapPost("/api/settings/load", () => Results.Json(new { settings = preferences.Load() }));
     app.MapPost("/api/settings/save", async (HttpContext context) =>
     {

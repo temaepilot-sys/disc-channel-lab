@@ -4,6 +4,83 @@ using System.Text.Json;
 
 internal static class HeadphoneBufferTests
 {
+    public static async Task IsolationAsync(string folder)
+    {
+        var root = Path.GetFullPath(folder); Directory.CreateDirectory(root);
+        Environment.SetEnvironmentVariable("DISCCHANNEL_DATA_HOME", Path.Combine(root, "profile"));
+        var log = new AppLog(Path.Combine(root, "logs")); var tools = new ToolPaths(); var runner = new ProcessRunner(log);
+        var probe = new FfprobeService(tools, runner); var service = new DiscService(probe, log);
+        var file = Path.Combine(root, "observer-load.flac");
+        await runner.RunAsync(tools.Ffmpeg, ["-v", "error", "-f", "lavfi", "-i",
+            "aevalsrc=0.05*sin(2*PI*220*t)|0.05*sin(2*PI*330*t)|0.05*sin(2*PI*440*t)|0.05*sin(2*PI*60*t)|0.05*sin(2*PI*550*t)|0.05*sin(2*PI*660*t):s=88200:c=5.1(side)",
+            "-t", "10", "-c:a", "flac", "-y", file], CancellationToken.None);
+        var disc = await service.AnalyzeAudioFilesAsync([file], CancellationToken.None); var title = disc.Playlists.Single();
+        var audio = (await service.AnalyzePlaylistAsync(disc, title, CancellationToken.None)).Streams.Single();
+        var factory = AudioNavigationService.HeadphoneOutputFactory; var options = HeadphoneSession.Current.Options;
+        var results = new List<object>(); using var loadStop = new CancellationTokenSource();
+        var load = new Thread(() => { double sum = 0; while (!loadStop.IsCancellationRequested) { for (int n = 1; n < 20000; n++) sum += Math.Sin(n + sum); Thread.Yield(); } })
+            { IsBackground = true, Priority = ThreadPriority.BelowNormal, Name = "Simulated visualization CPU load" };
+        load.Start();
+        try
+        {
+            foreach (bool spatial in new[] { false, true })
+            {
+                HeadphoneSession.Current.SetOptions(new() { Enabled = spatial, Method = HeadphoneMethod.SteamAudio });
+                SilentWindowsOutput? sink = null; int observed = 0;
+                AudioNavigationService.HeadphoneOutputFactory = () => sink = new SilentWindowsOutput();
+                var state = new PreviewMixState(StereoMixSettings.Default, null);
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+                await new AudioNavigationService(tools, runner, probe, log).PlayAsync(disc, title, audio, 0, 360000, timeout.Token,
+                    liveMix: () => state, mixedLevels: (_, _) => Thread.Sleep(80),
+                    visualization: new(() => true, frame => { if (frame.ForecastRevision == 0) { Interlocked.Increment(ref observed); Thread.Sleep(180); } }, Lookahead: !spatial));
+                if (sink is null || sink.EmptyBufferCount != 0 || sink.Peak <= .0001 || !sink.Finite || observed < 2)
+                    throw new InvalidDataException("Slow observers affected audio continuity.");
+                var line = File.ReadAllLines(log.FilePath).Last(l => l.Contains(" OUTPUT frames="));
+                if (line.Contains("observer-drops=0 ")) throw new InvalidDataException("Stress did not exercise dropping overloaded observers.");
+                Console.WriteLine($"PASS {(spatial ? "HRTF" : "Stereo")}: 260ms observer delay + CPU load, device gaps=0, max write gap={sink.MaximumWriteGapMs:0.0}ms; {line.Split("observer-drops=")[1]}");
+                results.Add(new { spatial, sink.EmptyBufferCount, sink.MaximumWriteGapMs, observed, log = line });
+            }
+            File.WriteAllText(Path.Combine(root, "results.json"), JsonSerializer.Serialize(results, new JsonSerializerOptions { WriteIndented = true }));
+        }
+        finally { loadStop.Cancel(); load.Join(1000); AudioNavigationService.HeadphoneOutputFactory = factory; HeadphoneSession.Current.SetOptions(options); }
+    }
+    public static async Task DiscAsync(string source, string folder)
+    {
+        var root = Path.GetFullPath(folder); Directory.CreateDirectory(root);
+        Environment.SetEnvironmentVariable("DISCCHANNEL_DATA_HOME", Path.Combine(root, "profile"));
+        var log = new AppLog(Path.Combine(root, "logs")); var tools = new ToolPaths(); var runner = new ProcessRunner(log);
+        var probe = new FfprobeService(tools, runner); var service = new DiscService(probe, log);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(40));
+        var disc = await service.AnalyzeAsync(source, timeout.Token);
+        var title = disc.Playlists.First(p => p.Format == DiscFormat.DvdVideo && p.DvdVideoTitle == 2);
+        var inspected = await service.AnalyzePlaylistAsync(disc, title, timeout.Token);
+        var stream = inspected.Streams.First(s => s.Channels == 2 && s.Codec.StartsWith("pcm", StringComparison.OrdinalIgnoreCase));
+        long start = Math.Min(1709L * 45000, Math.Max(0, title.DurationTicks - 12 * 45000));
+        var options = HeadphoneSession.Current.Options; var factory = AudioNavigationService.HeadphoneOutputFactory;
+        SilentWindowsOutput? sink = null;
+        var chunks = new System.Collections.Concurrent.ConcurrentQueue<PreviewPcmChunk>();
+        int meterUpdates = 0, clockUpdates = 0;
+        var stableMix = new PreviewMixState(StereoMixSettings.Default, null);
+        try
+        {
+            HeadphoneSession.Current.SetOptions(options with { Enabled = false });
+            AudioNavigationService.HeadphoneOutputFactory = () => sink = new SilentWindowsOutput();
+            await new AudioNavigationService(tools, runner, probe, log).PlayAsync(disc, title, stream, start,
+                Math.Min(title.DurationTicks, start + 12 * 45000), timeout.Token,
+                liveMix: () => stableMix, mixedLevels: (_, _) => meterUpdates++, playbackPosition: (_, _) => clockUpdates++,
+                visualization: new(() => true, chunks.Enqueue, Lookahead: true));
+            if (sink is null || !sink.SameThread || !sink.Finite || sink.Peak <= .0001 || sink.EmptyBufferCount != 0 ||
+                !chunks.Any(c => c.ForecastRevision > 0) || !chunks.Any(c => c.ForecastRevision == 0) || meterUpdates < 10 || clockUpdates < 10)
+                throw new InvalidDataException("Native disc playback, live/forecast PCM, output continuity or meters failed.");
+            var result = new { stream.Codec, stream.SampleRate, stream.Channels, startSeconds = start / 45000d,
+                sink.EmptyBufferCount, sink.MaximumWriteGapMs, sink.SubmittedFrames, sink.Peak, meterUpdates, clockUpdates,
+                currentPackets = chunks.Count(c => c.ForecastRevision == 0), forecastPackets = chunks.Count(c => c.ForecastRevision > 0) };
+            File.WriteAllText(Path.Combine(root, "results.json"), JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true }));
+            Console.WriteLine(JsonSerializer.Serialize(result));
+            Console.WriteLine("PASS: Real DVD PCM decode, dedicated native output and current/future visualizer data; hardware output receives silence only.");
+        }
+        finally { AudioNavigationService.HeadphoneOutputFactory = factory; HeadphoneSession.Current.SetOptions(options); }
+    }
     public static async Task RunAsync(string folder, string? realFile = null, string? sofaFile = null)
     {
         var root = Path.GetFullPath(folder); Directory.CreateDirectory(root);
@@ -67,7 +144,7 @@ internal static class HeadphoneBufferTests
         var synthetic = Path.Combine(root, "six-channels-88200.flac");
         await runner.RunAsync(tools.Ffmpeg, ["-v", "error", "-f", "lavfi", "-i",
             "aevalsrc=0.05*sin(2*PI*220*t)|0.05*sin(2*PI*330*t)|0.05*sin(2*PI*440*t)|0.05*sin(2*PI*60*t)|0.05*sin(2*PI*550*t)|0.05*sin(2*PI*660*t):s=88200:c=5.1",
-            "-t", "3", "-c:a", "flac", "-sample_fmt", "s32", "-bits_per_raw_sample", "24", "-y", synthetic], CancellationToken.None);
+            "-t", "10", "-c:a", "flac", "-sample_fmt", "s32", "-bits_per_raw_sample", "24", "-y", synthetic], CancellationToken.None);
         var session = HeadphoneSession.Current; var previous = session.Options; var factory = AudioNavigationService.HeadphoneOutputFactory;
         var runs = new List<object>();
         try
@@ -77,24 +154,27 @@ internal static class HeadphoneBufferTests
                 var disc = await service.AnalyzeAudioFilesAsync([file], CancellationToken.None); var title = disc.Playlists.Single();
                 var inspected = await service.AnalyzePlaylistAsync(disc, title, CancellationToken.None); var stream = inspected.Streams.Single();
                 var navigation = new AudioNavigationService(tools, runner, probe, log);
-                var renderers = new List<HeadphoneOptions> { new() { Enabled = true, Method = HeadphoneMethod.Direct },
+                var renderers = new List<HeadphoneOptions> { new() { Enabled = false }, new() { Enabled = true, Method = HeadphoneMethod.Direct },
                     new() { Enabled = true, Method = HeadphoneMethod.SteamAudio } };
                 if (sofaFile is not null) renderers.Add(new() { Enabled = true, Method = HeadphoneMethod.SteamAudio, Hrtf = HeadphoneHrtf.Sofa, SofaPath = Path.GetFullPath(sofaFile) });
                 foreach (var options in renderers)
                 {
-                    var method = options.Method + (options.Hrtf == HeadphoneHrtf.Sofa ? " SOFA" : "");
+                    var method = options.Enabled ? options.Method + (options.Hrtf == HeadphoneHrtf.Sofa ? " SOFA" : "") : "Native stereo";
                     session.SetOptions(options);
                     SilentWindowsOutput? sink = null;
                     AudioNavigationService.HeadphoneOutputFactory = () => sink = new SilentWindowsOutput();
                     using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-                    var chunks = new List<PreviewPcmChunk>();
-                    await navigation.PlayAsync(disc, title, stream, 0, Math.Min(title.DurationTicks, 135000), timeout.Token,
-                        liveMix: () => new(StereoMixSettings.Default, null), mixedLevels: (_, _) => { }, visualization: new(() => true, chunks.Add));
+                    var chunks = new System.Collections.Concurrent.ConcurrentQueue<PreviewPcmChunk>();
+                    var stableMix = new PreviewMixState(StereoMixSettings.Default, null);
+                    await navigation.PlayAsync(disc, title, stream, 0, Math.Min(title.DurationTicks, options.Enabled ? 135000 : 360000), timeout.Token,
+                        liveMix: () => stableMix, mixedLevels: (_, _) => { }, visualization: new(() => true, chunks.Enqueue, Lookahead: !options.Enabled));
                     Check(sink is { Disposed: true, SameThread: true } && sink.SubmittedFrames > 0,
                         method + " keeps initialization, PCM writes, drain and disposal on the same Windows audio thread");
                     Check(sink!.Finite && sink.Peak > .0001f && chunks.Count > 0,
                         method + " processes audible finite PCM while the test device itself receives only silence");
                     Check(sink.EmptyBufferCount == 0, method + $" has no empty device buffers with meters and visualization (empty={sink.EmptyBufferCount}, max write gap={sink.MaximumWriteGapMs:0.0} ms)");
+                    if (!options.Enabled) Check(chunks.Any(c => c.ForecastRevision > 0 && c.Seconds > 6) && chunks.Any(c => c.ForecastRevision == 0),
+                        "Native float playback preserves multi-second listener-sync forecasts alongside current PCM");
                     runs.Add(new { source = Path.GetFileName(file), method, sink.EmptyBufferCount, sink.SubmittedFrames, sink.BufferMilliseconds, sink.MaximumWriteGapMs });
                 }
             }

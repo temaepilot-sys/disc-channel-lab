@@ -12,6 +12,9 @@ public interface IHeadphoneOutput : IDisposable
     double StreamLatencyMilliseconds => 0;
     bool HasStarted => true;
     long EmptyBufferCount => 0;
+    bool SupportsPause => false;
+    void Pause() { }
+    void Resume() { }
     void WaitForSpace(int frames, CancellationToken token);
     void Write(float[] interleaved, int frames);
     void Drain(CancellationToken token);
@@ -23,7 +26,8 @@ public sealed partial class AudioNavigationService
     private async Task PlayHeadphonesAsync(DiscAnalysis disc, PlaylistInfo playlist, AudioStreamInfo stream,
         long startTicks, long endTicks, CancellationToken token, Action<long>? started, Func<double> volume,
         Func<PreviewMixState> liveMix, Action<long, double>? playbackPosition,
-        Action<long, MixerMeterFrame>? mixedLevels, PreviewPcmTap? visualization)
+        Action<long, MixerMeterFrame>? mixedLevels, PreviewPcmTap? visualization, bool spatial = true,
+        PreviewPlaybackControl? transport = null)
     {
         var channels = HeadphoneGeometry.Channels(stream);
         if (channels.Length != stream.Channels) throw new InvalidOperationException("Unknown headphone speaker layout.");
@@ -40,6 +44,7 @@ public sealed partial class AudioNavigationService
         {
             var bytes = pcm.Rent();
             int carried = 0;
+            long decodedFrames = 0;
             try
             {
                 if (playlist.Format is DiscFormat.DvdAudio or DiscFormat.DvdVideo)
@@ -82,7 +87,7 @@ public sealed partial class AudioNavigationService
                     // Preserve the HRIR samples after a partial final source block. Do not discard
                     // the remainder of a processed block and jump to the next convolution block.
                     bytes.AsSpan(carried).Clear();
-                    pcm.Add(bytes, token);
+                    await pcm.AddAsync(bytes, token).ConfigureAwait(false);
                 }
                 pcm.Complete();
             }
@@ -107,12 +112,19 @@ public sealed partial class AudioNavigationService
                 var feedTask = feed is null ? Task.CompletedTask : Feed();
                 try
                 {
+                    await using var lookahead = !spatial && visualization is { Lookahead: true }
+                        ? new VisualizerLookaheadStream(decoder.StandardOutput.BaseStream, channels, liveMix, volume,
+                            visualization.AtOffset(startTicks / 45000d + decodedFrames / 48000d), token, sampleBytes: 4) : null;
+                    Stream decoded = lookahead is null ? decoder.StandardOutput.BaseStream : lookahead;
+                    long decodedBytes = 0;
                     int read;
-                    while ((read = await decoder.StandardOutput.BaseStream.ReadAsync(bytes.AsMemory(carried), token)) > 0)
+                    while ((read = await decoded.ReadAsync(bytes.AsMemory(carried), token)) > 0)
                     {
+                        decodedBytes += read;
                         carried += read;
-                        if (carried == bytes.Length) { pcm.Add(bytes, token); bytes = pcm.Rent(); carried = 0; }
+                        if (carried == bytes.Length) { await pcm.AddAsync(bytes, token).ConfigureAwait(false); bytes = pcm.Rent(); carried = 0; }
                     }
+                    decodedFrames += decodedBytes / (channels.Length * 4);
                     await feedTask; await decoder.WaitForExitAsync(token);
                     if (decoder.ExitCode != 0) throw new FfToolException(await errors);
                 }
@@ -134,21 +146,23 @@ public sealed partial class AudioNavigationService
                 pcm.WaitUntilReady(token);
                 token.ThrowIfCancellationRequested();
                 using var scheduling = new HeadphoneAudioThread.Scheduling();
-                using var renderer = new HeadphoneRenderer(channels, session.Options);
+                using IPreviewPcmRenderer renderer = spatial ? new HeadphoneRenderer(channels, session.Options) : new StereoPcmRenderer(channels);
                 using var output = new HeadphonePlaybackOutput(HeadphoneOutputFactory());
-                output.Prepare(token);
                 session.ReportOutput(output.BufferMilliseconds, 0);
-                log.Write($"HEADPHONES {session.Options.Method}, 48000 Hz float, {channels.Length}ch, endpoint buffer {output.BufferMilliseconds:0.0} ms, " +
+                log.Write($"{(spatial ? "HEADPHONES " + session.Options.Method : "STEREO PCM")}, 48000 Hz float, {channels.Length}ch, endpoint buffer {output.BufferMilliseconds:0.0} ms, " +
                     $"raw prebuffer {pcm.Count * HeadphoneRenderer.BlockSize * 1000d / 48000:0.0} ms, " +
                     $"device latency {output.StreamLatencyMilliseconds:0.0} ms, silent guard {output.GuardFrames * 1000d / 48000:0.0} ms, MMCSS={scheduling.IsRegistered}");
-                if (session.Options.Method == HeadphoneMethod.SteamAudio)
+                if (spatial && session.Options.Method == HeadphoneMethod.SteamAudio)
                     log.Write($"HEADPHONES HRTF {session.Options.Hrtf}" + (session.Options.Hrtf == HeadphoneHrtf.Sofa ? $" {session.Options.SofaPath}" : ""));
                 var input = channels.Select(_ => new float[HeadphoneRenderer.BlockSize]).ToArray();
                 var stereo = new float[HeadphoneRenderer.BlockSize * 2];
                 bool announced = false;
+                using var observer = new PreviewAudioObserver(channels, startTicks, visualization, mixedLevels, playbackPosition, transport, output.BufferMilliseconds);
+                output.Prepare(token);
+                transport?.Attach(output);
                 try
                 {
-                    foreach (var block in pcm.ReadAll(token))
+                    foreach (var block in pcm.ReadAll(token, () => transport?.Apply(output, token)))
                     {
                         try { Render(block, HeadphoneRenderer.BlockSize); }
                         finally { pcm.Recycle(block); }
@@ -158,19 +172,23 @@ public sealed partial class AudioNavigationService
                     Array.Clear(silence);
                     for (int i = 0, blocks = renderer.TailBlocks; i < blocks; i++) Render(silence, HeadphoneRenderer.BlockSize);
                     pcm.Recycle(silence);
+                    transport?.Apply(output, token);
                     output.Drain(token);
                     if (!announced && output.HasStarted) started?.Invoke(startTicks);
                     playbackPosition?.Invoke(startTicks, output.PlayedFrames / 48000d);
                 }
                 finally
                 {
+                    transport?.Detach();
+                    observer.Dispose();
                     session.ReportOutput(output.BufferMilliseconds, renderer.ClippedSamples, output.EmptyBufferCount);
-                    log.Write($"HEADPHONES OUTPUT frames={output.SubmittedFrames} empty-buffer-events={output.EmptyBufferCount} clipped-samples={renderer.ClippedSamples}");
+                    log.Write($"{(spatial ? "HEADPHONES" : "STEREO PCM")} OUTPUT frames={output.SubmittedFrames} empty-buffer-events={output.EmptyBufferCount} clipped-samples={renderer.ClippedSamples} observer-drops={observer.DroppedPackets} observer-errors={observer.Errors}");
                 }
 
                 void Render(byte[] bytes, int frames)
                 {
                     token.ThrowIfCancellationRequested();
+                    transport?.Apply(output, token);
                     for (int channel = 0; channel < channels.Length; channel++)
                         for (int frame = 0; frame < HeadphoneRenderer.BlockSize; frame++)
                         {
@@ -181,49 +199,10 @@ public sealed partial class AudioNavigationService
                     var before = output.SubmittedFrames;
                     // The latest pose is sampled AFTER waiting for the output device, never in the decoder/lookahead.
                     renderer.Render(input, stereo, session.Pose, session.Options, liveMix(), volume());
-                    if (before % (HeadphoneRenderer.BlockSize * 8) == 0)
-                        session.ReportOutput(output.BufferMilliseconds, renderer.ClippedSamples, output.EmptyBufferCount);
                     output.Write(stereo, frames);
+                    transport?.Sample(output);
                     if (!announced && output.HasStarted) { announced = true; started?.Invoke(startTicks); }
-                    playbackPosition?.Invoke(startTicks, output.PlayedFrames / 48000d);
-                    if (mixedLevels is not null)
-                    {
-                        double Db(double value) => value > 0 ? 20 * Math.Log10(value) : -120;
-                        var peaks = new double[channels.Length]; var rms = new double[channels.Length];
-                        var left = new double[channels.Length]; var right = new double[channels.Length];
-                        for (int c = 0; c < channels.Length; c++)
-                        {
-                            double peak = 0, squares = 0, l = 0, r = 0;
-                            for (int f = 0; f < frames; f++)
-                            {
-                                var sample = input[c][f];
-                                peak = Math.Max(peak, Math.Abs(sample)); squares += (double)sample * sample;
-                                l = Math.Max(l, Math.Abs(renderer.ChannelLeft[c][f])); r = Math.Max(r, Math.Abs(renderer.ChannelRight[c][f]));
-                            }
-                            peaks[c] = Db(peak); rms[c] = Db(Math.Sqrt(squares / frames)); left[c] = Db(l); right[c] = Db(r);
-                        }
-                        double outputLeft = 0, outputRight = 0;
-                        for (int f = 0; f < frames; f++)
-                        { outputLeft = Math.Max(outputLeft, Math.Abs(stereo[f * 2])); outputRight = Math.Max(outputRight, Math.Abs(stereo[f * 2 + 1])); }
-                        var final = new[] { Db(outputLeft), Db(outputRight) };
-                        mixedLevels(startTicks, new((before + frames / 2d) / 48000, peaks, rms, left, right, final));
-                    }
-                    if (visualization?.Enabled() == true)
-                    {
-                        var source = new byte[frames * channels.Length * 2]; var post = new float[frames * channels.Length]; var final = new byte[frames * 4];
-                        short Pcm(float sample) => (short)Math.Clamp((int)Math.Round(sample * 32768), short.MinValue, short.MaxValue);
-                        for (int frame = 0; frame < frames; frame++)
-                        {
-                            BinaryPrimitives.WriteInt16LittleEndian(final.AsSpan(frame * 4, 2), Pcm(stereo[frame * 2]));
-                            BinaryPrimitives.WriteInt16LittleEndian(final.AsSpan(frame * 4 + 2, 2), Pcm(stereo[frame * 2 + 1]));
-                            for (int channel = 0; channel < channels.Length; channel++)
-                            {
-                                BinaryPrimitives.WriteInt16LittleEndian(source.AsSpan((frame * channels.Length + channel) * 2, 2), Pcm(input[channel][frame]));
-                                post[frame * channels.Length + channel] = (renderer.ChannelLeft[channel][frame] + renderer.ChannelRight[channel][frame]) * .70710678f;
-                            }
-                        }
-                        visualization.TryPublish(new(startTicks / 45000d + before / 48000d, channels, source, post, final));
-                    }
+                    observer.Capture(input, renderer, stereo, frames, before, output.PlayedFrames, output.EmptyBufferCount);
                 }
             }
             catch { stop.Cancel(); throw; }

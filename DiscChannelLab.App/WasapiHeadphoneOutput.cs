@@ -13,6 +13,10 @@ public sealed class WasapiHeadphoneOutput : IHeadphoneOutput
     private bool _started;
     private bool _initialized;
     private bool _disposed;
+    private bool _paused;
+    public bool SupportsPause => true;
+    public void Pause() { if (_started && !_paused) { Marshal.ThrowExceptionForHR(_client.Stop()); _paused = true; } }
+    public void Resume() { if (_paused) { Marshal.ThrowExceptionForHR(_client.Start()); _paused = false; } }
     public uint BufferFrames { get; }
     public long SubmittedFrames { get; private set; }
     public bool HasStarted => _started;
@@ -33,7 +37,7 @@ public sealed class WasapiHeadphoneOutput : IHeadphoneOutput
         _client = (IAudioClient)client;
         var format = new WaveFormat { Tag = 3, Channels = 2, Rate = 48000, AverageBytes = 384000, BlockAlign = 8, Bits = 32 };
         // A small scheduling margin for shared-mode device periods, without queuing rendered audio far ahead.
-        Marshal.ThrowExceptionForHR(_client.Initialize(0, 0x00040000 | 0x80000000 | 0x08000000, 300000, 0, ref format, IntPtr.Zero));
+        Marshal.ThrowExceptionForHR(_client.Initialize(0, 0x00040000 | 0x80000000 | 0x08000000, 600000, 0, ref format, IntPtr.Zero));
         _initialized = true;
         Marshal.ThrowExceptionForHR(_client.GetBufferSize(out var size)); BufferFrames = size;
         Marshal.ThrowExceptionForHR(_client.GetStreamLatency(out var latency)); StreamLatencyMilliseconds = latency / 10000d;

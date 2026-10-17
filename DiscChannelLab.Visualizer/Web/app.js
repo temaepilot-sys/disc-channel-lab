@@ -715,7 +715,9 @@ async function pollLive() {
   if (livePollBusy || busy) return;
   livePollBusy = true;
   try {
-    const response = await api('/api/live?signal=' + encodeURIComponent($('analysis-mode').value || 'post'));
+    const needsForecast = renderer.syncReference === 'listener';
+    const horizon = Math.min(8.2, Math.max(.5, 4.2 / renderer.particleSpeed));
+    const response = await api('/api/live?signal=' + encodeURIComponent($('analysis-mode').value || 'post') + '&ahead=' + (needsForecast ? '1' : '0') + '&horizon=' + horizon);
     if (!response.ok || typeof response.json !== 'function') return;
     const state = await response.json();
     if (!state.configured) return;
@@ -867,7 +869,11 @@ function updateTransport() {
   const t = position(); $('timeline').value = t; $('time').textContent = `${timeLabel(t)} / ${timeLabel(clip?.duration || 0)}`;
 }
 let lastStats = performance.now(), lastCameraTime = lastStats, frameCount = 0, fps = 0;
+let lastRenderTime = -Infinity;
 function render(now) {
+  // Leave CPU/GPU scheduling room for playback, including on high-refresh displays.
+  if (now - lastRenderTime < 1000 / 30 - .5) { requestAnimationFrame(render); return; }
+  lastRenderTime = now;
   // Camera movement uses wall time so it also works while audio is paused.
   const cameraStep = Math.min(.05, Math.max(0, (now - lastCameraTime) / 1000)) * Math.PI / 3;
   lastCameraTime = now;

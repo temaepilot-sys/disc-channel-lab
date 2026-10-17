@@ -12,6 +12,10 @@ public sealed class HeadphonePlaybackOutput(IHeadphoneOutput device) : IHeadphon
     private readonly float[] _silence = new float[HeadphoneRenderer.BlockSize * 2];
     private float _lastLeft, _lastRight;
     private bool _drained, _disposed;
+    private bool _paused;
+    public bool SupportsPause => device.SupportsPause;
+    public void Pause() { device.Pause(); _paused = true; }
+    public void Resume() { device.Resume(); _paused = false; }
     // Transport guards are device housekeeping, not media. Keep the seek bar, meters
     // and visualizer timestamps on the source clock, including short/canceled starts.
     public long SubmittedFrames => _mediaFrames;
@@ -103,7 +107,7 @@ public sealed class HeadphonePlaybackOutput(IHeadphoneOutput device) : IHeadphon
         _disposed = true;
         try
         {
-            if (!_drained && device.HasStarted && _mediaFrames > 0)
+            if (!_drained && !_paused && device.HasStarted && _mediaFrames > 0)
             {
                 // Playback cancellation must not cancel its own short release. This bounds
                 // shutdown even if an output device has disappeared or stopped responding.

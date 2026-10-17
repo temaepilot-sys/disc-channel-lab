@@ -25,7 +25,9 @@ Type 1: playback clock
   ClockMilliseconds is Environment.TickCount64 on the same Windows machine.
   The player sends a clock about every 30ms while connected, even when paused.
   Playing means the player's playback clock is running, not merely decoder startup.
-  Epoch changes on transport changes. Old-epoch PCM is rejected.
+  Epoch changes on new playback, seek, Stop and track changes. A retained native
+  Pause/Play keeps the epoch and queued PCM; Playing freezes/unfreezes the device clock.
+  Old-epoch PCM is rejected.
 
   Optional headphone fields (null/absent in ordinary playback):
     Head: {Yaw, Pitch, Roll}, degrees, yaw right-positive, pitch up-positive.
@@ -58,7 +60,7 @@ Type 2: PCM block
 Type 3: look-ahead PCM (requires updated player and viewer)
   Byte 3, int32 Epoch, int32 ForecastRevision (>0), then the same fields as type 2
   starting with float64 Seconds. Rate and channel ordering remain identical.
-  These are decoded future samples, NOT samples already submitted to ffplay.
+  These are decoded future samples, NOT samples already submitted to the output device.
   Post/Output use the current mixer controls without the actual 10 ms gain ramp.
   ForecastRevision increases on mixer/master changes or observer reconnect.
   Old revisions and epochs are rejected. Forecasts never replace current meters.
@@ -67,8 +69,11 @@ Type 3: look-ahead PCM (requires updated player and viewer)
   With no connected viewer, read-ahead falls back to about three blocks.
   Future packets use a separate queue of at most 512 messages. Clock/type 2
   messages take priority. Gaps reset future analysis rather than inventing samples.
-  The viewer keeps at most 256 future spectra at about 23 Hz and returns only
-  the requested signal through /api/live?signal=input|post|output.
+  The viewer keeps at most 256 future spectra at up to 25 Hz and returns only
+  the requested signal through /api/live?signal=input|post|output. Optional ahead=0 skips
+  future FFT analysis; ahead=1 restores it. horizon=<seconds> limits the returned
+  look-ahead to 0.5..8.2 seconds (default 8.2). Current FFT frames use a hop of at
+  least 1024 samples; forecasts use at least 1920, both capped to the FFT size.
   Listener emission samples future spectrum at audio time plus particle travel.
   Speaker emission continues to use current type 2 data. LFE needs no travel lead.
   Startup/seek/control changes have a visual warm-up; playback is never delayed.
@@ -80,17 +85,21 @@ Signal definitions (type 2)
         Mute/Solo and the actual per-sample gain ramps are reflected.
         Equal-power pan preserves this level; inspect Output to see left/right changes.
         Individual spectral energy does not encode the polarity sign.
-  Output: the exact, clipped PCM bytes sent to ffplay.
+  Output: the clipped stereo PCM submitted to Windows output (quantized to int16 for this
+          protocol), or the exact bytes sent to the legacy ffplay fallback.
           Coherent summation and polarity cancellation are preserved.
   The non-multichannel playback path already has decoded stereo before this tap;
   its Input/Post are reported as FL/FR, not reconstructed original speakers.
 
 Timing and failure behavior
   Type 2 PCM is observed only after successful submission to the playback stream.
-  The publisher never waits for visualization. A bounded queue keeps at most 12 messages.
+  The native audio thread copies into an eight-packet preallocated SPSC ring;
+  meter calculation, PCM conversion and callbacks run on a lower-priority worker.
+  A full ring drops captures instead of blocking output. No display callback runs
+  on the native audio thread. The pipe publisher never waits for visualization. A bounded queue keeps at most 12 messages.
   If the receiver stalls, oldest messages are dropped; audio continues unchanged.
   A missing block, new epoch, or channel-layout change resets FFT and smoothing history.
-  Analysis is bounded to 192 frames (roughly two seconds at the default hop).
+  Analysis is bounded to 192 frames (roughly four seconds at the default live hop).
   Browser polling is 50ms, at most one outstanding request.
   Frames are selected by the player's clock, not by drawing frame count.
   More than 500ms without a clock stops extrapolation and reports a lost connection.
@@ -110,6 +119,8 @@ Listener brightness
   after the regular spectrum tail. Packets without this flag retain the old layout.
 
 Rendering
+  The viewer process runs below normal CPU priority. Particle drawing is capped
+  at 30 fps independently of the monitor refresh rate; the audio clock remains master.
   GLSL ES shared uniforms have explicit, matching precision qualifiers.
   uPoint is mediump in both vertex and fragment shaders; vColor is also explicit.
   Reference: https://www.khronos.org/files/opengles_shading_language.pdf

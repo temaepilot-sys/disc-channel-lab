@@ -19,6 +19,9 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
     private PlaylistInfo? _loadedPlaylist;
     private CancellationTokenSource? _work;
     private CancellationTokenSource? _playback;
+    private PreviewPlaybackControl? _playbackControl;
+    private HeadphoneOptions? _playbackEngineOptions;
+    private double _playbackStartSeconds;
     private CancellationTokenSource? _inspection;
     public Task InspectionTask { get; private set; } = Task.CompletedTask;
     private string _inspectionProgress = "";
@@ -372,7 +375,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
     public MainViewModel(TrackEditsStore? editStore = null, CacheStorage? cacheStorage = null)
     {
         _cache = cacheStorage ?? new CacheStorage(AppDataPaths.Current, Path.Combine(AppContext.BaseDirectory, "SpaceSketch"),
-            () => Visualization.IsConnected || Visualization.IsViewerRunning || CacheStorage.RuntimeInUse());
+            () => _playback is not null || Visualization.IsConnected || Visualization.IsViewerRunning || CacheStorage.RuntimeInUse());
         var paths = new ToolPaths();
         var runner = new ProcessRunner(_log);
         var probe = new FfprobeService(paths, runner);
@@ -793,8 +796,23 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
     {
         StopInspection();
         if (IsPlaying) { PausePlayback(); return; }
+        if (_playbackControl is { IsPaused: true, CanPause: true } held && _playbackTask is { IsCompleted: false } &&
+            _playback?.IsCancellationRequested == false && SamePlaybackEngine(_playbackEngineOptions, HeadphoneSession.Current.Options))
+        {
+            _activePlaybackMix = CurrentMix;
+            _activePreviewChannel = SelectedPreviewChannel?.Code;
+            Volatile.Write(ref _livePreviewMix, PreviewState(_activePlaybackMix, _activePreviewChannel));
+            PreviewSeconds = Math.Clamp(_playbackStartSeconds + held.Position, 0, PreviewMax);
+            _playClockBase = PreviewSeconds; _playClock.Restart();
+            IsPlaying = true; held.Resume();
+            Status = $"{SelectedTrack?.Title} を再生しています";
+            _log.Write("TRANSPORT resume: retained decoder, DSP and output device");
+            PublishVisualizationClock(); return;
+        }
         await StartPlaybackAsync(++_transportVersion);
     }
+    private static bool SamePlaybackEngine(HeadphoneOptions? a, HeadphoneOptions b) => a is not null && a.Enabled == b.Enabled &&
+        (!a.Enabled || (a.Method == b.Method && a.Hrtf == b.Hrtf && string.Equals(a.SofaPath, b.SofaPath, StringComparison.OrdinalIgnoreCase)));
 
     public Task PreviousTrackAsync() => MoveTrackAsync(-1);
     public Task NextTrackAsync() => MoveTrackAsync(1);
@@ -820,7 +838,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
     public async Task SeekAsync(double seconds)
     {
         var resume = IsPlaying;
-        if (resume) PausePlaybackCore(capturePosition: false);
+        if (resume || _playbackControl?.IsPaused == true) PausePlaybackCore(capturePosition: false);
         PreviewSeconds = seconds;
         var version = ++_transportVersion;
         if (resume && PreviewSeconds < PreviewMax) await StartPlaybackAsync(version);
@@ -830,6 +848,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
     private async Task StartPlaybackAsync(int version)
     {
         StopInspection();
+        if (_playbackControl?.IsPaused == true) _playback?.Cancel();
         if (_playbackTask is { IsCompleted: false } previous) await previous;
         if (version != _transportVersion || !CanPlay || SelectedTrack is null || SelectedStream is null ||
             _disc is null || _loadedPlaylist is null) return;
@@ -845,17 +864,20 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
         Volatile.Write(ref _livePreviewMix, PreviewState(mix, previewChannel));
         var start = track.StartTicks + (long)Math.Round(PreviewSeconds * 45000, MidpointRounding.AwayFromZero);
         var session = new CancellationTokenSource();
+        var control = new PreviewPlaybackControl();
+        _playbackControl = control; _playbackEngineOptions = HeadphoneSession.Current.Options;
+        _playbackStartSeconds = (start - track.StartTicks) / 45000d;
         _playback = session;
         ResetMeterLevels();
         IsPlaying = true;
         Status = $"{track.Title} を再生しています";
         _playbackTask = RunPlaybackAsync(session, disc, playlist, stream, track, start,
-            mix, previewChannel, version);
+            mix, previewChannel, version, control);
     }
 
     private async Task RunPlaybackAsync(CancellationTokenSource session, DiscAnalysis disc, PlaylistInfo playlist,
         AudioStreamInfo stream, TrackRow track, long startTicks, StereoMixSettings mix,
-        string? previewChannel, int version)
+        string? previewChannel, int version, PreviewPlaybackControl control)
     {
         var completed = false;
         var uiContext = SynchronizationContext.Current;
@@ -885,7 +907,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
                         if (!ReferenceEquals(_playback, session) || !IsPlaying || version != _transportVersion ||
                             !_playClock.IsRunning) return;
                         _playClockBase = Math.Clamp((segmentStart - track.StartTicks) / 45000d + seconds +
-                            Stopwatch.GetElapsedTime(sampledAt).TotalSeconds, 0, PreviewMax);
+                            (control.CanPause ? control.EstimatedPosition - seconds : Stopwatch.GetElapsedTime(sampledAt).TotalSeconds), 0, PreviewMax);
                         _playClock.Restart();
                         AdvancePlaybackClock();
                     }, null);
@@ -895,7 +917,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
                     if (ReferenceEquals(_playback, session) && version == _transportVersion)
                         QueueMixedFrame((segmentStart - track.StartTicks) / 45000d + frame.Seconds, frame);
                 }, null), new PreviewPcmTap(() => Visualization.IsConnected && !session.IsCancellationRequested,
-                    frame => Visualization.PublishPcm(version, frame with { Seconds = frame.Seconds - track.StartTicks / 45000d }), Lookahead: true));
+                    frame => Visualization.PublishPcm(version, frame with { Seconds = frame.Seconds - track.StartTicks / 45000d }), Lookahead: true), transport: control);
             if (ReferenceEquals(_playback, session) && IsPlaying)
             {
                 completed = true;
@@ -915,8 +937,11 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
             {
                 _playClock.Stop();
                 _playback = null;
+                _playbackControl = null;
                 IsPlaying = false;
+                RefreshCacheControls();
             }
+            control.Dispose();
             session.Dispose();
             if (_disc?.Format == DiscFormat.Sacd) _ = RefreshCacheSizeAsync();
             if (advance)
@@ -931,7 +956,9 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 
     public void AdvancePlaybackClock()
     {
-        if (IsPlaying && !IsScrubbing && _playClock.IsRunning)
+        if (!IsScrubbing && _playbackControl is { CanPause: true, HasStarted: true } deviceClock)
+            PreviewSeconds = Math.Clamp(_playbackStartSeconds + deviceClock.EstimatedPosition, 0, PreviewMax);
+        else if (IsPlaying && !IsScrubbing && _playClock.IsRunning)
             PreviewSeconds = Math.Min(PreviewMax, _playClockBase + _playClock.Elapsed.TotalSeconds);
         ApplyMeterFrames();
         ApplyMixedFrames();
@@ -958,7 +985,8 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 
     // Dragging the seek bar changes PreviewSeconds before playback seeks. Meters must
     // continue to follow the sound being played, not the temporary slider position.
-    private double MeterPlaybackPosition => IsPlaying && _playClock.IsRunning
+    private double MeterPlaybackPosition => _playbackControl is { CanPause: true, HasStarted: true } native
+        ? Math.Clamp(_playbackStartSeconds + native.EstimatedPosition, 0, PreviewMax) : IsPlaying && _playClock.IsRunning
         ? Math.Clamp(_playClockBase + _playClock.Elapsed.TotalSeconds, 0, PreviewMax)
         : PreviewSeconds;
 
@@ -1021,10 +1049,17 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 
     private void PausePlaybackCore(bool capturePosition)
     {
-        if (!IsPlaying) return;
+        if (!IsPlaying && _playback is null) return;
         if (capturePosition) AdvancePlaybackClock();
         _playClock.Stop();
+        if (capturePosition && _playbackControl?.Pause() == true)
+        {
+            IsPlaying = false; Status = "一時停止しました";
+            _log.Write("TRANSPORT pause: retaining decoder, DSP and output device");
+            PublishVisualizationClock(); return;
+        }
         _playback?.Cancel();
+        _playbackControl = null;
         ++_transportVersion;
         IsPlaying = false;
         Status = "一時停止しました";
@@ -1035,6 +1070,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
         ++_transportVersion;
         _playClock.Stop();
         _playback?.Cancel();
+        _playbackControl = null;
         IsPlaying = false;
         PreviewSeconds = 0;
         ResetMeterLevels();

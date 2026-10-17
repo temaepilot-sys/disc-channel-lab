@@ -26,7 +26,7 @@ public static class StereoPreviewMixer
     public static async Task<long> CopyAsync(Stream source, Stream destination, AudioStreamInfo stream,
         Func<PreviewMixState> settings, Func<double> volume, CancellationToken token,
         Action? firstWrite = null, Action<PreviewMixState>? mixApplied = null, Action<MixerMeterFrame>? mixedLevels = null,
-        PreviewPcmTap? visualization = null)
+        PreviewPcmTap? visualization = null, Action<string>? pacingLog = null)
     {
         var channels = StereoMixSettings.ChannelNames(stream);
         if (channels.Count != stream.Channels)
@@ -38,7 +38,6 @@ public static class StereoPreviewMixer
 
         const int sampleRate = 48000;
         const int framesPerBuffer = 1024;
-        const double maxQueuedSeconds = 0.06;
         var frameBytes = channels.Count * sizeof(short);
         var input = new byte[framesPerBuffer * frameBytes + frameBytes];
         var output = new byte[framesPerBuffer * 2 * sizeof(short)];
@@ -46,7 +45,7 @@ public static class StereoPreviewMixer
         var right = new double[channels.Count];
         var targetLeft = new double[channels.Count];
         var targetRight = new double[channels.Count];
-        var clock = new Stopwatch();
+        using var pacing = new PreviewPcmPacer(visualization?.Enabled, log: pacingLog);
         var carried = 0;
         var submittedFrames = 0L;
         var rampFrames = 0;
@@ -72,8 +71,7 @@ public static class StereoPreviewMixer
             if (frames == 0) { carried = available; continue; }
             var complete = frames * frameBytes;
             // Decoder startup/seek time must not become a burst of queued audio.
-            if (!clock.IsRunning) clock.Start();
-            var wait = (submittedFrames + frames) / (double)sampleRate - maxQueuedSeconds - clock.Elapsed.TotalSeconds;
+            var wait = pacing.DelaySeconds(submittedFrames, frames);
             if (wait > 0) await Task.Delay(TimeSpan.FromSeconds(wait), token).ConfigureAwait(false);
 
             var requested = settings();
@@ -143,6 +141,7 @@ public static class StereoPreviewMixer
                 BinaryPrimitives.WriteInt16LittleEndian(output.AsSpan(frame * 4 + 2, 2), Clip(rightSample * gain));
             }
             await destination.WriteAsync(output.AsMemory(0, frames * 4), token).ConfigureAwait(false);
+            pacing.Submitted();
             if (post is not null)
                 visualization!.TryPublish(new(submittedFrames / (double)sampleRate, channels.ToArray(),
                     input.AsSpan(0, complete).ToArray(), post, output.AsSpan(0, frames * 4).ToArray()));

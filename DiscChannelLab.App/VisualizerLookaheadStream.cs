@@ -8,13 +8,14 @@ namespace Disc2Flac;
 public sealed class VisualizerLookaheadStream : Stream
 {
     sealed record Block(long Frame, byte[] Bytes);
-    const int FramesPerBlock = 1024, Capacity = 384; // 8.192 seconds, at most 6 MiB of 8-channel PCM.
+    const int FramesPerBlock = 1024, Capacity = 384; // 8.192 seconds; <=12 MiB of 8ch floating-point PCM.
     static int nextRevision;
     readonly Stream source;
     readonly string[] channels;
     readonly Func<PreviewMixState>? mix;
     readonly Func<double> volume;
     readonly PreviewPcmTap tap;
+    readonly int sampleBytes;
     readonly CancellationTokenSource stop;
     readonly object gate = new();
     readonly Queue<Block> pending = new();
@@ -26,8 +27,10 @@ public sealed class VisualizerLookaheadStream : Stream
     Exception? failure;
 
     public VisualizerLookaheadStream(Stream source, string[] channels, Func<PreviewMixState>? mix,
-        Func<double> volume, PreviewPcmTap tap, CancellationToken token)
+        Func<double> volume, PreviewPcmTap tap, CancellationToken token, int sampleBytes = 2)
     {
+        if (sampleBytes is not (2 or 4)) throw new ArgumentOutOfRangeException(nameof(sampleBytes));
+        this.sampleBytes = sampleBytes;
         this.source = source; this.channels = channels; this.mix = mix; this.volume = volume; this.tap = tap;
         stop = CancellationTokenSource.CreateLinkedTokenSource(token);
         producer = Task.Run(ProduceAsync); observer = Task.Run(ObserveAsync);
@@ -47,13 +50,13 @@ public sealed class VisualizerLookaheadStream : Stream
                     await Task.Delay(10, stop.Token).ConfigureAwait(false);
                 }
                 await slots.WaitAsync(stop.Token).ConfigureAwait(false);
-                var bytes = new byte[FramesPerBlock * channels.Length * 2];
+                var bytes = new byte[FramesPerBlock * channels.Length * sampleBytes];
                 int count = await source.ReadAtLeastAsync(bytes, bytes.Length, false, stop.Token).ConfigureAwait(false);
                 if (count == 0) { slots.Release(); break; }
-                if (count % (channels.Length * 2) != 0) throw new InvalidDataException("Truncated decoded PCM sample.");
+                if (count % (channels.Length * sampleBytes) != 0) throw new InvalidDataException("Truncated decoded PCM sample.");
                 if (count != bytes.Length) Array.Resize(ref bytes, count);
                 lock (gate) pending.Enqueue(new(frame, bytes));
-                ready.Release(); frame += count / (channels.Length * 2);
+                ready.Release(); frame += count / (channels.Length * sampleBytes);
             }
         }
         catch (OperationCanceledException) when (stop.IsCancellationRequested) { }
@@ -85,28 +88,39 @@ public sealed class VisualizerLookaheadStream : Stream
                 var left = new double[channels.Length]; var right = new double[channels.Length];
                 if (state is not null) StereoPreviewMixer.BuildWeights(channels, state, left, right);
                 else { left[0] = 1; right[1] = 1; }
+                var magnitude = left.Select((l, i) => Math.Sqrt(l * l + right[i] * right[i]) * gain).ToArray();
+                int observed = 0;
                 foreach (var block in blocks)
                 {
                     stop.Token.ThrowIfCancellationRequested();
                     if (!tap.Enabled() || mix?.Invoke() != state || volume() != requested) break;
-                    int frames = block.Bytes.Length / (channels.Length * 2);
+                    int frames = block.Bytes.Length / (channels.Length * sampleBytes);
                     var post = new float[frames * channels.Length]; var output = new byte[frames * 4];
+                    var input = sampleBytes == 2 ? block.Bytes : new byte[frames * channels.Length * 2];
                     for (int f = 0; f < frames; f++)
                     {
                         double l = 0, r = 0;
                         for (int c = 0; c < channels.Length; c++)
                         {
-                            int sample = BinaryPrimitives.ReadInt16LittleEndian(block.Bytes.AsSpan((f * channels.Length + c) * 2, 2));
+                            int offset = (f * channels.Length + c) * sampleBytes;
+                            double sample = sampleBytes == 2 ? BinaryPrimitives.ReadInt16LittleEndian(block.Bytes.AsSpan(offset, 2))
+                                : BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(block.Bytes.AsSpan(offset, 4))) * 32768d;
+                            if (!double.IsFinite(sample)) sample = 0;
+                            if (sampleBytes == 4) BinaryPrimitives.WriteInt16LittleEndian(input.AsSpan((f * channels.Length + c) * 2, 2),
+                                (short)Math.Clamp(Math.Round(sample), short.MinValue, short.MaxValue));
                             l += sample * left[c]; r += sample * right[c];
-                            post[f * channels.Length + c] = (float)(sample / 32768d * Math.Sqrt(left[c] * left[c] + right[c] * right[c]) * gain);
+                            post[f * channels.Length + c] = (float)(sample / 32768d * magnitude[c]);
                         }
                         BinaryPrimitives.WriteInt16LittleEndian(output.AsSpan(f * 4, 2), (short)Math.Clamp(Math.Round(l * gain), short.MinValue, short.MaxValue));
                         BinaryPrimitives.WriteInt16LittleEndian(output.AsSpan(f * 4 + 2, 2), (short)Math.Clamp(Math.Round(r * gain), short.MinValue, short.MaxValue));
                     }
-                    tap.TryPublish(new(block.Frame / 48000d, channels, block.Bytes, post, output, revision));
+                    tap.TryPublish(new(block.Frame / 48000d, channels, input, post, output, revision));
                     nextFrame = block.Frame + frames;
+                    // Rebuild long forecasts incrementally. An optional observer
+                    // must not monopolize a worker during a track or mix change.
+                    if (++observed >= 4) break;
                 }
-                await Task.Delay(30, stop.Token).ConfigureAwait(false);
+                await Task.Delay(observed > 0 ? 10 : 30, stop.Token).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException) when (stop.IsCancellationRequested) { }

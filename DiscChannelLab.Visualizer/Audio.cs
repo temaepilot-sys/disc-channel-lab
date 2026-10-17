@@ -111,6 +111,8 @@ public sealed class SpectrumAnalyzer
     readonly float[][] ring;
     readonly double[][] smoothed;
     readonly Complex[] transform;
+    readonly Complex[] rotations;
+    readonly int[] reversed;
     readonly double[] window;
     readonly (int Bin, double Weight)[][] bandWeights;
     readonly double powerScale;
@@ -134,6 +136,14 @@ public sealed class SpectrumAnalyzer
         ring = Enumerable.Range(0, channels).Select(_ => new float[settings.FftSize]).ToArray();
         smoothed = Enumerable.Range(0, channels).Select(_ => new double[settings.BandCount]).ToArray();
         transform = new Complex[settings.FftSize];
+        rotations = Enumerable.Range(0, settings.FftSize / 2).Select(k => Complex.FromPolarCoordinates(1, -2 * Math.PI * k / settings.FftSize)).ToArray();
+        reversed = new int[settings.FftSize];
+        for (int i = 1, j = 0; i < reversed.Length; i++)
+        {
+            int bit = reversed.Length >> 1;
+            for (; (j & bit) != 0; bit >>= 1) j ^= bit;
+            j ^= bit; reversed[i] = j;
+        }
         window = Enumerable.Range(0, settings.FftSize).Select(i => .5 - .5 * Math.Cos(2 * Math.PI * i / settings.FftSize)).ToArray();
         powerScale = 1 / (settings.FftSize * window.Sum(x => x * x));
         bandWeights = new (int Bin, double Weight)[settings.BandCount][];
@@ -196,24 +206,21 @@ public sealed class SpectrumAnalyzer
     public static double Smooth(double previous, double target, double dt, double attack, double release)
         => target + (previous - target) * Math.Exp(-dt / (target > previous ? attack : release));
 
-    static void Fft(Complex[] data)
+    void Fft(Complex[] data)
     {
-        for (int i = 1, j = 0; i < data.Length; i++)
+        for (int i = 1; i < data.Length; i++)
         {
-            int bit = data.Length >> 1;
-            for (; (j & bit) != 0; bit >>= 1) j ^= bit;
-            j ^= bit;
+            int j = reversed[i];
             if (i < j) (data[i], data[j]) = (data[j], data[i]);
         }
         for (int len = 2; len <= data.Length; len <<= 1)
         {
-            Complex step = Complex.FromPolarCoordinates(1, -2 * Math.PI / len);
+            int stride = data.Length / len;
             for (int start = 0; start < data.Length; start += len)
             {
-                Complex w = Complex.One;
-                for (int j = 0; j < len / 2; j++, w *= step)
+                for (int j = 0; j < len / 2; j++)
                 {
-                    Complex a = data[start + j], b = data[start + j + len / 2] * w;
+                    Complex a = data[start + j], b = data[start + j + len / 2] * rotations[j * stride];
                     data[start + j] = a + b;
                     data[start + j + len / 2] = a - b;
                 }

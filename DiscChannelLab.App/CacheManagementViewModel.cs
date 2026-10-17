@@ -11,10 +11,10 @@ public sealed partial class MainViewModel
         $"{LanguageService.T("音声")}: {CacheStorage.FormatBytes(_cacheUsage.AudioBytes)}\n" +
         $"{LanguageService.T("ビューアー")}: {CacheStorage.FormatBytes(_cacheUsage.ViewerBytes)}\n" +
         $"{LanguageService.T("必要なツール（保持）")}: {CacheStorage.FormatBytes(_cacheUsage.ToolBytes)}";
-    public bool CanClearCache => !IsBusy && !IsPlaying && InspectionTask.IsCompleted && !_cacheRefreshing && !_cache.IsInUse;
+    public bool CanClearCache => !IsBusy && _playback is null && !IsPlaying && InspectionTask.IsCompleted && !_cacheRefreshing && !_cache.IsInUse;
     public string CacheClearHint => LanguageService.T(_cacheUsage?.ScanErrors > 0 ? "一部の容量を確認できませんでした。" :
+        _playback is not null || IsPlaying || IsBusy || !InspectionTask.IsCompleted ? "再生・変換・診断の終了後にクリアできます。" :
         _cache.IsInUse ? "他のプレーヤーとビューアーを終了してからクリアできます。" :
-        IsPlaying || IsBusy || !InspectionTask.IsCompleted ? "再生・変換・診断の終了後にクリアできます。" :
         "曲情報・設定・保存済みFLACは保持します。音声キャッシュは次回再生成します。");
     public void RefreshCacheControls()
     {

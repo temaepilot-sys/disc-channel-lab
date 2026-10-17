@@ -10,6 +10,21 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Threading;
 
+if (args is ["playback-observer-stress", var playbackObserverOutput])
+{
+    try { await HeadphoneBufferTests.IsolationAsync(playbackObserverOutput); return 0; }
+    catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
+}
+if (args is ["playback-transport-tests", var playbackTransportOutput])
+{
+    try { PlaybackTransportTests.Run(playbackTransportOutput); return 0; }
+    catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
+}
+if (args is ["native-disc-buffer-test", var nativeDiscSource, var nativeDiscOutput])
+{
+    try { await HeadphoneBufferTests.DiscAsync(nativeDiscSource, nativeDiscOutput); return 0; }
+    catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
+}
 if (args is ["headphone-sofa-tests", var sofaFixtures, var sofaOutput])
 {
     try { await HeadphoneSofaTests.RunAsync(sofaFixtures, sofaOutput); return 0; }

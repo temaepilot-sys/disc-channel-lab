@@ -16,7 +16,7 @@ public sealed partial class AudioNavigationService(ToolPaths paths, ProcessRunne
     private readonly Dictionary<string, AudioStreamInfo> _clipCache = new(StringComparer.OrdinalIgnoreCase);
     private bool? _meterFiltersAvailable;
 
-    public bool CanPlay => HeadphoneSession.Current.Options.Enabled ? File.Exists(paths.Ffmpeg) : paths.Ffplay is not null;
+    public bool CanPlay => File.Exists(paths.Ffmpeg);
     public void ClearCache() => _clipCache.Clear();
 
     public async Task PlayAsync(DiscAnalysis disc, PlaylistInfo playlist, AudioStreamInfo stream,
@@ -25,12 +25,17 @@ public sealed partial class AudioNavigationService(ToolPaths paths, ProcessRunne
         Action<long, double, double[], double[]>? channelLevels = null,
         Action<long, double>? playbackPosition = null,
         Func<PreviewMixState>? liveMix = null, Action<long, MixerMeterFrame>? mixedLevels = null,
-        PreviewPcmTap? visualization = null)
+        PreviewPcmTap? visualization = null, PreviewPlaybackControl? transport = null)
     {
-        if (HeadphoneSession.Current.Options.Enabled)
+        if (HeadphoneSession.Current.Options.Enabled || stream.Channels == 2 || StereoMixSettings.Supports(stream))
         {
+            var spatial = HeadphoneSession.Current.Options.Enabled;
+            Action<long, MixerMeterFrame>? nativeLevels = mixedLevels;
+            if (nativeLevels is null && channelLevels is not null)
+                nativeLevels = (position, frame) => channelLevels(position, frame.Seconds, frame.Input, frame.InputRms);
             await Task.Run(() => PlayHeadphonesAsync(disc, playlist, stream, startTicks, endTicks, token, segmentStarted,
-                volume ?? (() => 1), liveMix ?? (() => new(mix ?? StereoMixSettings.Default, soloChannel)), playbackPosition, mixedLevels, visualization), token);
+                volume ?? (() => 1), liveMix ?? (() => new(mix ?? StereoMixSettings.Default, soloChannel)), playbackPosition, nativeLevels, visualization,
+                spatial: spatial, transport: transport), token);
             return;
         }
         var ffplay = paths.Ffplay ?? throw new FileNotFoundException("再生用の ffplay.exe が見つかりません。");
@@ -160,9 +165,9 @@ public sealed partial class AudioNavigationService(ToolPaths paths, ProcessRunne
             {
                 submittedBytes = liveChannels
                     ? await StereoPreviewMixer.CopyAsync(decoder.StandardOutput.BaseStream, player.StandardInput.BaseStream,
-                        stream, liveMix!, volume, token, () => segmentStarted?.Invoke(startTicks), LogLiveMix, frame => mixedLevels?.Invoke(startTicks, frame), visualization?.AtOffset(startTicks / 45000d))
+                        stream, liveMix!, volume, token, () => segmentStarted?.Invoke(startTicks), LogLiveMix, frame => mixedLevels?.Invoke(startTicks, frame), visualization?.AtOffset(startTicks / 45000d), log.Write)
                     : await CopyPcmWithVolumeAsync(decoder.StandardOutput.BaseStream, player.StandardInput.BaseStream,
-                        volume, token, () => segmentStarted?.Invoke(startTicks), visualization?.AtOffset(startTicks / 45000d));
+                        volume, token, () => segmentStarted?.Invoke(startTicks), visualization?.AtOffset(startTicks / 45000d), log.Write);
             }
             finally { player.StandardInput.Close(); }
             await inputTask;
@@ -269,10 +274,10 @@ public sealed partial class AudioNavigationService(ToolPaths paths, ProcessRunne
             {
                 if (liveChannels)
                     await StereoPreviewMixer.CopyAsync(decoder.StandardOutput.BaseStream, player.StandardInput.BaseStream,
-                        stream, liveMix!, volume, token, onStarted, LogLiveMix, frame => mixedLevels?.Invoke(segmentStartTicks, frame), visualization?.AtOffset(segmentStartTicks / 45000d));
+                        stream, liveMix!, volume, token, onStarted, LogLiveMix, frame => mixedLevels?.Invoke(segmentStartTicks, frame), visualization?.AtOffset(segmentStartTicks / 45000d), log.Write);
                 else
                     await CopyPcmWithVolumeAsync(decoder.StandardOutput.BaseStream, player.StandardInput.BaseStream,
-                        volume, token, onStarted, visualization?.AtOffset(segmentStartTicks / 45000d));
+                        volume, token, onStarted, visualization?.AtOffset(segmentStartTicks / 45000d), log.Write);
             }
             finally { player.StandardInput.Close(); }
             await decoder.WaitForExitAsync(token);
@@ -329,14 +334,13 @@ public sealed partial class AudioNavigationService(ToolPaths paths, ProcessRunne
                   $"channels={string.Join(';', (state.Channels ?? []).Select(x => $"{x.Code}:gain={x.Gain:0.####},pan={x.Pan:0.####},mute={x.Muted},solo={x.Solo},invert={x.InvertPolarity}"))}");
 
     public static async Task<long> CopyPcmWithVolumeAsync(Stream source, Stream destination, Func<double> volume,
-        CancellationToken token, Action? firstWrite = null, PreviewPcmTap? visualization = null)
+        CancellationToken token, Action? firstWrite = null, PreviewPcmTap? visualization = null, Action<string>? pacingLog = null)
     {
         const int bytesPerSecond = 48000 * 2 * sizeof(short);
         await using var ahead = visualization is { Lookahead: true }
             ? new VisualizerLookaheadStream(source, ["FL", "FR"], null, volume, visualization, token) : null;
         if (ahead is not null) source = ahead;
-        const double maxQueuedSeconds = 0.06;
-        var clock = new Stopwatch();
+        using var pacing = new PreviewPcmPacer(visualization?.Enabled, log: pacingLog);
         var submittedBytes = 0L;
         var buffer = new byte[4096];
         var carried = 0;
@@ -353,9 +357,7 @@ public sealed partial class AudioNavigationService(ToolPaths paths, ProcessRunne
             if (complete == 0) { carried = available; continue; }
             // Seeking may spend seconds decoding before the first PCM arrives.
             // Start pacing at that first frame, so decoder startup cannot build playback credit.
-            if (!clock.IsRunning) clock.Start();
-            var due = (submittedBytes + complete) / (double)bytesPerSecond - maxQueuedSeconds;
-            var wait = due - clock.Elapsed.TotalSeconds;
+            var wait = pacing.DelaySeconds(submittedBytes / 4, complete / 4);
             if (wait > 0) await Task.Delay(TimeSpan.FromSeconds(wait), token).ConfigureAwait(false);
             var original = visualization?.Enabled() == true ? buffer.AsSpan(0, complete).ToArray() : null;
             var requestedGain = SafeGain(volume());
@@ -383,6 +385,7 @@ public sealed partial class AudioNavigationService(ToolPaths paths, ProcessRunne
                 }
             }
             await destination.WriteAsync(buffer.AsMemory(0, complete), token).ConfigureAwait(false);
+            pacing.Submitted();
             if (original is not null)
             {
                 var output = buffer.AsSpan(0, complete).ToArray();

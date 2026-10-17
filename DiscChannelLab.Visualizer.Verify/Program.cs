@@ -27,8 +27,51 @@ void Check(bool condition, string name)
     Console.WriteLine("PASS: " + name); passed++;
 }
 var settings = new VisualizationSettings();
+// Scheduling regressions: decoder startup/stalls must not become pacing credit.
+double pacingTime = 100;
+var pacing = new PreviewPcmPacer(() => true, () => pacingTime);
+Check(pacing.DelaySeconds(0, 1024) == 0, "Delayed decoder startup starts with a bounded fresh PCM queue");
+Check(Math.Abs(pacing.DelaySeconds(5760, 1024) - 1024 / 48000d) < 1e-8,
+    "Viewer-linked playback caps mixed queued audio at 120 ms");
+pacingTime += 1;
+Check(pacing.DelaySeconds(5760, 1024) == 0 && pacing.RefillEvents == 1, "A scheduler/decoder stall triggers reserve refilling");
+Check(pacing.DelaySeconds(11520, 1024) > .02, "After a stall, later PCM is paced instead of using stale wall-clock credit");
+var unlinkedPacing = new PreviewPcmPacer(() => false, () => pacingTime);
+unlinkedPacing.DelaySeconds(0, 1024);
+Check(unlinkedPacing.DelaySeconds(2880, 1024) > .02, "Unlinked playback keeps its original 60 ms reserve");
 var stream = new AudioStreamInfo { Index = 0, Codec = "pcm_s16le", Channels = 6, ChannelLayout = "5.1(side)", SampleRate = 48000, BitDepth = 16 };
 var codes = StereoMixSettings.ChannelNames(stream).ToArray();
+var nativeInput = codes.Select((_, c) => Enumerable.Repeat((c + 1) / 128f, 256).ToArray()).ToArray();
+var nativeOutput = new float[512];
+var unityMix = new PreviewMixState(StereoMixSettings.Default, null);
+var nativeLeft = new double[codes.Length]; var nativeRight = new double[codes.Length];
+StereoPreviewMixer.BuildWeights(codes, unityMix, nativeLeft, nativeRight);
+using (var nativeMixer = new StereoPcmRenderer(codes))
+{
+    nativeMixer.Render(nativeInput, nativeOutput, new(130, 60, 20), new() { HeadroomDb = -60 }, unityMix, .8);
+    Check(Math.Abs(nativeOutput[0] - nativeLeft.Select((w, c) => w * nativeInput[c][0] * .8).Sum()) < 1e-7 &&
+        Math.Abs(nativeOutput[1] - nativeRight.Select((w, c) => w * nativeInput[c][0] * .8).Sum()) < 1e-7,
+        "Native stereo uses the original downmix weights, ignoring headphone headroom and pose");
+}
+var leftOnly = new PreviewMixState(StereoMixSettings.Default, null, codes.Select(c => new ExperimentalChannel(c, c == "FL" ? 1 : 0, -1, false)).ToArray());
+using (var nativeMixer = new StereoPcmRenderer(codes))
+{
+    nativeMixer.Render(nativeInput, nativeOutput, new(0, 0, 0), new(), leftOnly, 1);
+    Check(nativeOutput[0] == nativeInput[0][0] && nativeOutput[1] == 0 && nativeMixer.PostSample(0, 0) == nativeInput[0][0],
+        "100% FL remains true unity in both sound and Post meter");
+}
+using (var inverted = new StereoPcmRenderer(codes))
+{
+    var inverseMix = leftOnly with { Channels = leftOnly.Channels!.Select(c => c with { InvertPolarity = true }).ToArray() };
+    inverted.Render(nativeInput, nativeOutput, new(0, 0, 0), new(), inverseMix, 1);
+    Check(nativeOutput[0] == -nativeInput[0][0] && nativeOutput[1] == 0, "Native stereo preserves exact polarity inversion");
+}
+using (var over = new StereoPcmRenderer(["FL", "FR"]))
+{
+    over.Render([Enumerable.Repeat(.8f, 256).ToArray(), new float[256]], nativeOutput, new(0, 0, 0), new(), unityMix, 2);
+    Check(over.ClippedSamples == 256 && nativeOutput.All(float.IsFinite) && nativeOutput[0] == 1,
+        "Master amplification clips safely and counts clipping separately from device buffer gaps");
+}
 var channels = codes.Select((c, i) => new ExperimentalChannel(c, .6, i % 2 == 0 ? -1 : 1, false)).ToArray();
 channels[2] = channels[2] with { Muted = true };
 var state = new PreviewMixState(StereoMixSettings.Default, null, channels);
@@ -62,6 +105,21 @@ using (var destination = new MemoryStream())
     Check(stereoFrames.All(f => f.Channels.SequenceEqual(new[] { "FL", "FR" }) && f.Post.All(x => x == 5000 / 32768f)), "Stereo fallback captures post-volume output");
 }
 // Exercise the real receiver parser and STFT with actual mixer packets.
+var floatingPcm = new byte[32000 * 2 * 4];
+for (int n = 0; n < floatingPcm.Length / 4; n++)
+    BinaryPrimitives.WriteInt32LittleEndian(floatingPcm.AsSpan(n * 4, 4), BitConverter.SingleToInt32Bits((float)(.123456 * Math.Sin(n * .04))));
+var floatingForecasts = new System.Collections.Concurrent.ConcurrentQueue<PreviewPcmChunk>();
+using (var floatingSource = new MemoryStream(floatingPcm))
+await using (var floatingAhead = new VisualizerLookaheadStream(floatingSource, ["FL", "FR"], null, () => 1,
+    new PreviewPcmTap(() => true, floatingForecasts.Enqueue, true), CancellationToken.None, sampleBytes: 4))
+{
+    for (int n = 0; n < 100 && floatingForecasts.Count < 4; n++) await Task.Delay(10);
+    using var preserved = new MemoryStream(); var arbitrary = new byte[1937]; int read;
+    while ((read = await floatingAhead.ReadAsync(arbitrary)) > 0) preserved.Write(arbitrary, 0, read);
+    Check(preserved.ToArray().SequenceEqual(floatingPcm), "Native read-ahead preserves every original float PCM byte, including beyond 16-bit precision");
+    Check(floatingForecasts.Count > 0 && floatingForecasts.All(f => f.Input.Length == f.Output.Length && f.Post.Length * 2 == f.Input.Length),
+        "Float read-ahead produces correctly aligned protocol PCM without changing the playback format");
+}
 using (var receiver = new LiveReceiver(null, settings, Console.WriteLine))
 {
     var speakerStates = codes.Select(code => new SpeakerPlaybackState(code, code == "FC", false, code != "FC")).ToArray();
@@ -155,6 +213,25 @@ await using (var ahead = new VisualizerLookaheadStream(decoded, codes, () => Vol
     Check(!forecastSnapshot.RootElement.GetProperty("hasData").GetBoolean(), "Future PCM never replaces the currently audible spectrum");
     var futureValues = forecastData.GetProperty("values").EnumerateArray().Select(x => x.GetSingle()).ToArray();
     Check(Enumerable.Range(0, futureValues.Length / 96).All(n => futureValues.Skip(n * 96 + 32).Take(16).All(x => x == 0)), "Future spectrum honors Center mute");
+    using (var emissionReceiver = new LiveReceiver(null, settings, Console.WriteLine, enableForecast: false))
+    {
+        emissionReceiver.Consume(VisualizerBridge.Encode(new VisualizerClock(1, 25, "Emission", "PCM", 48000, .5, 10, false, Environment.TickCount64)));
+        var encodedForecasts = changedFuture.Select(packet => VisualizerBridge.Encode((25, packet))).ToArray();
+        var skipWatch = Stopwatch.StartNew();
+        foreach (var packet in encodedForecasts) emissionReceiver.Consume(packet);
+        Console.WriteLine($"Emission mode skipped {encodedForecasts.Length} future packets in {skipWatch.Elapsed.TotalMilliseconds:0.00} ms (no future FFTs).");
+        Check(emissionReceiver.ForecastPacketsAnalyzed == 0, "Emission views skip all future FFT work");
+        foreach (var frame in tapped.Frames) emissionReceiver.Consume(VisualizerBridge.Encode((25, frame)));
+        using var audible = JsonDocument.Parse(JsonSerializer.Serialize(emissionReceiver.Snapshot()));
+        Check(audible.RootElement.GetProperty("hasData").GetBoolean() && audible.RootElement.GetProperty("lookahead").GetProperty("values").GetArrayLength() == 0,
+            "Current PCM still analyzed while unused future HTTP arrays remain empty");
+        emissionReceiver.SetForecastEnabled(true);
+        foreach (var packet in encodedForecasts) emissionReceiver.Consume(packet);
+        Check(emissionReceiver.ForecastPacketsAnalyzed == encodedForecasts.Length, "Switching to listener-timed particles re-enables forecasts");
+        emissionReceiver.SetForecastEnabled(false);
+        using var disabled = JsonDocument.Parse(JsonSerializer.Serialize(emissionReceiver.Snapshot()));
+        Check(disabled.RootElement.GetProperty("lookahead").GetProperty("times").GetArrayLength() == 0, "Leaving listener sync releases the old forecast queue");
+    }
     forecastReceiver.Consume(VisualizerBridge.Encode(new VisualizerClock(1, 26, "Seek", "PCM", 48000, 4, 10, false, Environment.TickCount64)));
     forecastReceiver.Consume(VisualizerBridge.Encode((25, changedFuture[^1])));
     using var cleared = JsonDocument.Parse(JsonSerializer.Serialize(forecastReceiver.Snapshot()));
@@ -185,7 +262,7 @@ await using (var ahead = new VisualizerLookaheadStream(decoded, codes, () => Vol
 }
 Console.WriteLine($"{passed} link and look-ahead checks passed.");
 
-if (args.Length == 2 && args[0] == "--host")
+if (args.Length == 2 && args[0] is "--host" or "--host-stable")
 {
     using var bridge = new VisualizerBridge(); bridge.Start();
     var executable = Path.GetFullPath(args[1]);
@@ -215,6 +292,7 @@ if (args.Length == 2 && args[0] == "--host")
         Check(bridge.IsConnected, "Separate viewer process connects to the player's pipe");
         var script = await client.GetStringAsync("/app.js");
         Check(script.Contains("uniform mediump float uPoint") && script.Contains("function enterLive"), "Published assets include the shader fix and live controls");
+        Check(!script.Contains("ElectricFlow") && !script.Contains("AuroraRenderer"), "Public host retains the stable particle view");
         bridge.PublishClock(21, "Published host integration", "PCM", 48000, .25, 1, false, codes,
             codes.Select(code => new SpeakerPlaybackState(code, code == "FC", false, code != "FC")).ToArray());
         foreach (var frame in tapped.Frames) { bridge.PublishPcm(21, frame); await Task.Delay(10); }
@@ -226,6 +304,24 @@ if (args.Length == 2 && args[0] == "--host")
         Check(data.GetProperty("channels").GetArrayLength() == 6 && data.GetProperty("output").GetArrayLength() == 32, "Browser receives original channels and final stereo spectrum");
         Check(data.GetProperty("speakerStates").EnumerateArray().Single(s => s.GetProperty("code").GetString() == "FC").GetProperty("muted").GetBoolean(),
             "Published browser API exposes the muted speaker state received from the player");
+        using (var disableFuture = await client.PostAsync("/api/live?ahead=0", null)) disableFuture.EnsureSuccessStatusCode();
+        foreach (var frame in tapped.Frames) bridge.PublishPcm(21, frame with { ForecastRevision = 1 });
+        await Task.Delay(80);
+        using (var quietResponse = await client.PostAsync("/api/live?ahead=0", null))
+        using (var quietSnapshot = JsonDocument.Parse(await quietResponse.Content.ReadAsStringAsync()))
+            Check(quietSnapshot.RootElement.GetProperty("lookahead").GetProperty("values").GetArrayLength() == 0,
+                "Published emission API skips future analysis and returns no forecast payload");
+        using (var enableFuture = await client.PostAsync("/api/live?ahead=1", null)) enableFuture.EnsureSuccessStatusCode();
+        foreach (var frame in tapped.Frames) { bridge.PublishPcm(21, frame with { ForecastRevision = 2 }); await Task.Delay(3); }
+        bool futureRestored = false;
+        for (int n = 0; n < 50 && !futureRestored; n++)
+        {
+            using var futureResponse = await client.PostAsync("/api/live?ahead=1", null);
+            using var futureSnapshot = JsonDocument.Parse(await futureResponse.Content.ReadAsStringAsync());
+            futureRestored = futureSnapshot.RootElement.GetProperty("lookahead").GetProperty("values").GetArrayLength() > 0;
+            if (!futureRestored) await Task.Delay(20);
+        }
+        Check(futureRestored, "Published API can restore listener-sync forecasts without restarting playback");
         using var end = await client.PostAsync("/api/quit", null);
         await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
         Check(process.ExitCode == 0, "Published host closes cleanly");

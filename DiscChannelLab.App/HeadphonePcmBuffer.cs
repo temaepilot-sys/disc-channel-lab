@@ -7,7 +7,8 @@ namespace Disc2Flac;
 public sealed class HeadphonePcmBuffer(int blockBytes) : IDisposable
 {
     public const int PrebufferBlocks = 32; // 171 ms at 48 kHz / 256 frames; not rendered audio latency.
-    public const int CapacityBlocks = 64;
+    public const int CapacityBlocks = 256; // 1.37s raw PCM; controls still run at device submission.
+    readonly SemaphoreSlim slots = new(CapacityBlocks);
     private readonly BlockingCollection<byte[]> _blocks = new(CapacityBlocks);
     private readonly ConcurrentQueue<byte[]> _recycled = new();
     private readonly TaskCompletionSource _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -20,7 +21,19 @@ public sealed class HeadphonePcmBuffer(int blockBytes) : IDisposable
     public void Add(byte[] block, CancellationToken token)
     {
         if (block.Length != blockBytes) throw new ArgumentException("Incorrect headphone PCM block size.");
-        _blocks.Add(block, token);
+        slots.Wait(token);
+        AddReserved(block, token);
+    }
+    public async ValueTask AddAsync(byte[] block, CancellationToken token)
+    {
+        if (block.Length != blockBytes) throw new ArgumentException("Incorrect headphone PCM block size.");
+        await slots.WaitAsync(token).ConfigureAwait(false);
+        AddReserved(block, token);
+    }
+    void AddReserved(byte[] block, CancellationToken token)
+    {
+        try { _blocks.Add(block, token); }
+        catch { slots.Release(); throw; }
         if (++_produced >= PrebufferBlocks) _ready.TrySetResult();
     }
     public void Complete(Exception? error = null)
@@ -34,14 +47,16 @@ public sealed class HeadphonePcmBuffer(int blockBytes) : IDisposable
         _ready.Task.WaitAsync(token).GetAwaiter().GetResult();
         Volatile.Read(ref _failure)?.Throw();
     }
-    public IEnumerable<byte[]> ReadAll(CancellationToken token)
+    public IEnumerable<byte[]> ReadAll(CancellationToken token, Action? whileWaiting = null)
     {
-        foreach (var block in _blocks.GetConsumingEnumerable(token))
+        while (!_blocks.IsCompleted)
         {
+            if (!_blocks.TryTake(out var block, 10, token)) { whileWaiting?.Invoke(); continue; }
+            slots.Release();
             Volatile.Read(ref _failure)?.Throw();
             yield return block;
         }
         Volatile.Read(ref _failure)?.Throw();
     }
-    public void Dispose() => _blocks.Dispose();
+    public void Dispose() { _blocks.Dispose(); slots.Dispose(); }
 }

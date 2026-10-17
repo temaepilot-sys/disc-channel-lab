@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const assert = require('node:assert/strict');
-const root = path.resolve(__dirname, '../DiscChannelLab.Visualizer');
+const root = process.env.LAB_VIEWER_ROOT || path.resolve(__dirname, '../DiscChannelLab.Visualizer');
 const output = path.resolve(__dirname, '../verification-output');
 fs.mkdirSync(output, {recursive: true});
 const packet = fs.readFileSync(process.argv[2] || path.join(output, 'visualizer-demo.packet'));

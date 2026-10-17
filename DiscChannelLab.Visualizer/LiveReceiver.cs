@@ -14,7 +14,7 @@ public sealed record HeadphoneSpeakerValue(string Code, double X, double Y, doub
 public sealed record HeadphoneSceneValue(bool RotateWorld, double FrontAngle, HeadphoneSpeakerValue[] Speakers);
 
 /// <summary>Receives PCM on its own worker; never decodes or plays audio in linked mode.</summary>
-public sealed class LiveReceiver(string? pipeName, VisualizationSettings settings, Action<string> log) : IDisposable
+public sealed class LiveReceiver(string? pipeName, VisualizationSettings settings, Action<string> log, bool enableForecast = true) : IDisposable
 {
     readonly object gate = new();
     readonly CancellationTokenSource stop = new();
@@ -35,6 +35,17 @@ public sealed class LiveReceiver(string? pipeName, VisualizationSettings setting
     long revision;
     string? lastError;
     Task? worker;
+    volatile bool forecastEnabled = enableForecast;
+    public long ForecastPacketsAnalyzed { get; private set; }
+    public void SetForecastEnabled(bool enabled)
+    {
+        lock (gate)
+        {
+            if (forecastEnabled == enabled) return;
+            forecastEnabled = enabled;
+            ResetForecast();
+        }
+    }
     public bool Configured => !string.IsNullOrWhiteSpace(pipeName);
     public void Start() { if (Configured) worker = Task.Run(RunAsync); }
 
@@ -96,6 +107,9 @@ public sealed class LiveReceiver(string? pipeName, VisualizationSettings setting
         }
         if (payload[0] is not (2 or 3)) throw new InvalidDataException("Unknown live packet type.");
         bool forecast = payload[0] == 3;
+        // Emission-time views use only audible PCM. Do not spend audio-time CPU
+        // performing seconds of future FFTs or allocate their large HTTP arrays.
+        if (forecast && !forecastEnabled) return;
         using var reader = new BinaryReader(new MemoryStream(payload), Encoding.UTF8);
         reader.ReadByte(); int epoch = reader.ReadInt32();
         int generation = forecast ? reader.ReadInt32() : 0;
@@ -112,16 +126,18 @@ public sealed class LiveReceiver(string? pipeName, VisualizationSettings setting
             if (clock is null || clock.Epoch != epoch) return; // Discard old seek/session data.
             if (forecast)
             {
-                if (generation <= 0 || generation < forecastGeneration) return;
+                if (!forecastEnabled || generation <= 0 || generation < forecastGeneration) return;
                 if (forecastAnalyzer is null || generation != forecastGeneration || !forecastChannels.SequenceEqual(codes) || Math.Abs(time - forecastExpected) > 2d / 48000)
                 {
                     ResetForecast(); forecastGeneration = generation; forecastChannels = codes; forecastBase = time;
-                    forecastAnalyzer = new SpectrumAnalyzer(codes.Length * 2 + 2, settings, (seconds, values) =>
+                    var forecastSettings = settings with { HopSize = Math.Min(settings.FftSize, Math.Max(settings.HopSize, 1920)) };
+                    forecastAnalyzer = new SpectrumAnalyzer(codes.Length * 2 + 2, forecastSettings, (seconds, values) =>
                     {
                         lock (gate)
                         {
+                            if (!forecastEnabled || generation != forecastGeneration || clock?.Epoch != epoch) return;
                             double timestamp = forecastBase + seconds;
-                            if (timestamp - lastForecast < .04) return; // About 23 Hz; bounded HTTP payload.
+                            if (timestamp - lastForecast < .04 - 1e-8) return; // <=25 Hz, tolerant of timestamp round-off.
                             lastForecast = timestamp; forecasts.Enqueue((timestamp, values));
                             while (forecasts.Count > 256) forecasts.Dequeue();
                         }
@@ -134,7 +150,8 @@ public sealed class LiveReceiver(string? pipeName, VisualizationSettings setting
                 if (analyzer is null || analyzerEpoch != epoch || !channels.SequenceEqual(codes) || Math.Abs(time - expectedTime) > 2d / 48000)
                 {
                     Reset(); channels = codes; analyzerEpoch = epoch; baseTime = time;
-                    analyzer = new SpectrumAnalyzer(codes.Length * 2 + 2, settings, retainFrames: false, onDetailedFrame: (seconds, values, fastValues) =>
+                    var currentSettings = settings with { HopSize = Math.Min(settings.FftSize, Math.Max(settings.HopSize, 1024)) };
+                    analyzer = new SpectrumAnalyzer(codes.Length * 2 + 2, currentSettings, retainFrames: false, onDetailedFrame: (seconds, values, fastValues) =>
                     {
                         lock (gate)
                         {
@@ -162,6 +179,7 @@ public sealed class LiveReceiver(string? pipeName, VisualizationSettings setting
             sample[^1] = BinaryPrimitives.ReadInt16LittleEndian(payload.AsSpan(outputStart + i * 4 + 2, 2)) / 32768f;
             current.Push(sample);
         }
+        if (forecast) ForecastPacketsAnalyzed++;
     }
 
     void Reset()
@@ -175,7 +193,7 @@ public sealed class LiveReceiver(string? pipeName, VisualizationSettings setting
         forecastChannels = []; forecastGeneration = 0;
     }
 
-    public object Snapshot(string signal = "post")
+    public object Snapshot(string signal = "post", double lookaheadSeconds = 8.2)
     {
         lock (gate)
         {
@@ -193,7 +211,8 @@ public sealed class LiveReceiver(string? pipeName, VisualizationSettings setting
             int forecastWidth = forecastChannels.Length * settings.BandCount;
             int start = signal == "input" ? 0 : signal == "post" ? forecastWidth : forecastWidth * 2;
             int length = signal == "output" ? settings.BandCount * 2 : forecastWidth;
-            var ahead = forecasts.Where(f => f.Time <= position + 8.2).ToArray();
+            lookaheadSeconds = double.IsFinite(lookaheadSeconds) ? Math.Clamp(lookaheadSeconds, .5, 8.2) : 8.2;
+            var ahead = forecasts.Where(f => f.Time <= position + lookaheadSeconds).ToArray();
             return new
             {
                 configured = Configured, connected = fresh, playing, hasData, revision, epoch = clock?.Epoch ?? -1,

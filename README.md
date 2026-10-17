@@ -50,6 +50,10 @@ The player always starts in **2ch Stereo**. Under **Preview Audio**, select **2c
 
 Use the built-in HRTF or choose an **external SOFA** and replay the same marked passage to compare. Standard and SOFA retain separate comparison trims. Every Lab slider has an individual **↺** reset, and **Reset sound settings** restores the audio defaults together.
 
+## Playback reliability
+
+Pause and resume retain the native decoder and Windows audio device in Stereo, Direct and HRTF modes. Metering and visualization run separately from audio output; slow display updates are dropped instead of blocking sound. The viewer also reduces redundant FFT work and caps particle rendering at 30 fps. [Playback behavior and diagnostic checks](docs/headphones.md#playback-transitions).
+
 ## Features
 
 - Inspect titles, chapters, tracks, audio streams, and channel layouts.

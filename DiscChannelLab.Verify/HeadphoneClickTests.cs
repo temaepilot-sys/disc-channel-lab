@@ -59,7 +59,8 @@ internal static class HeadphoneClickTests
                 foreach (var seek in new[] { 0L, 13781L })
                 {
                     using var cancel = new CancellationTokenSource();
-                    var capture = new CaptureOutput { OnWrite = count => { if (count == 6) cancel.Cancel(); } };
+                    var guardSamples = HeadphonePlaybackOutput.MinimumGuardFrames * 2;
+                    var capture = new CaptureOutput { OnWrite = count => { if (count == HeadphonePlaybackOutput.MinimumGuardFrames / 256 + 6) cancel.Cancel(); } };
                     AudioNavigationService.HeadphoneOutputFactory = () => capture;
                     var canceled = false;
                     try { await new AudioNavigationService(tools, runner, probe, log).PlayAsync(disc, title, stream, seek, title.DurationTicks, cancel.Token); }
@@ -68,7 +69,7 @@ internal static class HeadphoneClickTests
                         $"{method} stops and drains its de-click release after cancellation at position {seek}");
                     Check(capture.Samples[0] == 0 && capture.Samples[1] == 0 && capture.Samples[^1] == 0 && capture.Samples[^2] == 0 && capture.Samples.Any(v => Math.Abs(v) > .001),
                         $"{method} file playback and seek begin and end at zero with audible content preserved");
-                    Check(MaxStep(capture.Samples, 3070, capture.Samples.Count) < .003,
+                    Check(MaxStep(capture.Samples, guardSamples + 3070, capture.Samples.Count) < .003,
                         $"{method} cancellation does not cut the last nonzero sample abruptly");
                 }
             }

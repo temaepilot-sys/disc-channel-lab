@@ -66,6 +66,10 @@ Audio is decoded to 48 kHz float PCM and rendered in 256-sample blocks to Window
 
 Playback starts, seeks and resumes use an 8 ms raised-cosine fade from silence, after headphone rendering. Stopping releases the last submitted stereo sample smoothly to zero before the device closes; it does not replay queued decoder blocks. Shutdown has a timeout, and the Windows endpoint buffer is explicitly reset on close. These short transport fades prevent abrupt waveform cuts; they do not alter stored audio, FLAC exports or steady playback levels.
 
+Direct and HRTF also run a short **silent device guard before the first source frame and after the final release**. The guard is at least 64 ms, extends to cover the endpoint buffer plus Windows' reported stream latency, and is capped at about 500 ms. Silent packets use Windows' `AUDCLNT_BUFFERFLAGS_SILENT`; the client is reset on opening and closing. This adds a small delay to transport changes so the downstream output path can settle to silence. Guards do not count as track time and do not offset meters or the 3D viewer. Preparation can be canceled without playing a track fragment. This addresses possible device transition noise; a clean digital test alone cannot establish that every device is acoustically free of clicks.
+
+`headphone-restart-tests <output-folder>` checks repeated loud-to-silent renderer replacement, consecutive 5.1 FLAC tracks, guards at different device latencies, cancellation and source-clock alignment. Together with `headphone-buffer-tests`, it verifies the PCM and silent Windows output path without playing audible test tones.
+
 ## Viewer synchronization
 
 In keyboard mode, speakers, grid, labels, particles and beams rotate around the fixed listener. In tracker mode, the room stays fixed; **Listener** camera can follow the head. L/R width and surround placement match the audio renderer.

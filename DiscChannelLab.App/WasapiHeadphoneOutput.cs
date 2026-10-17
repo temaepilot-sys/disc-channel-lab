@@ -21,6 +21,7 @@ public sealed class WasapiHeadphoneOutput : IHeadphoneOutput
     public long PlayedFrames => Math.Max(0, SubmittedFrames - Padding);
     public uint Padding { get { Marshal.ThrowExceptionForHR(_client.GetCurrentPadding(out var padding)); return padding; } }
     public double BufferMilliseconds => BufferFrames * 1000d / HeadphoneRenderer.SampleRate;
+    public double StreamLatencyMilliseconds { get; }
     public WasapiHeadphoneOutput()
     {
         try
@@ -35,10 +36,12 @@ public sealed class WasapiHeadphoneOutput : IHeadphoneOutput
         Marshal.ThrowExceptionForHR(_client.Initialize(0, 0x00040000 | 0x80000000 | 0x08000000, 300000, 0, ref format, IntPtr.Zero));
         _initialized = true;
         Marshal.ThrowExceptionForHR(_client.GetBufferSize(out var size)); BufferFrames = size;
+        Marshal.ThrowExceptionForHR(_client.GetStreamLatency(out var latency)); StreamLatencyMilliseconds = latency / 10000d;
         if (size < HeadphoneRenderer.BlockSize) throw new InvalidOperationException("Audio endpoint buffer is too small.");
         Marshal.ThrowExceptionForHR(_client.SetEventHandle(_event.SafeWaitHandle.DangerousGetHandle()));
         iid = typeof(IAudioRenderClient).GUID;
         Marshal.ThrowExceptionForHR(_client.GetService(ref iid, out var render)); _render = (IAudioRenderClient)render;
+        Marshal.ThrowExceptionForHR(_client.Reset());
         }
         catch { Dispose(); throw; }
     }
@@ -53,10 +56,13 @@ public sealed class WasapiHeadphoneOutput : IHeadphoneOutput
     }
     public void Write(float[] interleaved, int frames)
     {
+        uint flags = 2; // AUDCLNT_BUFFERFLAGS_SILENT: the engine must ignore the buffer's old bytes.
+        for (int i = 0; i < frames * 2; i++)
+            if (interleaved[i] != 0) { flags = 0; break; }
         if (_started && Padding == 0) EmptyBufferCount++;
         Marshal.ThrowExceptionForHR(_render.GetBuffer((uint)frames, out var data));
-        try { Marshal.Copy(interleaved, 0, data, frames * 2); }
-        finally { Marshal.ThrowExceptionForHR(_render.ReleaseBuffer((uint)frames, 0)); }
+        try { if (flags == 0) Marshal.Copy(interleaved, 0, data, frames * 2); }
+        finally { Marshal.ThrowExceptionForHR(_render.ReleaseBuffer((uint)frames, flags)); }
         SubmittedFrames += frames;
         // Fill almost the entire device buffer before starting, rather than starting on 5.3 ms of audio.
         if (!_started && Padding >= StartupFrames) Start();

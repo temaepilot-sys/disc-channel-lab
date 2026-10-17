@@ -161,7 +161,8 @@ internal static class HeadphoneTests
                 using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
                 await navigation.PlayAsync(disc, playlist, stream, 9000, playlist.DurationTicks, timeout.Token,
                     segmentStarted: _ => starts++, mixedLevels: (_, _) => meters++, visualization: new(() => true, chunks.Add));
-                Check(starts == 1 && sink.SubmittedFrames >= 48000 && sink.SubmittedFrames < 50000 && meters > 100 && chunks.Count == meters,
+                var mediaFrames = sink.SubmittedFrames - 2 * HeadphonePlaybackOutput.MinimumGuardFrames;
+                Check(starts == 1 && mediaFrames >= 48000 && mediaFrames < 50000 && meters > 100 && chunks.Count == meters,
                     method + " decodes and seeks actual 5.1 FLAC with matching meters and viewer blocks");
                 Check(sink.Samples.All(float.IsFinite) && sink.Samples.Any(v => Math.Abs(v) > .001f) && chunks.All(c => c.Channels.SequenceEqual(new[] { "FL", "FR", "FC", "LFE", "SL", "SR" })),
                     method + " preserves explicit channel order and emits finite audible stereo");

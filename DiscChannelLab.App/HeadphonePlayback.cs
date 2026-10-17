@@ -9,6 +9,7 @@ public interface IHeadphoneOutput : IDisposable
     long SubmittedFrames { get; }
     long PlayedFrames { get; }
     double BufferMilliseconds { get; }
+    double StreamLatencyMilliseconds => 0;
     bool HasStarted => true;
     long EmptyBufferCount => 0;
     void WaitForSpace(int frames, CancellationToken token);
@@ -135,9 +136,11 @@ public sealed partial class AudioNavigationService
                 using var scheduling = new HeadphoneAudioThread.Scheduling();
                 using var renderer = new HeadphoneRenderer(channels, session.Options);
                 using var output = new HeadphonePlaybackOutput(HeadphoneOutputFactory());
+                output.Prepare(token);
                 session.ReportOutput(output.BufferMilliseconds, 0);
                 log.Write($"HEADPHONES {session.Options.Method}, 48000 Hz float, {channels.Length}ch, endpoint buffer {output.BufferMilliseconds:0.0} ms, " +
-                    $"raw prebuffer {pcm.Count * HeadphoneRenderer.BlockSize * 1000d / 48000:0.0} ms, MMCSS={scheduling.IsRegistered}");
+                    $"raw prebuffer {pcm.Count * HeadphoneRenderer.BlockSize * 1000d / 48000:0.0} ms, " +
+                    $"device latency {output.StreamLatencyMilliseconds:0.0} ms, silent guard {output.GuardFrames * 1000d / 48000:0.0} ms, MMCSS={scheduling.IsRegistered}");
                 var input = channels.Select(_ => new float[HeadphoneRenderer.BlockSize]).ToArray();
                 var stereo = new float[HeadphoneRenderer.BlockSize * 2];
                 bool announced = false;

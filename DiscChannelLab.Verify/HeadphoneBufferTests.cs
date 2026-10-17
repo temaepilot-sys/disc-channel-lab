@@ -119,6 +119,7 @@ internal static class HeadphoneBufferTests
         public long SubmittedFrames => _device.SubmittedFrames;
         public long PlayedFrames => _device.PlayedFrames;
         public double BufferMilliseconds => _device.BufferMilliseconds;
+        public double StreamLatencyMilliseconds => _device.StreamLatencyMilliseconds;
         public bool HasStarted => _device.HasStarted;
         public long EmptyBufferCount => _device.EmptyBufferCount;
         private void CheckThread() => SameThread &= Environment.CurrentManagedThreadId == _owner;

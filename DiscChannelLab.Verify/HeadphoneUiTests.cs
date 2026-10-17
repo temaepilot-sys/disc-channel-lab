@@ -109,14 +109,27 @@ internal static class HeadphoneUiTests
                 Check(HeadphoneSession.Current.Options.FrontAngle == 30, "Standard placement button restores 30 degrees per front speaker");
                 var room = (Canvas)lab.FindName("Room");
                 System.Windows.Shapes.Ellipse Speaker(string code) => room.Children.OfType<System.Windows.Shapes.Ellipse>().Single(s => Equals(s.Tag, code));
-                void ClickSpeaker(string code) => Speaker(code).RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left) { RoutedEvent = Mouse.MouseDownEvent });
+                void ClickSpeaker(string code, bool shift = false, bool label = false)
+                {
+                    // Exercise modifier dispatch without sending physical Shift keystrokes to the user's desktop.
+                    if (shift) typeof(HeadphonesWindow).GetMethod("ApplySpeakerClick", BindingFlags.NonPublic | BindingFlags.Instance)!
+                        .Invoke(lab, [code, ModifierKeys.Shift]);
+                    else
+                    {
+                        UIElement target = label ? room.Children.OfType<TextBlock>().Single(s => Equals(s.Tag, code)) : Speaker(code);
+                        target.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left) { RoutedEvent = Mouse.MouseDownEvent });
+                    }
+                }
                 var orange = ((SolidColorBrush)Speaker("FL").Fill).Color;
                 Check(orange.R > orange.G && orange.G > orange.B && Speaker("FL").Cursor == Cursors.Hand,
                     "Available speakers use orange circles with a clickable cursor");
                 var centerStrip = model.MixerStrips.Single(s => s.Code == "FC");
                 centerStrip.Solo = true; ClickSpeaker("FC");
+                Check(!centerStrip.Muted && !centerStrip.Solo && model.MixerStrips.All(s => !s.Muted),
+                    "Ordinary click clears Solo and returns the channel to On without muting it");
+                ClickSpeaker("FC");
                 Check(centerStrip.Muted && !centerStrip.Solo && model.MixerStrips.Where(s => s.Code != "FC").All(s => !s.Muted),
-                    "Clicking a speaker mutes only that mixer channel and clears its Solo");
+                    "Ordinary click still toggles Mute for a channel that is not soloed");
                 Check(((SolidColorBrush)Speaker("FC").Fill).Color.R < orange.R && ((string)Speaker("FC").ToolTip).Contains("unmute"),
                     "Muted speakers become dark and offer an unmute tooltip");
                 ClickSpeaker("FC");
@@ -125,13 +138,42 @@ internal static class HeadphoneUiTests
                 centerStrip.Muted = true; Pump(Task.Delay(80));
                 Check(((string)Speaker("FC").ToolTip).Contains("unmute"), "Mixer Mute changes are reflected back in the room diagram");
                 ClickSpeaker("FC");
+                ClickSpeaker("FC", shift: true);
+                Check(centerStrip.Solo && !centerStrip.Muted && Speaker("FC").StrokeThickness == 3 &&
+                    System.Windows.Automation.AutomationProperties.GetName(Speaker("FC")).Contains("Solo") &&
+                    ((string)Speaker("FC").ToolTip).Contains("Shift+click"),
+                    "Shift click enables Solo with a visible badge, gold outline and accessible state");
+                ClickSpeaker("FL", shift: true);
+                Check(centerStrip.Solo && model.MixerStrips.Single(s => s.Code == "FL").Solo,
+                    "Shift click allows multiple speakers to be soloed together");
+                ClickSpeaker("FC", shift: true);
+                Check(!centerStrip.Solo && !centerStrip.Muted && model.MixerStrips.Single(s => s.Code == "FL").Solo,
+                    "A repeated Shift click clears only that Solo and leaves other solos intact");
+                ClickSpeaker("FL", label: true);
+                Check(model.MixerStrips.All(s => !s.Solo && !s.Muted),
+                    "Clicking the speaker label also clears Solo and returns to On");
+                centerStrip.Muted = true; ClickSpeaker("FC", shift: true);
+                Check(centerStrip.Solo && !centerStrip.Muted, "Shift click on a muted speaker switches it to Solo without simultaneous Mute");
+                ClickSpeaker("FC", shift: true);
+                Check(!centerStrip.Solo && !centerStrip.Muted, "Clearing Solo leaves the channel unmuted");
+                LanguageService.Instance.SetJapanese(true); Pump(Task.Delay(80));
+                Check(((string)Speaker("FC").ToolTip).Contains("Shift＋クリックでSolo"), "Solo gesture tooltips switch to Japanese");
+                LanguageService.Instance.SetJapanese(false); Pump(Task.Delay(80));
                 ClickSpeaker("LFE");
                 Check(model.MixerStrips.Single(s => s.Code == "LFE").Muted, "The LFE circle also toggles its real mixer channel");
+                ClickSpeaker("LFE");
+                ClickSpeaker("LFE", shift: true);
+                Check(model.MixerStrips.Single(s => s.Code == "LFE").Solo && !model.MixerStrips.Single(s => s.Code == "LFE").Muted,
+                    "LFE supports the same Solo gesture");
                 ClickSpeaker("LFE");
                 model.ExperimentalMixerEnabled = false; ClickSpeaker("FL");
                 Check(model.ExperimentalMixerEnabled && model.MixerStrips.Single(s => s.Code == "FL").Muted,
                     "A speaker click enables a bypassed headphone mixer so Mute takes effect");
                 ClickSpeaker("FL");
+                model.ExperimentalMixerEnabled = false; ClickSpeaker("FC", shift: true);
+                Check(model.ExperimentalMixerEnabled && centerStrip.Solo && !centerStrip.Muted,
+                    "Shift click enables a bypassed mixer so Solo is applied to playback");
+                ClickSpeaker("FC");
                 void Key(Key key) => room.RaiseEvent(new KeyEventArgs(Keyboard.PrimaryDevice, PresentationSource.FromVisual(room)!, Environment.TickCount, key) { RoutedEvent = Keyboard.PreviewKeyDownEvent });
                 Key(System.Windows.Input.Key.Right); Key(System.Windows.Input.Key.Up); Key(System.Windows.Input.Key.E);
                 Check(HeadphoneSession.Current.Pose == new HeadPose(5, 5, 5), "Real room keyboard events change yaw, pitch and roll");
@@ -167,6 +209,10 @@ internal static class HeadphoneUiTests
                 Check(model.IsPlaying && model.PreviewSeconds >= .3 && !mode.IsEnabled && !enable.IsEnabled && !previewMode.IsEnabled,
                     "Play from mark starts the chosen renderer at the saved position and locks mode selection during playback");
                 ClickSpeaker("FL");
+                ClickSpeaker("FR", shift: true);
+                Check(model.IsPlaying && model.MixerStrips.Single(s => s.Code == "FR").Solo,
+                    "Solo can change during HRTF playback without restarting it");
+                ClickSpeaker("FR");
                 Check(model.IsPlaying && model.MixerStrips.Single(s => s.Code == "FL").Muted,
                     "Speaker Mute remains available during HRTF playback without restarting it");
                 ClickSpeaker("FL");
@@ -188,19 +234,35 @@ internal static class HeadphoneUiTests
                 {
                     model.Visualization.Start(); Pump(pipe.ConnectAsync(timeout.Token));
                     for (int n = 0; n < 100 && !model.Visualization.IsConnected; n++) Pump(Task.Delay(10));
-                    JsonElement ReadSpeakerState()
+                    JsonElement ReadSpeakerStates()
                     {
                         var header = new byte[4]; Pump(pipe.ReadExactlyAsync(header.AsMemory(), timeout.Token).AsTask());
                         var payload = new byte[BitConverter.ToInt32(header)]; Pump(pipe.ReadExactlyAsync(payload.AsMemory(), timeout.Token).AsTask());
                         using var packet = JsonDocument.Parse(payload.AsMemory(1));
-                        return packet.RootElement.GetProperty("SpeakerStates").EnumerateArray().Single(s => s.GetProperty("Code").GetString() == "FL").Clone();
+                        return packet.RootElement.GetProperty("SpeakerStates").Clone();
                     }
+                    JsonElement ReadSpeakerState() => ReadSpeakerStates().EnumerateArray().Single(s => s.GetProperty("Code").GetString() == "FL");
                     model.AdvancePlaybackClock(); var mutedState = ReadSpeakerState();
                     Check(mutedState.GetProperty("Muted").GetBoolean() && !mutedState.GetProperty("Enabled").GetBoolean(),
                         "A Lab circle click publishes the actual muted mixer state through the real 3D pipe");
-                    ClickSpeaker("FL"); model.AdvancePlaybackClock(); var activeState = ReadSpeakerState();
+                    ClickSpeaker("FL"); model.AdvancePlaybackClock(); var activeStates = ReadSpeakerStates();
+                    var activeState = activeStates.EnumerateArray().Single(s => s.GetProperty("Code").GetString() == "FL");
+                    var activeChannels = activeStates.EnumerateArray().ToDictionary(s => s.GetProperty("Code").GetString()!, s => s.GetProperty("Enabled").GetBoolean());
                     Check(!activeState.GetProperty("Muted").GetBoolean() && activeState.GetProperty("Enabled").GetBoolean(),
                         "Unmute reaches the 3D pipe without restarting playback or changing preview mode");
+                    ClickSpeaker("FL", shift: true); model.AdvancePlaybackClock(); var soloStates = ReadSpeakerStates();
+                    Check(soloStates.EnumerateArray().All(s => s.GetProperty("Enabled").GetBoolean() == (s.GetProperty("Code").GetString() == "FL")) &&
+                        soloStates.EnumerateArray().Single(s => s.GetProperty("Code").GetString() == "FL").GetProperty("Solo").GetBoolean(),
+                        "Lab Solo publishes one enabled channel and suppresses other particles through the actual 3D pipe");
+                    ClickSpeaker("FR", shift: true); model.AdvancePlaybackClock(); var multipleSolos = ReadSpeakerStates();
+                    Check(multipleSolos.EnumerateArray().All(s => s.GetProperty("Enabled").GetBoolean() == (s.GetProperty("Code").GetString() is "FL" or "FR")),
+                        "Multiple Lab solos publish both enabled channels to the 3D viewer");
+                    ClickSpeaker("FL"); ClickSpeaker("FR"); model.AdvancePlaybackClock(); var clearedSolos = ReadSpeakerStates();
+                    Check(clearedSolos.EnumerateArray().All(s => s.GetProperty("Enabled").GetBoolean() == activeChannels[s.GetProperty("Code").GetString()!] &&
+                        !s.GetProperty("Solo").GetBoolean() && !s.GetProperty("Muted").GetBoolean()),
+                        "Ordinary clicks clear Solo without muting and restore the original 3D channels, respecting zero-gain faders");
+                    File.WriteAllText(Path.Combine(root, "speaker-states.json"), JsonSerializer.Serialize(new { baseline = activeStates, solo = soloStates,
+                        multiple = multipleSolos, cleared = clearedSolos }, new JsonSerializerOptions { WriteIndented = true }));
                 }
                 previewMode.SelectedValue = PreviewAudioMode.HeadphonesHrtf; Pump(Task.Delay(80));
                 lab.UpdateLayout();

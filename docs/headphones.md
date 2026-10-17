@@ -34,7 +34,9 @@ A lone BL/BR surround pair uses ±110°, just like SL/SR in a 5.1 layout. BL/BR 
 
 **Front L/R angle** adjusts FL/FR to ±15–90° during playback. Wider angles make L/R easier to distinguish. Direct approaches one-ear routing at ±90°; HRTF retains the contribution arriving at the opposite ear. **Standard ±30°** restores the recommended front placement. Both renderers, the room diagram and the viewer use the same setting.
 
-Click an orange speaker circle or its channel label in the Lab room diagram to **Mute / unmute** that channel, including LFE. Muted speakers become dark with a diagonal line; other channels suppressed by Solo are dimmed. The switch shares the active mixer's Mute state and automatically enables that mixer if bypassed. It works in Stereo, Direct and HRTF without changing the playback mode. Muting clears that channel's Solo, without changing other channels' Solo or linked fader levels. Speaker switches require a loaded, supported layout. The room remains focused for arrow-key controls.
+Click an orange speaker circle or its channel label in the Lab room diagram to **Mute / unmute** that channel, including LFE. **Shift+click toggles Solo**; multiple speakers can be soloed together. A normal click on a soloed speaker clears its Solo and leaves it unmuted. Solo and Mute are mutually exclusive on the same channel. Other channels' Solo settings and linked fader levels stay as set, so a channel without Solo remains suppressed while another Solo is active.
+
+Soloed speakers have a gold outline and an **S** badge. Muted speakers become dark with a diagonal line; other channels suppressed by Solo are dimmed. These controls share the active mixer's states, automatically enable that mixer if bypassed, and reach the 3D viewer. They work in Stereo, Direct and HRTF without changing the playback mode. Speaker switches require a loaded, supported layout. The room remains focused for arrow-key controls.
 
 ## Keyboard and opentrack
 

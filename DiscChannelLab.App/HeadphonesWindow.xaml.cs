@@ -101,16 +101,24 @@ public partial class HeadphonesWindow : Window
     }
     private void Room_MouseDown(object sender, MouseButtonEventArgs e)
     {
+        if (e.ChangedButton != MouseButton.Left) return;
         Room.Focus();
-        if (!_model.CanUseExperimentalMixer ||
-            e.OriginalSource is not FrameworkElement { Tag: string code }) return;
+        if (e.OriginalSource is FrameworkElement { Tag: string code } && ApplySpeakerClick(code, Keyboard.Modifiers))
+            e.Handled = true;
+    }
+    private bool ApplySpeakerClick(string code, ModifierKeys modifiers)
+    {
+        if (!_model.CanUseExperimentalMixer) return false;
         var strip = _model.MixerStrips.FirstOrDefault(s => s.Code == code);
-        if (strip is null) return;
+        if (strip is null) return false;
         var muted = _model.ExperimentalMixerEnabled && strip.Muted;
+        var solo = _model.ExperimentalMixerEnabled && strip.Solo;
         _model.ExperimentalMixerEnabled = true;
-        strip.Muted = !muted;
-        e.Handled = true;
+        if (modifiers.HasFlag(ModifierKeys.Shift)) strip.Solo = !solo;
+        else if (solo) { strip.Solo = false; strip.Muted = false; }
+        else strip.Muted = !muted;
         DrawRoom();
+        return true;
     }
     private void Room_KeyDown(object sender, KeyEventArgs e)
     {
@@ -206,18 +214,27 @@ public partial class HeadphonesWindow : Window
             var strip = _model.MixerStrips.FirstOrDefault(s => s.Code == code);
             var clickable = _model.CanUseExperimentalMixer && strip is not null;
             var muted = _model.ExperimentalMixerEnabled && strip?.Muted == true;
-            var suppressed = muted || hasSolo && strip?.Solo != true;
+            var solo = _model.ExperimentalMixerEnabled && strip?.Solo == true;
+            var suppressed = muted || hasSolo && !solo;
             var strength = _model.IsPlaying && meter is not null ? meter.PeakPercent / 100 : 0;
             var color = suppressed ? new SolidColorBrush(Color.FromRgb(49, 56, 66)) :
                 new SolidColorBrush(Color.FromRgb((byte)(176 + strength * 70), (byte)(96 + strength * 60), (byte)(34 + strength * 35)));
-            var outline = suppressed ? Brushes.SlateGray : Brushes.PeachPuff;
+            var outline = solo ? Brushes.Gold : suppressed ? Brushes.SlateGray : Brushes.PeachPuff;
             if (code != "LFE") Line(x, y, cx, cy, new SolidColorBrush(suppressed ? Color.FromArgb(35, 110, 110, 110) : Color.FromArgb(60, 240, 150, 65)));
             var shape = Ellipse(x, y, code == "LFE" ? 9 : 12, color, outline, code);
             var hint = !clickable ? HeadphoneText.T("Open a disc, ISO or audio file in the main window.") :
-                LanguageService.T(muted ? "クリックしてMute解除" : "クリックしてMute");
+                LanguageService.T(solo ? "クリックしてSolo解除（オンに戻す）" : muted ? "クリックしてMute解除" : "クリックしてMute") +
+                " · " + LanguageService.T(solo ? "Shift＋クリックでSolo解除" : "Shift＋クリックでSolo");
             shape.Cursor = clickable ? Cursors.Hand : Cursors.Arrow;
             shape.ToolTip = $"{code} · {hint}";
-            System.Windows.Automation.AutomationProperties.SetName(shape, $"{code} · {(muted ? "Mute" : "On")}");
+            shape.StrokeThickness = solo ? 3 : 1;
+            System.Windows.Automation.AutomationProperties.SetName(shape, $"{code} · {(solo ? "Solo" : muted ? "Mute" : "On")}");
+            if (solo)
+            {
+                var badge = new TextBlock { Text = "S", FontSize = 11, FontWeight = FontWeights.Bold,
+                    Foreground = Brushes.White, Width = 16, TextAlignment = TextAlignment.Center, IsHitTestVisible = false };
+                Canvas.SetLeft(badge, x - 8); Canvas.SetTop(badge, y - 8); Room.Children.Add(badge);
+            }
             if (muted)
             {
                 Line(x - 6, y + 6, x + 6, y - 6, Brushes.LightGray, 2);

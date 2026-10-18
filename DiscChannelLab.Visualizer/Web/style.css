@@ -4,9 +4,21 @@
 
 #appearance{width:210px}#appearance label{font-size:12px}@media(max-width:900px){#appearance{width:185px}}
 .settings-actions{display:flex;gap:6px;margin-top:12px}.settings-actions button{flex:1;font-size:11px;padding:7px 4px}#settings-status{margin-top:8px;font-size:10px;line-height:1.5;color:var(--muted);overflow-wrap:anywhere}
+#aurora-controls{border-bottom:1px solid var(--edge);margin-bottom:16px;padding-bottom:12px}#aurora-controls summary{cursor:pointer;color:var(--accent);font-size:12px;margin-bottom:14px}#aurora-controls details{padding:4px 0}.aurora-note{display:block;font-size:10px;line-height:1.5;color:var(--muted)}
 #toggle-ui,#demo{width:112px;flex-shrink:0;white-space:nowrap}
 body.ui-hidden header{display:contents}
 body.ui-hidden header>div:not(.actions),body.ui-hidden .actions>button:not(#toggle-ui),body.ui-hidden footer,body.ui-hidden #source,body.ui-hidden #appearance,body.ui-hidden #legend,body.ui-hidden #scene-help,body.ui-hidden #stats,body.ui-hidden #labels,body.ui-hidden #welcome{display:none}
 body.ui-hidden .actions{position:fixed;right:24px;top:14px;z-index:6}
 body.ui-hidden #toggle-ui{background:#0b1421b5}
 #appearance{max-height:calc(100% - 48px);overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin}
+body.spark-mode .particle-only{display:none}
+body.spark-mode .gradient{background:linear-gradient(90deg,#ff240c,#ff6b17,#61f095,#0fdbf2,#1f6bff,#b34dff)}
+#spark-controls{border-bottom:1px solid var(--edge);padding-bottom:14px;margin-bottom:16px}
+#spark-controls small{display:block;color:var(--muted);font-size:10px;line-height:1.6}
+#spark-controls summary{cursor:pointer;font-size:11px;color:var(--accent);margin:0 0 14px}
+
+
+body.hybrid-mode #appearance .particle-sync{display:none}
+
+#scene-help{max-width:calc(100% - 280px);line-height:1.5}
+#veil-palette-label .aurora-note{margin:-4px 0 16px}

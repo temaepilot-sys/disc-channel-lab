@@ -83,8 +83,8 @@ public partial class MainWindow : Window
             for (var directory = new System.IO.DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
             {
                 foreach (var relative in new[] { "SpaceSketch/DiscChannelLab.Visualizer.exe", "DiscChannelLab.Visualizer.exe",
-                    "artifacts/public-win-x64/SpaceSketch/DiscChannelLab.Visualizer.exe",
-                    "DiscChannelLab-visualizer-lab/artifacts/SpaceSketch-linked/DiscChannelLab.Visualizer.exe" })
+                    "artifacts/personal-win-x64/SpaceSketch/DiscChannelLab.Visualizer.exe",
+                    "artifacts/public-win-x64/SpaceSketch/DiscChannelLab.Visualizer.exe" })
                 {
                     var candidate = System.IO.Path.Combine(directory.FullName, relative);
                     if (System.IO.File.Exists(candidate)) { executable = candidate; break; }

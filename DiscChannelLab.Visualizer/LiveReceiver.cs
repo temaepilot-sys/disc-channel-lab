@@ -16,10 +16,19 @@ public sealed record HeadphoneSceneValue(bool RotateWorld, double FrontAngle, He
 /// <summary>Receives PCM on its own worker; never decodes or plays audio in linked mode.</summary>
 public sealed class LiveReceiver(string? pipeName, VisualizationSettings settings, Action<string> log, bool enableForecast = true) : IDisposable
 {
+    public event Action? OpenRequested;
     readonly object gate = new();
     readonly CancellationTokenSource stop = new();
     readonly Queue<(double Time, float[] Values, float[] FastValues)> frames = new();
     readonly Queue<(double Time, float[] Values)> forecasts = new();
+    // Keep already received PCM, without decoding/FFT, while emission views are active.
+    // The player can be eight seconds ahead: throwing these packets away makes a
+    // later Listener view wait for that entire window to pass before it can emit.
+    readonly Queue<(long Sequence, double Time, byte[] Payload)> rawForecasts = new();
+    const int RawForecastLimit = 384, RawForecastByteLimit = 24 * 1024 * 1024;
+    long rawSequence, warmVersion;
+    int rawBytes, rawGeneration;
+    bool warming;
     SpectrumAnalyzer? forecastAnalyzer;
     string[] forecastChannels = [];
     int forecastGeneration;
@@ -37,14 +46,49 @@ public sealed class LiveReceiver(string? pipeName, VisualizationSettings setting
     Task? worker;
     volatile bool forecastEnabled = enableForecast;
     public long ForecastPacketsAnalyzed { get; private set; }
+    public (int Packets, int Bytes) ForecastCacheSize { get { lock (gate) return (rawForecasts.Count, rawBytes); } }
     public void SetForecastEnabled(bool enabled)
     {
+        long version;
         lock (gate)
         {
             if (forecastEnabled == enabled) return;
             forecastEnabled = enabled;
             ResetForecast();
+            version = ++warmVersion;
+            warming = enabled && rawForecasts.Count > 0;
+            if (!warming) return;
         }
+        _ = Task.Run(() => WarmForecastsAsync(version));
+    }
+
+    async Task WarmForecastsAsync(long version)
+    {
+        long cursor = 0;
+        try
+        {
+            while (!stop.IsCancellationRequested)
+            {
+                (long Sequence, double Time, byte[] Payload)[] batch;
+                lock (gate)
+                {
+                    if (!forecastEnabled || version != warmVersion) return;
+                    batch = rawForecasts.Where(p => p.Sequence > cursor && p.Time >= (clock?.Position ?? 0) - .15).Take(4).ToArray();
+                    if (batch.Length == 0) { warming = false; return; }
+                }
+                foreach (var packet in batch) { ConsumePcm(packet.Payload, version); cursor = packet.Sequence; }
+                // Yield between small batches so the audible PCM worker stays responsive.
+                await Task.Delay(1, stop.Token).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) when (stop.IsCancellationRequested) { }
+        finally { lock (gate) if (version == warmVersion) warming = false; }
+    }
+
+    void ClearRawForecasts()
+    {
+        rawForecasts.Clear(); rawBytes = rawGeneration = 0;
+        ++warmVersion; warming = false;
     }
     public bool Configured => !string.IsNullOrWhiteSpace(pipeName);
     public void Start() { if (Configured) worker = Task.Run(RunAsync); }
@@ -57,14 +101,14 @@ public sealed class LiveReceiver(string? pipeName, VisualizationSettings setting
             {
                 using var pipe = new NamedPipeClientStream(".", pipeName!, PipeDirection.In, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
                 await pipe.ConnectAsync(1500, stop.Token).ConfigureAwait(false);
-                lock (gate) { connected = true; clock = null; lastError = null; Reset(); ResetForecast(); }
+                lock (gate) { connected = true; clock = null; lastError = null; Reset(); ResetForecast(); ClearRawForecasts(); }
                 log("DiscChannelLab live pipe connected");
                 var size = new byte[4];
                 while (!stop.IsCancellationRequested)
                 {
                     await pipe.ReadExactlyAsync(size, stop.Token).ConfigureAwait(false);
                     int length = BinaryPrimitives.ReadInt32LittleEndian(size);
-                    if (length is < 2 or > 262144) throw new InvalidDataException("Invalid link packet size.");
+                    if (length is < 1 or > 262144) throw new InvalidDataException("Invalid link packet size.");
                     var payload = new byte[length];
                     await pipe.ReadExactlyAsync(payload, stop.Token).ConfigureAwait(false);
                     Consume(payload);
@@ -84,6 +128,12 @@ public sealed class LiveReceiver(string? pipeName, VisualizationSettings setting
     public void Consume(byte[] payload)
     {
         if (payload.Length == 0) throw new InvalidDataException("Empty live packet.");
+        if (payload[0] == 4)
+        {
+            if (payload.Length != 1) throw new InvalidDataException("Invalid viewer open request.");
+            OpenRequested?.Invoke();
+            return;
+        }
         if (payload[0] == 1)
         {
             var next = JsonSerializer.Deserialize<PlayerClock>(payload.AsSpan(1)) ?? throw new InvalidDataException("Clock is missing.");
@@ -100,16 +150,18 @@ public sealed class LiveReceiver(string? pipeName, VisualizationSettings setting
                 throw new InvalidDataException("Invalid headphone speaker positions.");
             lock (gate)
             {
-                if (clock?.Epoch != next.Epoch) { Reset(); ResetForecast(); }
+                if (clock?.Epoch != next.Epoch) { Reset(); ResetForecast(); ClearRawForecasts(); }
                 clock = next; connected = true;
             }
             return;
         }
         if (payload[0] is not (2 or 3)) throw new InvalidDataException("Unknown live packet type.");
+        ConsumePcm(payload);
+    }
+
+    void ConsumePcm(byte[] payload, long? replayVersion = null)
+    {
         bool forecast = payload[0] == 3;
-        // Emission-time views use only audible PCM. Do not spend audio-time CPU
-        // performing seconds of future FFTs or allocate their large HTTP arrays.
-        if (forecast && !forecastEnabled) return;
         using var reader = new BinaryReader(new MemoryStream(payload), Encoding.UTF8);
         reader.ReadByte(); int epoch = reader.ReadInt32();
         int generation = forecast ? reader.ReadInt32() : 0;
@@ -126,16 +178,28 @@ public sealed class LiveReceiver(string? pipeName, VisualizationSettings setting
             if (clock is null || clock.Epoch != epoch) return; // Discard old seek/session data.
             if (forecast)
             {
+                if (replayVersion is { } version && (version != warmVersion || !forecastEnabled)) return;
+                if (generation <= 0 || generation < rawGeneration) return;
+                if (replayVersion is null)
+                {
+                    if (generation != rawGeneration) { ClearRawForecasts(); ResetForecast(); rawGeneration = generation; }
+                    rawForecasts.Enqueue((++rawSequence, time, payload)); rawBytes += payload.Length;
+                    while (rawForecasts.Count > RawForecastLimit || rawBytes > RawForecastByteLimit ||
+                        rawForecasts.TryPeek(out var oldest) && time - oldest.Time > 8.3)
+                        rawBytes -= rawForecasts.Dequeue().Payload.Length;
+                    if (!forecastEnabled || warming) return;
+                }
                 if (!forecastEnabled || generation <= 0 || generation < forecastGeneration) return;
                 if (forecastAnalyzer is null || generation != forecastGeneration || !forecastChannels.SequenceEqual(codes) || Math.Abs(time - forecastExpected) > 2d / 48000)
                 {
                     ResetForecast(); forecastGeneration = generation; forecastChannels = codes; forecastBase = time;
+                    long analysisRevision = forecastRevision;
                     var forecastSettings = settings with { HopSize = Math.Min(settings.FftSize, Math.Max(settings.HopSize, 1920)) };
                     forecastAnalyzer = new SpectrumAnalyzer(codes.Length * 2 + 2, forecastSettings, (seconds, values) =>
                     {
                         lock (gate)
                         {
-                            if (!forecastEnabled || generation != forecastGeneration || clock?.Epoch != epoch) return;
+                            if (!forecastEnabled || analysisRevision != forecastRevision || generation != forecastGeneration || clock?.Epoch != epoch) return;
                             double timestamp = forecastBase + seconds;
                             if (timestamp - lastForecast < .04 - 1e-8) return; // <=25 Hz, tolerant of timestamp round-off.
                             lastForecast = timestamp; forecasts.Enqueue((timestamp, values));

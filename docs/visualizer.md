@@ -4,6 +4,29 @@
 
 Space sketch is an experimental companion viewer for DiscChannelLab. It turns each channel’s frequency-band energy into colored particles, helping you explore how multichannel recordings fill a listening space. It also works as a place to simply watch music unfold.
 
+## Rendering modes
+
+Both build editions offer **Particles**, **Spark Field**, **Hybrid · Spectral Veil**, and **Aurora + Spark Field**. The personal and public builds share the same source and features. Electric Flow and the earlier standalone Aurora are retired.
+
+**Spark Field** combines short micro sparks, tiny streaks, and lingering soft motes, driven by current audio. [Implementation notes](spark-field-implementation-notes.md).
+
+**Aurora + Spark Field** overlays the current band-reactive veil with Spark Field. Choose **Veil colors → Original · Spectrum** for the original veil palette, or **Match Spark Field** to share Spark's exact frequency-to-color mapping. Spark colors remain unchanged; hot spark cores can still appear white. Calm and Warm veil palettes are also available. Both sets of controls, vertical flow, Mute/Solo and Save settings apply in the combined mode. Only the current FFT is used, with no extra decoding or look-ahead. The combined view is capped at 30 fps by default, or 60 fps when both quality settings are High. The old particle pool and speaker beams stay idle in this mode.
+
+**Hybrid · Spectral Veil** combines the original particles with independently animated frequency bands around each actual speaker. All 16 current FFT bands are retained: bass is low, treble high. Each band's fast energy controls its own vertical/depth displacement and brightness; positive spectral changes excite a stronger response. Quiet bands settle, rather than following a common clock-driven wave. LFE forms a low circular field at the listener’s feet when present and enabled.
+
+**Vertical flow** adds soft falling light (**Downward · Waterfall**) or rising light (**Upward**) over that motion. **Off** retains the previous appearance. The color/frequency height stays fixed; light accents travel through the active bands. Each source drives its own flow from audio time and energy, and pause freezes it. LFE stays on the floor. The direction is included in Save settings.
+
+Reopening Space sketch restores the current view and drawing mode from the running companion's memory. **Save settings** is still needed to restore that view after the companion exits; **Load settings** reads the saved file. A bounded in-memory PCM window (384 packets / at most 24 MiB) lets Listener-synchronized Particles resume without waiting for the player's entire look-ahead window. Unused future FFTs remain disabled in Spark Field, Hybrid and Aurora + Spark Field.
+
+- **Veil colors** appears directly below Visual style. **Veil settings**: Vibration rate, Band movement, Intensity, Opacity, Density, Afterglow, Quality, and Hybrid particle amount in Hybrid only. Gentle / Clear response / Percussive are presets. Settings use the existing saved preferences; old Aurora/Electric mode selections fall back to Particles.
+- Pause freezes the bands. Seek, source/signal changes and disconnect clear stale light. Mute/Solo immediately clears disabled sources. Final stereo shows FL/FR only. Camera/head orientation uses the existing shared scene transform.
+- Hybrid follows current audio; particle travel synchronization remains available in Particles. No new FFT, decoding, audio delay, or audio thread work is introduced.
+- The motion is an **illustration of spectral activity**, with vibration slowed for visibility. Magnitude-only FFT data cannot reconstruct acoustic phase or measured room pressure. Afterglow is visual, not recorded reverberation.
+
+Indexed GPU meshes use two persistent buffers: Low 24×32 cells / one layer, Medium 40×48 / two layers, High 64×64 / two layers. Low/Medium cap rendering at 30 fps; High at 60 fps. Resources are allocated only when the mode is selected.
+
+Verification includes actual WebGL screenshots, synthetic per-band isolation, real multichannel PCM pipe + FFT, Input/Post/Output, Mute/Solo, pause and seek. Use `node tests/hybrid-checks.cjs` for band-motion logic. [Implementation and verification notes](spark-field-implementation-notes.md) describe the measurements and their limits.
+
 ## See the light where the channels meet
 
 Multichannel recordings can bring sound from the front, wrap it around you from behind, and fill the space at your feet with bass. Space sketch lets you trace the channel layout and the movement of sound, then watch their frequency-band energy overlap at the listener. Explore the recording, or simply enjoy light gathering with the music and drifting like fireflies.
@@ -57,6 +80,8 @@ For a separately built viewer, select its `DiscChannelLab.Visualizer.exe` when p
 - .NET 10 SDK to build. The public output is framework-dependent: install both the **.NET 10 Desktop Runtime** and **ASP.NET Core Runtime 10**, x64, to run the player and viewer. Check that both runtimes are installed when moving the public build to another PC.
 - DiscChannelLab uses the user’s FFmpeg tools for disc playback. The viewer itself needs no FFmpeg installation or bundled codec.
 
+Closing the 3D browser window does not always stop its local host immediately. Pressing the player’s 3D button now asks that existing host to show the viewer again, or activates its existing window. If the host has already exited, the button starts a new one. Install the matching updated player and viewer together.
+
 ## Browser choice
 
 Opening **3D Viewer** detects installed browsers and shows a chooser. Nothing is selected automatically on first use. Your last explicit choice is remembered in `SpaceSketch/BrowserSettings.json`, and the chooser appears again on the next viewer launch. **Detect again** rescans installations; **Browse…** can select the actual browser executable from a portable installation. If the saved browser is missing, choose another yourself; the viewer never silently falls back to Edge, Chrome or the system default. Cancel closes the launcher without opening a browser.
@@ -84,6 +109,12 @@ Post-mix energy is calculated from `sample × sqrt(leftWeight² + rightWeight²)
 The managed multichannel path preserves the decoded channels. When the player has already converted a playback path to stereo, the viewer receives FL/FR; it cannot reconstruct original channels from that stereo signal. Enable the player's mixer playback option to hear and visualize edited mixer settings. In the standard mix, LFE contributes no output by default; Input retains its original spectrum, while an explicit Mute / Solo exclusion or zero mixer fader also hides that channel's particles.
 
 Both synchronization modes use moving particles emitted from the speakers. Past particles remain as a visual trail, not additional audio. Changing the mixer refreshes the look-ahead and clears incompatible listener-mode trails. The synthetic demo is independent of the player mixer.
+
+## Move through the 3D space
+
+Click the scene to use **W/S** forward/back along the viewing direction, **A/D** strafe left/right, **Q/E** turn left/right in place, and **Z/X** move down/up in world height. Hold **Shift** for 4× movement/turning or **Alt** for 0.15× precision. Alt takes priority if both are held. Release the keys to stop; losing focus also cancels movement.
+
+The first movement switches to **Camera → Free movement** without moving the camera to another preset. Arrow keys and mouse dragging adjust the view; in Free movement they turn at the current position. **Home** or **Reset camera** restores the selected camera mode's default position and forward view, keeping that mode selected. In Free movement, it returns to the defaults of the preset you departed from while keeping Free movement selected. **Save settings** remembers the flight position, heading and Home preset. Navigation works while paused and with every drawing mode. It controls the picture only; headphone audio direction and playback are unchanged. Keyboard controls do not take over input fields or Ctrl/Command shortcuts.
 
 ## Appearance and saved settings
 
@@ -132,7 +163,9 @@ dotnet run --project DiscChannelLab.Visualizer.Verify -c Release -- --write-demo
 node tests/visualizer-frontend.cjs
 ```
 
-The frontend checks simulate browser and audio APIs. They verify controls and data flow, not actual GPU rendering or audible latency. The screenshots above were supplied from interactive use; a final visual and listening check on the target PC remains useful. This is a source preview; no binary release or ZIP is supplied.
+Run `./tests/verify-space-sketch.ps1` for the self-tests, real pipe/host tests and frontend checks. Add `-Browser` for actual Chrome/WebGL checks of Home, rendering, color matching, settings and player-linked audio. Browser checks require Chrome and Node.js 22 or newer; ordinary playback does not require either Node.js or a particular browser brand. Set `LAB_VIEWER_EXE` when running an individual browser script against another build. Local results are saved under `verification-output/space-sketch`.
+
+Frontend mocks verify controls and data flow; the browser checks separately verify actual WebGL. Audio queue tests use a test output sink, so they do not establish acoustic latency or listening quality on every device. See the [update summary](changes-2026-10-18.md). GitHub contains source and documentation; no binary release or ZIP is included with this update.
 
 ## Headphone direction link
 

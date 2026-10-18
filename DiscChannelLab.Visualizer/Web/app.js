@@ -10,6 +10,7 @@ let playing = false, offset = 0, sourceStart = 0, busy = false, generation = 0;
 let sourceEnded = false, lastVisualTime = 0, draggingTimeline = false;
 let normalSyncReference = null;
 let liveMode = false, liveState = null, liveAt = 0, liveInitialized = false, livePollBusy = false, liveKey = '';
+let analysisSettings = null;
 
 function error(message) { $('notice').textContent = message; $('notice').hidden = false; }
 function timeLabel(t) { t = Math.max(0, Math.floor(t)); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`; }
@@ -258,8 +259,10 @@ class SpaceRenderer {
     gl.useProgram(this.program);
     this.matrixLocation = gl.getUniformLocation(this.program, 'uMatrix'); this.heightLocation = gl.getUniformLocation(this.program, 'uHeight'); this.pointLocation = gl.getUniformLocation(this.program, 'uPoint');
     this.buffer = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, this.buffer);
+    this.geometryAttributes = [];
     for (const [name, count, offset] of [['aPosition', 3, 0], ['aColor', 4, 12], ['aSize', 1, 28]]) {
       const location = gl.getAttribLocation(this.program, name); gl.enableVertexAttribArray(location); gl.vertexAttribPointer(location, count, gl.FLOAT, false, 32, offset);
+      this.geometryAttributes.push({ location, count, offset });
     }
     gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     this.max = 24000; this.data = new Float32Array(this.max * PARTICLE_STRIDE); this.vertices = new Float32Array(this.max * 8); this.count = 0;
@@ -268,16 +271,70 @@ class SpaceRenderer {
     this.particleSpeed = 2;
     this.particleSize = 1; this.particleOpacity = 1; this.listenerSize = 1.5; this.listenerBrightness = 1.4;
     this.speakerBeams = false; this.beamStrength = .8; this.beamMesh = new SpeakerBeamMesh();
+    this.visualStyle = 'particles'; this.aurora = null; this.auroraSettings = Aurora.sanitize();
+    this.spark = null; this.sparkSettings = SparkField.sanitize();
+    this.legacyComposite = false; // Temporary diagnostic A/B switch, never saved.
     this.lines = []; this.speakers = []; this.bands = new Float32Array(0); this.lightLevels = new Float32Array(0); this.budgets = [];
-    this.camera = { yaw: .48, pitch: .56, distance: 12.8, target: [0, .8, 0] }; this.listenerView = false;
+    this.camera = { yaw: .48, pitch: .56, distance: 12.8, target: [0, .8, 0], homeView: 'orbit' }; this.listenerView = false;
     this.setClip({ channels: ['FL', 'FR', 'FC', 'LFE', 'SL', 'SR'], bandCount: 16, centers: Array.from({ length: 16 }, (_, i) => 20 * 1000 ** ((i + .5) / 16)), dispersion: [] });
     this.wireInput();
-    canvas.addEventListener('webglcontextlost', e => { e.preventDefault(); pause(); error('3D rendering stopped. Close and reopen the viewer.'); });
+    canvas.addEventListener('webglcontextlost', e => {
+      e.preventDefault(); this.contextLost = true;
+      error('3D graphics context lost. Audio continues; reopen the viewer to restore graphics.');
+    });
+  }
+  setVisualStyle(value, settings = this.auroraSettings) {
+    const next = Aurora.style(value), normalized = Aurora.sanitize(settings);
+    if (this.visualStyle !== next || this.auroraSettings.layout !== normalized.layout) this.clear();
+    this.visualStyle = next; this.auroraSettings = normalized;
+    if (Aurora.hasVeil(next) && !this.aurora) {
+      this.aurora = new Aurora.Renderer(this.gl);
+      this.aurora.configure(this.speakers, this.info, analysisSettings);
+    }
+    if (this.aurora) this.aurora.settings = normalized;
+    if (Aurora.hasSpark(next) && !this.spark) {
+      try {
+        this.spark = new SparkField.Renderer(this.gl);
+        this.spark.configure(this.speakers, this.info, analysisSettings);
+      } catch (e) { this.sparkFallback(e); }
+    }
+    this.spark?.setOptions(this.sparkSettings);
+    this.buildScene();
+  }
+  get hasSpark() { return Aurora.hasSpark(this.visualStyle); }
+  get hasVeil() { return Aurora.hasVeil(this.visualStyle); }
+  sparkFallback(e) {
+    this.spark?.dispose(); this.spark = null; this.visualStyle = 'particles';
+    $('visual-style').value = 'particles'; $('spark-controls').hidden = true;
+    document.body.classList.toggle('spark-mode', false);
+    document.body.classList.toggle('hybrid-mode', false);
+    $('aurora-controls').hidden = $('veil-palette-label').hidden = true;
+    $('settings-status').textContent = `Spark Field unavailable; using Particles. ${e.message}`;
+    this.clear(); this.buildScene();
+  }
+  restoreGeometry() {
+    const gl = this.gl;
+    gl.useProgram(this.program); gl.bindBuffer(gl.ARRAY_BUFFER, this.buffer);
+    for (const { location, count, offset } of this.geometryAttributes) {
+      gl.enableVertexAttribArray(location); gl.vertexAttribPointer(location, count, gl.FLOAT, false, 32, offset);
+    }
+  }
+  finishAuroraComposite() {
+    if (this.visualStyle === 'particles' || this.legacyComposite) return;
+    // This context is unpremultiplied, but ordinary GL blending already weights RGB
+    // by source alpha. Leaving a translucent framebuffer makes the browser multiply
+    // that RGB AGAIN by framebuffer alpha. Keep the Aurora canvas opaque instead.
+    // Change alpha only after ALL layers, leaving their RGB, hue and contrast intact.
+    const gl = this.gl;
+    gl.colorMask(false, false, false, true); gl.clearColor(0, 0, 0, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT); gl.colorMask(true, true, true, true);
   }
   clear() {
     this.count = 0; this.visibleCount = 0; this.budgets.fill(0); this.bands.fill(0);
     this.lightLevels.fill(0);
     this.beamMesh.vertexCount = 0;
+    this.aurora?.clear();
+    this.spark?.clear();
   }
   setSyncReference(value) {
     const next = value === 'speaker' ? 'speaker' : 'listener';
@@ -304,6 +361,8 @@ class SpaceRenderer {
         azimuth: Math.atan2(-position[2], -position[0]), radius: Math.hypot(position[0], position[2]) };
     });
     this.beamMesh.configure(this.speakers, info);
+    this.aurora?.configure(this.speakers, info, analysisSettings);
+    this.spark?.configure(this.speakers, info, analysisSettings);
     this.buildScene();
   }
   channelSuppressed(channel) {
@@ -334,9 +393,14 @@ class SpaceRenderer {
     for (let c = 0; c < this.speakers.length; c++) if (this.channelSuppressed(c)) {
       const from = c * this.info.bandCount, to = from + this.info.bandCount;
       this.budgets.fill(0, from, to); this.bands.fill(0, from, to); this.lightLevels.fill(0, from, to);
+      this.aurora?.hide(c);
+      this.spark?.hide(c);
     }
   }
-  line(a, b, c = [.2, .33, .43], alpha = .45) { this.lines.push(...a, ...c, alpha, 1, ...b, ...c, alpha, 1); }
+  line(a, b, c = [.2, .33, .43], alpha = .45) {
+    const opacity = alpha * (this.hasSpark ? .42 : 1);
+    this.lines.push(...a, ...c, opacity, 1, ...b, ...c, opacity, 1);
+  }
   circle(center, radius, color, alpha, plane = 'floor', steps = 80) {
     const point = angle => plane === 'floor' ? add(center, [radius * Math.cos(angle), 0, radius * Math.sin(angle)]) : add(center, [radius * Math.cos(angle), radius * Math.sin(angle), 0]);
     for (let i = 0; i < steps; i++) this.line(point(i / steps * Math.PI * 2), point((i + 1) / steps * Math.PI * 2), color, alpha);
@@ -393,15 +457,53 @@ class SpaceRenderer {
   }
   rotate(yaw, pitch) {
     if (yaw === 0 && pitch === 0) return;
+    const eye = this.freeView ? this.cameraPose().eye : null;
     const turn = Math.PI * 2;
     this.camera.yaw = ((this.camera.yaw + yaw) % turn + turn) % turn;
     this.camera.pitch = clamp(this.camera.pitch + pitch, -Math.PI / 2, Math.PI / 2);
+    if (eye) this.camera.target = sub(eye, scale(this.cameraBackward(), this.camera.distance));
+  }
+  cameraBackward() {
+    const c = this.camera;
+    return [Math.sin(c.yaw) * Math.cos(c.pitch), Math.sin(c.pitch), Math.cos(c.yaw) * Math.cos(c.pitch)];
+  }
+  enterFreeView() {
+    if (this.freeView) return;
+    const pose = this.cameraPose(), backward = norm(sub(pose.eye, pose.target));
+    const homeView = this.camera.homeView || 'orbit';
+    const turn = 2 * Math.PI;
+    this.camera = { yaw: ((Math.atan2(backward[0], backward[2]) % turn) + turn) % turn,
+      pitch: Math.asin(clamp(backward[1], -1, 1)), distance: 4,
+      target: sub(pose.eye, scale(backward, 4)), homeView };
+    this.listenerView = false; this.freeView = true; $('view').value = 'free';
+  }
+  navigate(forward, right, up, yaw, seconds, speedScale) {
+    if (!forward && !right && !up && !yaw) return;
+    this.enterFreeView();
+    this.rotate(yaw * seconds * Math.PI / 3 * speedScale, 0);
+    const c = this.camera, side = [Math.cos(c.yaw), 0, -Math.sin(c.yaw)];
+    let direction = add(scale(this.cameraBackward(), -forward), add(scale(side, right), [0, up, 0]));
+    const length = Math.hypot(...direction);
+    if (length > 1) direction = scale(direction, 1 / length); // Diagonals never exceed the chosen speed.
+    c.target = add(c.target, scale(direction, 2.4 * seconds * speedScale));
   }
   view(name) {
+    if (name === 'free') { this.enterFreeView(); return; }
+    this.freeView = false;
     this.listenerView = name === 'listener';
     this.camera = { yaw: name === 'front' ? Math.PI : ['back', 'listener', 'top'].includes(name) ? 0 : .48,
       pitch: name === 'listener' ? -Math.atan2(.35, 3) : name === 'top' ? Math.PI / 2 : name === 'bird' ? Math.PI / 3 : .56,
-      distance: ['top', 'bird'].includes(name) ? 13 : 12.8, target: [0, .8, 0] };
+      distance: ['top', 'bird'].includes(name) ? 13 : 12.8, target: [0, .8, 0], homeView: name };
+  }
+  home() {
+    const selected = $('view').value || 'orbit';
+    const origin = selected === 'free' ? this.camera.homeView : selected;
+    const preset = ['orbit', 'bird', 'top', 'listener', 'front', 'back'].includes(origin) ? origin : 'orbit';
+    // Reset the current preset, never select another camera mode. A flying camera
+    // remembers the preset it departed from, but remains in Free movement on Home.
+    this.view(preset);
+    if (selected === 'free') this.enterFreeView();
+    $('view').value = selected;
   }
   cameraPose() {
     if (this.listenerView && liveMode && liveState?.head && liveState.scene?.rotateWorld) {
@@ -554,11 +656,18 @@ class SpaceRenderer {
       lightValues = fastSpectrum ? fastSpectrum.subarray(index * size, (index + 1) * size) : this.bands;
     }
     this.updateLightLevels(lightValues, dt);
-    const density = Number($('density').value), step = Math.min(dt, .08);
+    if (this.hasSpark) {
+      this.showSparkLfe = $('lfe').checked;
+      this.spark?.update(this.bands, lightValues, dt, time, this);
+      if (this.hasVeil) this.aurora?.update(this.bands, lightValues, dt, time, this);
+      return; // The legacy pool and other renderers remain idle.
+    }
+    if (this.visualStyle === 'hybrid') this.aurora?.update(this.bands, lightValues, dt, time, this);
+    const density = Number($('density').value) * (this.visualStyle === 'hybrid' ? this.auroraSettings.hybridAmount : 1), step = Math.min(dt, .08);
     for (let c = 0; c < this.speakers.length; c++) for (let b = 0; b < clip.bandCount; b++) {
       if (this.channelSuppressed(c)) { this.budgets[c * clip.bandCount + b] = 0; continue; }
       const k = c * clip.bandCount + b, intensity = this.bands[k];
-      if (this.syncReference === 'listener' && this.speakers[c].code !== 'LFE') {
+      if (this.visualStyle === 'particles' && this.syncReference === 'listener' && this.speakers[c].code !== 'LFE') {
         // Same emitter, geometry and decay as Speaker mode. Only the sampled audio time differs.
         // Candidate thinning gives the same expected emission rate with a per-particle travel offset.
         this.budgets[k] = Math.min(60, this.budgets[k] + step * density * 103);
@@ -576,10 +685,14 @@ class SpaceRenderer {
     }
   }
   draw(time) {
+    if (this.contextLost) return;
     const gl = this.gl, canvas = this.canvas;
     const ratio = Math.min(devicePixelRatio || 1, 1.5), width = Math.round(canvas.clientWidth * ratio), height = Math.round(canvas.clientHeight * ratio);
     if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
-    gl.viewport(0, 0, width, height); gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.viewport(0, 0, width, height);
+    if (this.visualStyle !== 'particles' && !this.legacyComposite) gl.clearColor(7 / 255, 13 / 255, 23 / 255, 0);
+    else gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
     const pose = this.cameraPose();
     const baseMatrix = cameraMatrix(pose.eye, pose.target, width / Math.max(1, height), pose.right);
     const rotateWorld = liveMode && !!liveState?.head && !!liveState.scene?.rotateWorld;
@@ -605,13 +718,32 @@ class SpaceRenderer {
       this.lines = [];
     }
     gl.uniformMatrix4fv(this.matrixLocation, false, this.matrix);
+    if (this.hasVeil && this.aurora) {
+      try { this.aurora.draw(this.matrix, this); }
+      catch (e) {
+        this.aurora.dispose(); this.aurora = null; this.visualStyle = 'particles';
+        $('visual-style').value = 'particles'; $('aurora-controls').hidden = true;
+        document.body.classList.toggle('hybrid-mode', false);
+        document.body.classList.toggle('spark-mode', false);
+        $('spark-controls').hidden = $('veil-palette-label').hidden = true;
+        this.clear(); this.buildScene();
+        $('settings-status').textContent = `Hybrid unavailable; using Particles. ${e.message}`;
+      } finally { this.restoreGeometry(); }
+    }
+    // Draw sparks after the soft veil so its translucent surface does not dim their cores.
+    if (this.hasSpark && this.spark) {
+      try { this.spark.draw(this.matrix, this); }
+      catch (e) { this.sparkFallback(e); }
+      finally { this.restoreGeometry(); }
+    }
     const lfe = this.speakers.findIndex(s => s.code === 'LFE');
     if ($('lfe').checked && lfe >= 0 && this.bands.length && this.count) {
       let level = 0; for (let b = 0; b < this.info.bandCount; b++) if (this.info.centers[b] <= 160) level = Math.max(level, this.bands[lfe * this.info.bandCount + b]);
       if (!this.channelSuppressed(lfe)) for (let r = 0; r < 4; r++) { const radius = ((time * .8 + r * 1.5) % 6); this.circle([0, .025, 0], radius, [.85, .23, .08], level * .2 * (1 - radius / 7), 'floor', 90); }
       if (this.lines.length) { const rings = new Float32Array(this.lines); gl.bufferData(gl.ARRAY_BUFFER, rings, gl.DYNAMIC_DRAW); gl.drawArrays(gl.LINES, 0, rings.length / 8); }
     }
-    this.beamMesh.build(this, rotateWorld ? pointInRoom(pose.eye, liveState.head) : pose.eye);
+    if (this.hasVeil || this.hasSpark) this.beamMesh.vertexCount = 0;
+    else this.beamMesh.build(this, rotateWorld ? pointInRoom(pose.eye, liveState.head) : pose.eye);
     if (this.beamMesh.vertexCount) {
       gl.bufferData(gl.ARRAY_BUFFER, this.beamMesh.vertices.subarray(0, this.beamMesh.vertexCount * 8), gl.DYNAMIC_DRAW);
       gl.drawArrays(gl.TRIANGLES, 0, this.beamMesh.vertexCount);
@@ -637,6 +769,7 @@ class SpaceRenderer {
       if (this.vertices[v + 6] > .001) this.visibleCount++;
     }
     gl.uniform1f(this.pointLocation, 1); gl.bufferData(gl.ARRAY_BUFFER, this.vertices.subarray(0, this.count * 8), gl.DYNAMIC_DRAW); gl.drawArrays(gl.POINTS, 0, this.count);
+    this.finishAuroraComposite();
     for (const s of this.speakers) {
       const p = [...add(s.position, s.code === 'LFE' ? [0, 0, .6] : [0, .48, 0]), 1], q = [0, 0, 0, 0];
       for (let row = 0; row < 4; row++) for (let col = 0; col < 4; col++) q[row] += this.matrix[col * 4 + row] * p[col];
@@ -651,7 +784,7 @@ try { renderer = new SpaceRenderer($('scene')); }
 catch (e) {
   // A graphics failure must not prevent demo audio playback.
   error('Could not start 3D rendering. Demo playback is still available.\n' + e.message);
-  renderer = { count: 0, bands: new Float32Array(0), clear() {}, setClip() {}, setSpeakerStates() {}, advance() {}, draw() {}, view() {}, rotate() {}, buildScene() {}, setSpread() {}, setSyncReference() {}, setParticleSpeed() {} };
+  renderer = { count: 0, bands: new Float32Array(0), clear() {}, setClip() {}, setSpeakerStates() {}, advance() {}, draw() {}, view() {}, home() {}, rotate() {}, navigate() {}, buildScene() {}, setSpread() {}, setSyncReference() {}, setParticleSpeed() {}, setVisualStyle() {} };
 }
 
 function enterLive() {
@@ -681,7 +814,7 @@ function applyLive(state) {
   $('head-follow-label').hidden = !state.head || !!state.scene?.rotateWorld;
   $('scene-help').textContent = state.head
     ? 'Change sound direction in Headphones: click its room, then use arrow keys. Camera → Listener shows that direction; drag in Overview to orbit.'
-    : 'Click the scene, then ↑ ↓: tilt · ← →: rotate · Drag: look / orbit · Right-drag: pan · Wheel: zoom';
+    : 'Click scene · WASD: move · Q/E: turn · Z/X: down/up · Shift: fast · Alt: fine · Home: reset · Arrows: tilt/turn · Drag: look';
   $('sync-reference').options[0].disabled = !!state.head;
   if (state.head && normalSyncReference === null) normalSyncReference = renderer.syncReference;
   if (!state.head && normalSyncReference !== null) {
@@ -695,15 +828,19 @@ function applyLive(state) {
     renderer.setClip(clip); liveKey = key; lastVisualTime = state.position;
   } else {
     clip.duration = state.duration;
-    if (forecastReset || (reset && (state.playing || Math.abs(state.position - previousPosition) > .2)) || Math.abs(state.position - previousPosition) > .5) renderer.clear();
+    if ((renderer.hasSpark && reset) || (!renderer.hasSpark && forecastReset) || (reset && (state.playing || Math.abs(state.position - previousPosition) > .2)) || Math.abs(state.position - previousPosition) > .5) renderer.clear();
     if (reset || Math.abs(state.position - previousPosition) > .5) lastVisualTime = state.position;
   }
   renderer.setSpeakerStates(state.speakerStates);
+  if (!state.connected) { renderer.aurora?.clear(); renderer.spark?.clear(); }
   playing = state.connected && state.playing;
   $('filename').textContent = state.name;
   $('format').textContent = `${state.codec || 'DiscChannelLab'} · ${(state.sourceSampleRate / 1000).toFixed(1)} kHz · ${state.channels.length ? state.channels.join(' / ') : 'Waiting for audio'}`;
   $('preview-note').textContent = state.head
-    ? `Headphones · ${state.headphoneRenderer} · yaw ${state.head.yaw.toFixed(1)}° / pitch ${state.head.pitch.toFixed(1)}° / roll ${state.head.roll.toFixed(1)}°. ${state.scene?.rotateWorld ? 'Keyboard: listener fixed, room rotates.' : 'Tracker: room fixed, head turns.'} FL / FR ±${state.scene?.frontAngle ?? 30}°. Particles show current emission.`
+    ? `Headphones · ${state.headphoneRenderer} · yaw ${state.head.yaw.toFixed(1)}° / pitch ${state.head.pitch.toFixed(1)}° / roll ${state.head.roll.toFixed(1)}°. ${state.scene?.rotateWorld ? 'Keyboard: listener fixed, room rotates.' : 'Tracker: room fixed, head turns.'} FL / FR ±${state.scene?.frontAngle ?? 30}°.`
+    : renderer.visualStyle === 'aurora-spark' ? 'Aurora veils and sparks share the current audio. Choose original veil colors or Match Spark Field; no travel delay.'
+    : renderer.visualStyle === 'spark-field' ? 'Spark Field follows the current audio. Soft afterglow is visual only; no look-ahead or travel delay.'
+    : renderer.visualStyle === 'hybrid' ? 'Each channel’s frequency bands drive their own veil height and movement. Current audio, no travel delay.'
     : renderer.syncReference === 'listener' && !state.lookahead?.times?.length
     ? 'Preparing look-ahead. If this persists, restart the updated player and playback.'
     : 'Use DiscChannelLab for playback, seeking and volume.';
@@ -715,7 +852,7 @@ async function pollLive() {
   if (livePollBusy || busy) return;
   livePollBusy = true;
   try {
-    const needsForecast = renderer.syncReference === 'listener';
+    const needsForecast = renderer.visualStyle === 'particles' && renderer.syncReference === 'listener';
     const horizon = Math.min(8.2, Math.max(.5, 4.2 / renderer.particleSpeed));
     const response = await api('/api/live?signal=' + encodeURIComponent($('analysis-mode').value || 'post') + '&ahead=' + (needsForecast ? '1' : '0') + '&horizon=' + horizon);
     if (!response.ok || typeof response.json !== 'function') return;
@@ -738,7 +875,7 @@ $('volume').oninput = () => { $('volume-value').textContent = `${$('volume').val
 $('timeline').oninput = () => { draggingTimeline = true; $('time').textContent = `${timeLabel(Number($('timeline').value))} / ${timeLabel(clip.duration)}`; };
 $('timeline').onchange = () => { draggingTimeline = false; seek(Number($('timeline').value)).catch(e => error(e.message)); };
 $('view').onchange = () => renderer.view($('view').value);
-$('reset-view').onclick = () => { $('view').value = 'orbit'; renderer.view('orbit'); };
+$('reset-view').onclick = () => { clearCameraKeys(); renderer.home(); };
 $('sync-reference').onchange = () => {
   if (liveMode && liveState?.head) $('sync-reference').value = 'speaker';
   renderer.setSyncReference($('sync-reference').value);
@@ -774,12 +911,83 @@ $('beam-strength').oninput = () => {
   renderer.beamStrength = clamp(Number($('beam-strength').value), 0, 2);
   $('beam-strength-value').textContent = `${renderer.beamStrength.toFixed(1)}×`;
 };
+// Aurora controls stay independent of the existing particle controls and audio settings.
+const auroraSliders = { intensity: 'aurora-intensity', opacity: 'aurora-opacity', density: 'aurora-density',
+  speed: 'aurora-speed', detail: 'aurora-detail', persistence: 'aurora-persistence', hybridAmount: 'hybrid-amount' };
+function readAuroraControls() {
+  const value = { layout: $('aurora-layout').value, preset: $('aurora-preset').value,
+    quality: $('aurora-quality').value, palette: $('aurora-palette').value, flowDirection: $('aurora-flow').value };
+  for (const [key, id] of Object.entries(auroraSliders)) value[key] = Number($(id).value);
+  return Aurora.sanitize(value);
+}
+function applyAuroraControls(value) {
+  const settings = Aurora.sanitize(value);
+  for (const key of ['layout', 'preset', 'quality', 'palette']) $('aurora-' + key).value = settings[key];
+  $('aurora-flow').value = settings.flowDirection;
+  $('veil-color-note').hidden = $('visual-style').value !== 'aurora-spark';
+  $('veil-color-note').textContent = settings.palette === 'spark'
+    ? 'Veil and sparks share frequency colors. Hot spark cores can still shine white.'
+    : 'The veil keeps its own palette; sparks keep their original frequency colors.';
+  for (const [key, id] of Object.entries(auroraSliders)) {
+    $(id).value = settings[key]; $(id + '-value').textContent = settings[key].toFixed(2);
+  }
+  renderer.setVisualStyle($('visual-style').value, settings);
+}
+$('visual-style').value = 'particles';
+$('visual-style').onchange = () => {
+  const style = $('visual-style').value, spark = Aurora.hasSpark(style), veil = Aurora.hasVeil(style);
+  document.body.classList.toggle('spark-mode', spark);
+  $('spark-controls').hidden = !spark;
+  document.body.classList.toggle('hybrid-mode', veil);
+  $('lfe-display-text').textContent = style === 'aurora-spark' ? 'LFE field / floor motes' : spark ? 'LFE floor motes' : 'LFE ripples';
+  $('aurora-controls').hidden = $('veil-palette-label').hidden = !veil;
+  $('veil-color-note').hidden = style !== 'aurora-spark';
+  $('hybrid-control').hidden = $('visual-style').value !== 'hybrid';
+  renderer.setVisualStyle($('visual-style').value, readAuroraControls());
+};
+for (const id of [...Object.values(auroraSliders), 'aurora-layout', 'aurora-quality', 'aurora-palette', 'aurora-flow']) {
+  const change = () => { $('aurora-preset').value = 'custom'; applyAuroraControls(readAuroraControls()); };
+  if (Object.values(auroraSliders).includes(id)) $(id).oninput = change; else $(id).onchange = change;
+}
+$('aurora-preset').onchange = () => {
+  const preset = Aurora.presets[$('aurora-preset').value];
+  applyAuroraControls(preset ? { ...preset,
+    palette: $('visual-style').value === 'aurora-spark' ? $('aurora-palette').value : preset.palette } : readAuroraControls());
+};
+applyAuroraControls(Aurora.defaults);
+const sparkSliders = { density: 'spark-density', intensity: 'spark-intensity', streak: 'spark-streak',
+  spread: 'spark-spread', drift: 'spark-drift', afterglow: 'spark-afterglow', speed: 'spark-speed', streakLength: 'spark-length', twinkle: 'spark-twinkle' };
+function readSparkControls() {
+  const value = { preset: $('spark-preset').value, quality: $('spark-quality').value };
+  for (const [key, id] of Object.entries(sparkSliders)) value[key] = Number($(id).value);
+  return SparkField.sanitize(value);
+}
+function applySparkControls(value) {
+  const options = SparkField.sanitize(value); renderer.sparkSettings = options;
+  $('spark-preset').value = options.preset; $('spark-quality').value = options.quality;
+  for (const [key, id] of Object.entries(sparkSliders)) {
+    $(id).value = options[key]; $(id + '-value').textContent = options[key].toFixed(2);
+  }
+  renderer.spark?.setOptions(options);
+}
+for (const id of Object.values(sparkSliders)) $(id).oninput = () => {
+  $('spark-preset').value = 'custom'; applySparkControls(readSparkControls());
+};
+$('spark-quality').onchange = () => applySparkControls(readSparkControls());
+$('spark-preset').onchange = () => {
+  const options = SparkField.presets[$('spark-preset').value];
+  applySparkControls(options ? { ...options, quality: $('spark-quality').value } : readSparkControls());
+};
+applySparkControls(SparkField.defaults);
 $('transparency').oninput = () => {
   const percent = clamp(Number($('transparency').value), 0, 100);
   renderer.particleOpacity = 1 - percent / 100;
   $('transparency-value').textContent = `${percent}%`;
 };
 const cameraKeys = new Set(), arrowKeys = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
+const navigationKeys = new Set(['KeyW', 'KeyS', 'KeyA', 'KeyD', 'KeyQ', 'KeyE', 'KeyZ', 'KeyX']);
+let cameraShift = false, cameraAlt = false;
+function clearCameraKeys() { cameraKeys.clear(); cameraShift = cameraAlt = false; }
 const editingControl = () => document.activeElement?.isContentEditable || ['INPUT', 'SELECT', 'TEXTAREA', 'BUTTON'].includes(document.activeElement?.tagName);
 let uiHidden = false;
 function setInterfaceHidden(hidden) {
@@ -790,23 +998,32 @@ function setInterfaceHidden(hidden) {
 }
 $('toggle-ui').onclick = () => { setInterfaceHidden(!uiHidden); $('scene').focus(); };
 document.addEventListener('keydown', e => {
+  cameraShift = !!e.shiftKey; cameraAlt = !!e.altKey;
+  if (e.ctrlKey || e.metaKey) clearCameraKeys();
   if (e.code === 'KeyH' && !editingControl() && !e.ctrlKey && !e.altKey && !e.metaKey) {
     e.preventDefault(); if (!e.repeat) setInterfaceHidden(!uiHidden);
   }
   if (e.code === 'KeyS' && (e.ctrlKey || e.metaKey) && !e.altKey) {
     e.preventDefault(); if (!e.repeat && !$('save-settings').disabled) settingsAction(true);
   }
-  if (arrowKeys.has(e.code) && !editingControl() && !e.ctrlKey && !e.altKey && !e.metaKey) { e.preventDefault(); cameraKeys.add(e.code); }
+  if (e.code === 'Home' && !editingControl() && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    e.preventDefault(); if (!e.repeat) $('reset-view').onclick();
+  }
+  if ((arrowKeys.has(e.code) || navigationKeys.has(e.code)) && !editingControl() && !e.ctrlKey && !e.metaKey) { e.preventDefault(); cameraKeys.add(e.code); }
+  // Prevent the browser menu from stealing focus during precision flight. Other Alt shortcuts remain available.
+  if (['AltLeft', 'AltRight'].includes(e.code) && !editingControl() && !e.ctrlKey && !e.metaKey) e.preventDefault();
   if (!liveMode && e.code === 'Space' && !['INPUT', 'SELECT', 'BUTTON'].includes(document.activeElement.tagName)) { e.preventDefault(); if (clip) playing ? pause() : play(); }
 });
-document.addEventListener('keyup', e => cameraKeys.delete(e.code));
-window.addEventListener('blur', () => cameraKeys.clear());
-document.addEventListener('visibilitychange', () => { if (document.hidden) cameraKeys.clear(); });
-document.addEventListener('focusin', () => { if (editingControl()) cameraKeys.clear(); });
+document.addEventListener('keyup', e => { cameraKeys.delete(e.code); cameraShift = !!e.shiftKey; cameraAlt = !!e.altKey; });
+window.addEventListener('blur', clearCameraKeys);
+document.addEventListener('visibilitychange', () => { if (document.hidden) clearCameraKeys(); });
+document.addEventListener('focusin', () => { if (editingControl()) clearCameraKeys(); });
 
 function captureSettings() {
   return {
     version: 1, signal: $('analysis-mode').value, view: $('view').value, syncReference: normalSyncReference ?? $('sync-reference').value,
+    visualStyle: Aurora.style($('visual-style').value), aurora: readAuroraControls(),
+    sparkField: readSparkControls(),
     spread: Number($('spread').value), particleSize: Number($('particle-size').value), particleSpeed: Number($('particle-speed').value),
     listenerSize: Number($('listener-size').value), listenerBrightness: Number($('listener-brightness').value), transparency: Number($('transparency').value), density: Number($('density').value),
     speakerBeams: $('speaker-beams').checked, beamStrength: Number($('beam-strength').value),
@@ -816,7 +1033,11 @@ function captureSettings() {
   };
 }
 function applySettings(value) {
-  cameraKeys.clear();
+  clearCameraKeys();
+  renderer.legacyComposite = false;
+  applySparkControls(value.sparkField);
+  $('visual-style').value = Aurora.style(value.visualStyle);
+  applyAuroraControls(value.aurora); $('visual-style').onchange();
   $('sync-reference').value = value.syncReference === 'speaker' ? 'speaker' : 'listener';
   $('sync-reference').onchange();
   $('particle-speed').value = value.particleSpeed ?? 2; $('particle-speed').oninput();
@@ -832,6 +1053,9 @@ function applySettings(value) {
   renderer.buildScene();
   $('view').value = value.view; renderer.view(value.view);
   renderer.camera = { ...value.camera, target: [...value.camera.target] };
+  renderer.camera.homeView = value.view === 'free'
+    ? (['orbit', 'bird', 'top', 'listener', 'front', 'back'].includes(value.camera.homeView) ? value.camera.homeView : 'orbit')
+    : value.view;
   $('analysis-mode').value = value.signal; $('analysis-mode').onchange();
   setInterfaceHidden(value.hideUi);
 }
@@ -861,39 +1085,90 @@ async function settingsAction(save, startup = false) {
 }
 $('save-settings').onclick = () => settingsAction(true);
 $('load-settings').onclick = () => settingsAction(false);
-// Restore preferences before live mode chooses its signal. Never auto-start demo audio.
-const settingsReady = settingsAction(false, true);
+// One request provides the FFT definition, previous view and current audio snapshot.
+// Reopening a window must not silently switch its mode or wait for serial API calls.
+let sessionReady = false;
+const settingsReady = (async () => {
+  try {
+    const response = await api('/api/bootstrap');
+    if (!response.ok) throw new Error('Startup request failed.');
+    const value = await response.json();
+    if (!value.analysis || !value.settings) throw new Error('Incomplete startup response.');
+    analysisSettings = value.analysis;
+    applySettings(value.settings);
+    if (value.live?.configured) {
+      liveInitialized = true; liveState = value.live; liveAt = performance.now(); enterLive();
+      $('follow').hidden = false;
+    }
+  } catch (_) {
+    // Retain recovery with older hosts, and the explicit settings error message.
+    try { const r = await api('/api/analysis-settings'); if (r.ok) analysisSettings = await r.json(); } catch (_) {}
+    await settingsAction(false, true);
+  }
+  sessionReady = true;
+})();
+function rememberSession(keepalive = false) {
+  if (!sessionReady) return;
+  api('/api/session/view', { keepalive, headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(captureSettings()) }).catch(() => {});
+}
+document.addEventListener('change', () => rememberSession());
+window.addEventListener('pagehide', () => rememberSession(true));
 settingsReady.then(() => { pollLive(); setInterval(pollLive, 50); });
 function updateTransport() {
   if (draggingTimeline) return;
   const t = position(); $('timeline').value = t; $('time').textContent = `${timeLabel(t)} / ${timeLabel(clip?.duration || 0)}`;
 }
 let lastStats = performance.now(), lastCameraTime = lastStats, frameCount = 0, fps = 0;
-let lastRenderTime = -Infinity;
+const frameTimes = new Float32Array(180); let frameSample = 0, previousFrameTime = lastStats;
+let lastRenderFrame = -Infinity;
 function render(now) {
-  // Leave CPU/GPU scheduling room for playback, including on high-refresh displays.
-  if (now - lastRenderTime < 1000 / 30 - .5) { requestAnimationFrame(render); return; }
-  lastRenderTime = now;
+  // Do not render at an unrestricted 120/144/240 Hz just because the monitor
+  // supports it. Leave CPU/GPU scheduling room for the independent audio player.
+  {
+    const combined = renderer.visualStyle === 'aurora-spark';
+    const quality = combined ? (renderer.sparkSettings?.quality === 'high' && renderer.auroraSettings?.quality === 'high' ? 'high' : 'medium')
+      : renderer.visualStyle === 'spark-field' ? renderer.sparkSettings?.quality : renderer.visualStyle === 'particles' ? 'medium' : renderer.auroraSettings?.quality;
+    const interval = 1000 / (quality === 'high' || renderer.visualStyle === 'spark-field' && quality !== 'low' ? 60 : 30);
+    if (now - lastRenderFrame < interval - .5) { requestAnimationFrame(render); return; }
+    lastRenderFrame = now;
+  }
+  frameTimes[frameSample++ % frameTimes.length] = Math.max(0, now - previousFrameTime); previousFrameTime = now;
   // Camera movement uses wall time so it also works while audio is paused.
-  const cameraStep = Math.min(.05, Math.max(0, (now - lastCameraTime) / 1000)) * Math.PI / 3;
+  const cameraSeconds = Math.min(.05, Math.max(0, (now - lastCameraTime) / 1000));
+  const cameraSpeedScale = cameraAlt ? .15 : cameraShift ? 4 : 1; // Alt takes priority if both are held.
+  const cameraStep = cameraSeconds * Math.PI / 3 * cameraSpeedScale;
   lastCameraTime = now;
-  if (!editingControl()) renderer.rotate((Number(cameraKeys.has('ArrowRight')) - Number(cameraKeys.has('ArrowLeft'))) * cameraStep * (renderer.listenerView ? -1 : 1),
-    (Number(cameraKeys.has('ArrowUp')) - Number(cameraKeys.has('ArrowDown'))) * cameraStep);
-  if (liveMode && now - liveAt > 500) { playing = false; $('state').textContent = 'Waiting for player connection'; }
+  if (!editingControl()) {
+    renderer.navigate(Number(cameraKeys.has('KeyW')) - Number(cameraKeys.has('KeyS')),
+      Number(cameraKeys.has('KeyD')) - Number(cameraKeys.has('KeyA')),
+      Number(cameraKeys.has('KeyX')) - Number(cameraKeys.has('KeyZ')),
+      Number(cameraKeys.has('KeyQ')) - Number(cameraKeys.has('KeyE')), cameraSeconds, cameraSpeedScale);
+    renderer.rotate((Number(cameraKeys.has('ArrowRight')) - Number(cameraKeys.has('ArrowLeft'))) * cameraStep * (renderer.listenerView || renderer.freeView ? -1 : 1),
+      (Number(cameraKeys.has('ArrowUp')) - Number(cameraKeys.has('ArrowDown'))) * cameraStep * (renderer.freeView ? -1 : 1));
+  }
+  if (liveMode && now - liveAt > 500) { if (playing) { renderer.aurora?.clear(); renderer.spark?.clear(); } playing = false; $('state').textContent = 'Waiting for player connection'; }
   const t = position();
   if (playing) {
     renderer.advance(Math.max(0, t - lastVisualTime), t); lastVisualTime = t;
-    if (!liveMode && sourceEnded && t >= clip.duration - .002) { offset = clip.duration; playing = false; detachSource(); $('play').textContent = '↻ Replay'; $('state').textContent = 'Playback ended'; }
+    if (!liveMode && sourceEnded && t >= clip.duration - .002) { renderer.aurora?.clear(); offset = clip.duration; playing = false; detachSource(); renderer.spark?.clear(); $('play').textContent = '↻ Replay'; $('state').textContent = 'Playback ended'; }
   }
   renderer.draw(t); updateTransport(); frameCount++;
-  if (now - lastStats > 750) { fps = Math.round(frameCount * 1000 / (now - lastStats)); $('stats').textContent = `${(renderer.visibleCount ?? renderer.count).toLocaleString()} particles · ${fps} fps`; lastStats = now; frameCount = 0; }
+  if (now - lastStats > 750) { fps = Math.round(frameCount * 1000 / (now - lastStats)); $('stats').textContent = renderer.hasSpark ? `${renderer.hasVeil ? 'Aurora + Spark' : 'Spark Field'} · ${renderer.spark?.pool.count || 0} lights · ${fps} fps` : `${renderer.visualStyle === 'particles' ? '' : 'Hybrid · '}${(renderer.visibleCount ?? renderer.count).toLocaleString()} particles · ${fps} fps`; lastStats = now; frameCount = 0; }
   requestAnimationFrame(render);
 }
 requestAnimationFrame(render);
 // Read-only diagnostics and small controls for local browser integration checks.
 window.lab = {
-  get state() { return { playing, liveMode, time: position(), particles: renderer.count, fps, channels: clip?.channels, duration: clip?.duration, contextState: context?.state, errors: $('notice').hidden ? null : $('notice').textContent, bands: Array.from(renderer.bands), view: $('view').value }; },
+  get state() { return { playing, liveMode, time: position(), particles: renderer.hasSpark ? renderer.spark?.pool.count || 0 : renderer.count, fps, channels: clip?.channels, duration: clip?.duration, contextState: context?.state, errors: $('notice').hidden ? null : $('notice').textContent, bands: Array.from(renderer.bands), view: $('view').value }; },
   play, pause, stop, seek, settingsReady, headFrame,
+  get diagnostics() {
+    const sorted = Array.from(frameTimes.subarray(0, Math.min(frameSample, frameTimes.length))).sort((a, b) => a - b);
+    return { visualStyle: renderer.visualStyle, fps, frameTimeP95: sorted[Math.floor((sorted.length - 1) * .95)] || 0,
+      aurora: renderer.hasVeil ? renderer.aurora?.stats : { vertices: 0, drawCalls: 0 },
+      sparkField: renderer.hasSpark ? renderer.spark?.stats : { particles: 0, drawCalls: 0, buffers: 0 },
+      electricFlow: { vertices: 0, drawCalls: 0, buffers: 0 } }; // Legacy diagnostic consumers; no renderer is loaded.
+  },
   get head() { return liveState?.head; },
   get scene() { return liveState?.scene; },
   get cameraPose() { return renderer.cameraPose(); },

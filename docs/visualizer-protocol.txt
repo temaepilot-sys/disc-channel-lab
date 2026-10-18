@@ -14,7 +14,7 @@ Activation
 
 Envelope
   int32 little-endian payload length, then exactly that many payload bytes.
-  Accepted length: 2..262144 bytes. First payload byte identifies the message type.
+  Accepted length: 1..262144 bytes. First payload byte identifies the message type.
 
 Type 1: playback clock
   Byte 1, followed by UTF-8 JSON (no BOM):
@@ -77,6 +77,18 @@ Type 3: look-ahead PCM (requires updated player and viewer)
   Listener emission samples future spectrum at audio time plus particle travel.
   Speaker emission continues to use current type 2 data. LFE needs no travel lead.
   Startup/seek/control changes have a visual warm-up; playback is never delayed.
+
+  When future analysis is disabled, the receiver retains validated raw packets
+  without extra payload copies: at most 384 packets, 24 MiB and an 8.3-second
+  timestamp span. Re-enabling analysis replays small asynchronous batches near
+  the current clock. Epoch and mixer revisions invalidate old cached packets.
+
+Type 4: show viewer window
+  Exactly one byte: 4. No JSON or PCM follows it.
+  Requests activation of the current viewer window or a new browser window.
+  The player coalesces requests independently of bounded PCM queues; control
+  delivery takes priority. The receiver queues browser work on a separate worker,
+  so launch/focus never blocks current PCM analysis or changes audio state.
 
 Signal definitions (type 2)
   Input: decoder PCM before the managed mixer, for supported multichannel layouts.

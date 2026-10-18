@@ -1,7 +1,7 @@
 param(
     [ValidateSet('Debug', 'Release')]
     [string]$Configuration = 'Release',
-    [string]$OutputDirectory = 'artifacts\standalone-win-x64-visualizer-link'
+    [string]$OutputDirectory = 'artifacts\personal-win-x64'
 )
 
 $ErrorActionPreference = 'Stop'

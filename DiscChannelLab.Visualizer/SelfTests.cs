@@ -23,7 +23,7 @@ public static class SelfTests
                 var store = new ViewerPreferencesStore(preferenceFile);
                 Check(store.Load() is null, "Missing viewer settings use UI defaults");
                 File.WriteAllText(preferenceFile, "{\"version\":1}");
-                Check(store.Load() is { SyncReference: "listener", ParticleSpeed: 2, ListenerSize: 1.5, ListenerBrightness: 1.4, SpeakerBeams: false, BeamStrength: .8 }, "Legacy preferences retain particle view and default beam strength");
+                Check(store.Load() is { VisualStyle: "particles", Aurora.Layout: "curtain", Aurora.Intensity: .75, SyncReference: "listener", ParticleSpeed: 2, ListenerSize: 1.5, ListenerBrightness: 1.4, SpeakerBeams: false, BeamStrength: .8 }, "Legacy preferences retain particle view and default beam strength");
                 var original = new ViewerPreferences { View = "listener", Spread = 12, Transparency = 65,
                     SyncReference = "speaker", ParticleSpeed = 3.2, ListenerSize = 2.4, ListenerBrightness = 4,
                     SpeakerBeams = true, BeamStrength = 1.6,
@@ -51,6 +51,63 @@ public static class SelfTests
                 invalidRejected = false;
                 try { store.Load(); } catch (JsonException) { invalidRejected = true; }
                 Check(invalidRejected && File.ReadAllText(preferenceFile) == "{broken", "Corrupt settings are reported and preserved");
+                var free = original with { View = "free", Camera = new CameraPreferences { Yaw = 5.9, Pitch = -.8,
+                    Distance = 4, Target = [-12.5, -3.4, 22] } };
+                store.Save(free); restored = new ViewerPreferencesStore(preferenceFile).Load()!;
+                Check(restored.View == "free" && restored.Camera.Yaw == free.Camera.Yaw &&
+                    restored.Camera.Target.SequenceEqual(free.Camera.Target), "Free navigation position and orientation survive a store restart");
+                store.Save(free with { Camera = free.Camera with { HomeView = "listener" } });
+                Check(store.Load()!.Camera.HomeView == "listener", "Free camera retains its original preset for Home across store restarts");
+                var aurora = original with { VisualStyle = "hybrid", Aurora = new AuroraPreferences { Layout = "flow", Preset = "custom",
+                    Intensity = 1.1, Opacity = .73, Density = .2, Speed = 1.3, Detail = .6, Persistence = .8, HybridAmount = .4, Quality = "high", Palette = "warm", FlowDirection = "down" } };
+                store.Save(aurora);
+                restored = new ViewerPreferencesStore(preferenceFile).Load()!;
+                Check(restored.VisualStyle == "hybrid" && restored.Aurora == aurora.Aurora && restored.Camera == aurora.Camera with { Target = restored.Camera.Target },
+                    "Aurora settings and existing camera survive a store restart");
+                store.Save(aurora with { Aurora = aurora.Aurora with { FlowDirection = "up" } });
+                Check(store.Load()!.Aurora.FlowDirection == "up", "Upward flow survives JSON save/load");
+                store.Save(aurora with { Aurora = aurora.Aurora with { FlowDirection = "invalid" } });
+                Check(store.Load()!.Aurora.FlowDirection == "none", "Invalid flow defaults to Off");
+                File.WriteAllText(preferenceFile, """{"version":1,"visualStyle":42,"aurora":{"layout":"dome","preset":"unknown","intensity":-10,"opacity":9,"speed":"NaN","detail":null,"persistence":"Infinity","quality":"ultra","palette":false}}""");
+                restored = store.Load()!;
+                Check(restored.VisualStyle == "particles" && restored.Aurora is { Layout: "curtain", Preset: "calm", Intensity: 0, Opacity: 1,
+                    Speed: .35, Detail: .4, Persistence: .65, Quality: "medium", Palette: "spectrum" }, "Malformed new fields fall back or clamp without rejecting legacy settings");
+                foreach (string json in new[] { "{\"aurora\":null}", "{\"aurora\":42}", "{\"aurora\":[]}", "{\"aurora\":\"bad\"}" })
+                {
+                    File.WriteAllText(preferenceFile, json);
+                    Check(store.Load()!.Aurora == new AuroraPreferences(), "Missing or non-object Aurora preferences use safe defaults");
+                }
+                foreach (double x in new[] { double.NaN, double.PositiveInfinity, double.NegativeInfinity })
+                {
+                    store.Save(aurora with { Aurora = aurora.Aurora with { Intensity = x, Opacity = x, Speed = x, Detail = x } });
+                    Check(store.Load()!.Aurora is { Intensity: .75, Opacity: .55, Speed: .35, Detail: .4 }, "Nonfinite Aurora numbers serialize as safe defaults");
+                }
+                File.WriteAllText(preferenceFile, "{\"aurora\":{\"intensity\":1e999,\"hybridAmount\":-1,\"density\":9}}");
+                Check(store.Load()!.Aurora is { Intensity: .75, HybridAmount: 0, Density: 1 }, "Overflow and out-of-range Aurora values are normalized");
+                var electric = original with { VisualStyle = "electric-flow", ElectricFlow = new() { Intensity = 1.2, Spread = .9, Quality = "high", Amplitude = 2.5, Emission = 1.7, Gravity = 1.2, Width = 2, Glow = 1.5 } };
+                store.Save(electric); restored = store.Load()!;
+                Check(restored.VisualStyle == "particles" && restored.ElectricFlow == electric.ElectricFlow, "Retired modes fall back to Particles while retaining old preference data");
+                File.WriteAllText(preferenceFile, "{\"electricFlow\":{\"intensity\":\"bad\",\"spread\":-2,\"quality\":\"ultra\"}}");
+                Check(store.Load()!.ElectricFlow is { Intensity: .8, Spread: .2, Quality: "medium" }, "Invalid Electric Flow fields safely default or clamp");
+                store.Save(electric with { ElectricFlow = new() { Intensity = double.NaN, Spread = double.PositiveInfinity } });
+                Check(store.Load()!.ElectricFlow == new ElectricFlowPreferences(), "Nonfinite Electric Flow settings normalize without changing legacy fields");
+                File.WriteAllText(preferenceFile, "{\"electricFlow\":{\"amplitude\":99,\"emission\":-3,\"gravity\":0,\"width\":null,\"glow\":1e999}}");
+                Check(store.Load()!.ElectricFlow is { Amplitude: 4, Emission: .1, Gravity: .25, Width: 1.3, Glow: 1 }, "New motion and halo fields clamp safely and migrate old preferences");
+                var spark = original with { VisualStyle = "spark-field", SparkField = new() { Density = 1.4, Afterglow = 1.6, Speed = 1.25, Streak = .8, StreakLength = 1.5, Twinkle = .3, Quality = "high", Preset = "tesla" } };
+                store.Save(spark); restored = store.Load()!;
+                Check(restored.VisualStyle == "spark-field" && restored.SparkField == spark.SparkField, "Spark Field settings survive a store restart");
+                var combined = spark with { VisualStyle = "aurora-spark", Aurora = new() { Palette = "spark", FlowDirection = "down", Opacity = .4 } };
+                store.Save(combined); restored = new ViewerPreferencesStore(preferenceFile).Load()!;
+                Check(restored.VisualStyle == "aurora-spark" && restored.Aurora == combined.Aurora && restored.SparkField == combined.SparkField,
+                    "Aurora + Spark saves matching palette, flow and independent Spark settings together");
+                store.Save(combined with { Aurora = combined.Aurora with { Palette = "spectrum" } });
+                Check(store.Load()!.Aurora.Palette == "spectrum", "Combined mode can retain the original veil palette");
+                File.WriteAllText(preferenceFile, "{\"sparkField\":{\"density\":99,\"intensity\":\"bad\",\"quality\":\"ultra\",\"afterglow\":-5,\"streakLength\":null,\"twinkle\":1e999}}");
+                Check(store.Load()!.SparkField is { Density: 2.5, Intensity: 1, Quality: "medium", Afterglow: 0, StreakLength: 1, Twinkle: .6 }, "Invalid Spark Field fields safely default or clamp");
+                File.WriteAllText(preferenceFile, "{\"sparkField\":null}");
+                Check(store.Load() is { VisualStyle: "particles", SparkField: { Density: 1, Preset: "surround" } }, "Old or null Spark Field preferences keep the Particles default");
+                store.Save(spark with { SparkField = new() { Drift = double.NaN, Intensity = double.PositiveInfinity, Preset = "unknown" } });
+                Check(store.Load()!.SparkField == new SparkFieldPreferences(), "Nonfinite Spark Field settings normalize without altering legacy settings");
             }
             finally { if (File.Exists(preferenceFile)) File.Delete(preferenceFile); }
             var settings = new VisualizationSettings();

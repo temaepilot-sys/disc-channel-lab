@@ -13,7 +13,8 @@ string home = AppContext.BaseDirectory;
 string cache = Path.Combine(home, "cache");
 Directory.CreateDirectory(cache);
 string log = Path.Combine(cache, "visualizer.log");
-void Log(string message) => File.AppendAllText(log, $"{DateTime.Now:O} {message}{Environment.NewLine}");
+object logGate = new();
+void Log(string message) { lock (logGate) File.AppendAllText(log, $"{DateTime.Now:O} {message}{Environment.NewLine}"); }
 
 try
 {
@@ -48,7 +49,9 @@ try
     if (pipeName is not null && (!pipeName.StartsWith("DiscChannelLab.SpaceSketch.v1.", StringComparison.Ordinal) || pipeName.Length > 160 || pipeName.Any(c => !(char.IsAsciiLetterOrDigit(c) || c == '.'))))
         throw new ArgumentException("Invalid link pipe name.");
     var initialPreferences = preferences.Load() ?? new ViewerPreferences();
-    using var live = new LiveReceiver(pipeName, settings, Log, initialPreferences.SyncReference == "listener");
+    ViewerPreferences? sessionView = null; // Reopen state; explicit Save still controls the disk file.
+    using var live = new LiveReceiver(pipeName, settings, Log,
+        initialPreferences.VisualStyle == "particles" && initialPreferences.SyncReference == "listener");
     live.Start();
     var gate = new SemaphoreSlim(1, 1);
     byte[]? demo = null;
@@ -75,7 +78,7 @@ try
             }
         }
     });
-    foreach (var (url, file, mime) in new[] { ("/", "index.html", "text/html; charset=utf-8"), ("/app.js", "app.js", "text/javascript; charset=utf-8"), ("/style.css", "style.css", "text/css; charset=utf-8") })
+    foreach (var (url, file, mime) in new[] { ("/", "index.html", "text/html; charset=utf-8"), ("/app.js", "app.js", "text/javascript; charset=utf-8"), ("/spectral-veil.js", "spectral-veil.js", "text/javascript; charset=utf-8"), ("/spark-field.js", "spark-field.js", "text/javascript; charset=utf-8"), ("/style.css", "style.css", "text/css; charset=utf-8") })
         app.MapGet(url, () =>
         {
             var resource = Assembly.GetExecutingAssembly().GetManifestResourceNames().Single(n => n.EndsWith(".Web." + file));
@@ -89,6 +92,22 @@ try
         var horizon = double.TryParse(context.Request.Query["horizon"], System.Globalization.NumberStyles.Float,
             System.Globalization.CultureInfo.InvariantCulture, out var seconds) ? seconds : 8.2;
         return Results.Json(live.Snapshot(context.Request.Query["signal"].ToString(), horizon));
+    });
+    app.MapPost("/api/analysis-settings", () => Results.Json(new { edges = settings.Edges, minimumDb = settings.MinimumDb, maximumDb = settings.MaximumDb }));
+    app.MapPost("/api/bootstrap", () =>
+    {
+        var view = Volatile.Read(ref sessionView) ?? preferences.Load() ?? new ViewerPreferences();
+        live.SetForecastEnabled(view.VisualStyle == "particles" && view.SyncReference == "listener");
+        return Results.Json(new { analysis = new { edges = settings.Edges, minimumDb = settings.MinimumDb, maximumDb = settings.MaximumDb },
+            settings = view, live = live.Snapshot(view.Signal, Math.Clamp(4.2 / view.ParticleSpeed, .5, 8.2)) });
+    });
+    app.MapPost("/api/session/view", async (HttpContext context) =>
+    {
+        context.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>()!.MaxRequestBodySize = 16384;
+        var view = await context.Request.ReadFromJsonAsync<ViewerPreferences>(context.RequestAborted)
+            ?? throw new InvalidDataException("Viewer settings are missing.");
+        view.Validate(); Volatile.Write(ref sessionView, view);
+        return Results.Ok();
     });
     app.MapPost("/api/settings/load", () => Results.Json(new { settings = preferences.Load() }));
     app.MapPost("/api/settings/save", async (HttpContext context) =>
@@ -120,11 +139,23 @@ try
     string page = address + "/#" + secret;
     File.WriteAllText(Path.Combine(cache, "endpoint.json"), JsonSerializer.Serialize(new { url = page, address, token = secret, pid = Environment.ProcessId }));
     Log("Started local visualizer");
-    if (browser is not null)
+    using var window = browser is null ? null : new ViewerWindowSession(() =>
     {
+        Interlocked.Exchange(ref heartbeat, Environment.TickCount64);
         BrowserLauncher.PrepareProfile(browser, cache);
-        Process.Start(BrowserLauncher.CreateStartInfo(browser, page, cache))?.Dispose();
-    }
+        var process = Process.Start(BrowserLauncher.CreateStartInfo(browser, page, cache))
+            ?? throw new IOException("The selected browser did not start.");
+        Log("Browser window launched");
+        return process;
+    }, e => Log("Browser window: " + e));
+    live.OpenRequested += () =>
+    {
+        // The pipe callback only queues work. Browser startup never blocks PCM analysis.
+        Interlocked.Exchange(ref heartbeat, Environment.TickCount64);
+        Log("Viewer window reopen requested");
+        window?.RequestOpen();
+    };
+    window?.RequestOpen();
     _ = Task.Run(async () =>
     {
         while (!app.Lifetime.ApplicationStopping.IsCancellationRequested)

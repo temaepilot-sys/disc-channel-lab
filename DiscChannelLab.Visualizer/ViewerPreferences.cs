@@ -1,10 +1,16 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace DiscChannelLab.Visualizer;
 
 public sealed record ViewerPreferences
 {
     public int Version { get; init; } = 1;
+    [JsonConverter(typeof(VisualStyleConverter))]
+    public string VisualStyle { get; init; } = "particles";
+    public AuroraPreferences Aurora { get; init; } = new();
+    public ElectricFlowPreferences ElectricFlow { get; init; } = new();
+    public SparkFieldPreferences SparkField { get; init; } = new();
     public string Signal { get; init; } = "post";
     public string SyncReference { get; init; } = "listener";
     public double ParticleSpeed { get; init; } = 2;
@@ -28,7 +34,7 @@ public sealed record ViewerPreferences
     public void Validate()
     {
         if (Version != 1 || Signal is not ("post" or "input" or "output") || SyncReference is not ("listener" or "speaker") ||
-            View is not ("orbit" or "bird" or "top" or "listener" or "front" or "back"))
+            View is not ("orbit" or "bird" or "top" or "listener" or "front" or "back" or "free"))
             throw new InvalidDataException("Unsupported viewer settings version or view mode.");
         Check(Spread, 0, 90); Check(ParticleSize, .3, 3); Check(Transparency, 0, 100);
         Check(ParticleSpeed, .5, 4);
@@ -52,6 +58,7 @@ public sealed record ViewerPreferences
 
 public sealed record CameraPreferences
 {
+    public string HomeView { get; init; } = "orbit";
     public double Yaw { get; init; } = .48;
     public double Pitch { get; init; } = .56;
     public double Distance { get; init; } = 12.8;

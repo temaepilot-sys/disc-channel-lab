@@ -16,13 +16,16 @@
 - [ ] Design and test a versioned audio-effect extension interface before foobar2000 integration.
 - [ ] Review the release artifacts and their license obligations before publishing binary releases.
 
-## Space sketch source preview
+## Space sketch
 
 - [x] Include viewer sources and the player’s optional PCM link in the repository.
 - [x] Build the viewer beside the public player without embedding FFmpeg.
 - [x] Document English UI, local data, Input/Post/Output semantics and symbolic particle geometry.
 - [x] Include supplied overview and listener screenshots, reviewed for visible personal paths.
 - [x] Exclude saved viewer preferences, local endpoint tokens, browser profiles and test audio.
+- [x] Integrate all four rendering modes into the shared public/personal source.
+- [x] Document matching palettes, vertical flow, camera navigation and mode-preserving Home.
+- [x] Include actual WebGL and named-pipe checks with portable test paths.
 - [ ] Broaden hardware, GPU and listening-latency checks before a binary release.
 
 ## Headphone playback in the main application

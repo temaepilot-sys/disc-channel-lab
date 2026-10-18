@@ -6,6 +6,21 @@ using System.Text.Json;
 using Disc2Flac;
 using DiscChannelLab.Visualizer;
 
+if (args is ["--window-fixture", var fixtureOutput])
+{
+    ViewerReopenTests.WindowFixture(fixtureOutput);
+    return;
+}
+if (args is ["--reopen-tests", var reopenOutput])
+{
+    await ViewerReopenTests.RunAsync(reopenOutput);
+    return;
+}
+if (args is ["--chrome-reopen-tests", var chromeReopenOutput, var chromeEndpoint])
+{
+    await ChromeReopenTests.RunAsync(chromeReopenOutput, chromeEndpoint);
+    return;
+}
 if (args is ["--browser-tests", var browserTestFolder])
 {
     BrowserTests.Run(browserTestFolder);
@@ -226,11 +241,32 @@ await using (var ahead = new VisualizerLookaheadStream(decoded, codes, () => Vol
         Check(audible.RootElement.GetProperty("hasData").GetBoolean() && audible.RootElement.GetProperty("lookahead").GetProperty("values").GetArrayLength() == 0,
             "Current PCM still analyzed while unused future HTTP arrays remain empty");
         emissionReceiver.SetForecastEnabled(true);
-        foreach (var packet in encodedForecasts) emissionReceiver.Consume(packet);
-        Check(emissionReceiver.ForecastPacketsAnalyzed == encodedForecasts.Length, "Switching to listener-timed particles re-enables forecasts");
+        for (int n = 0; n < 200 && emissionReceiver.ForecastPacketsAnalyzed == 0; n++) await Task.Delay(10);
+        Check(emissionReceiver.ForecastPacketsAnalyzed > 0, "Listener sync restores retained forecasts without any newly received future packets");
+        Check(emissionReceiver.ForecastCacheSize is { Packets: <= 384, Bytes: <= 25165824 }, "Raw future PCM cache stays within its packet and memory limits");
         emissionReceiver.SetForecastEnabled(false);
         using var disabled = JsonDocument.Parse(JsonSerializer.Serialize(emissionReceiver.Snapshot()));
         Check(disabled.RootElement.GetProperty("lookahead").GetProperty("times").GetArrayLength() == 0, "Leaving listener sync releases the old forecast queue");
+    }
+    using (var boundedReceiver = new LiveReceiver(null, settings, Console.WriteLine, enableForecast: false))
+    {
+        boundedReceiver.Consume(VisualizerBridge.Encode(new VisualizerClock(1, 30, "Cache bounds", "PCM", 48000, 0, 20, false, Environment.TickCount64)));
+        string[] eight = ["FL", "FR", "FC", "LFE", "BL", "BR", "SL", "SR"];
+        byte[] Packet(int frames, double time, int generation = 1) => VisualizerBridge.Encode((30,
+            new PreviewPcmChunk(time, eight, new byte[frames * 16], new float[frames * 8], new byte[frames * 4], generation)));
+        for (int n = 0; n < 500; n++) boundedReceiver.Consume(Packet(1024, n * .001));
+        Check(boundedReceiver.ForecastCacheSize.Packets == 384, "Raw forecast cache evicts packets beyond 384 entries");
+        for (int n = 0; n < 200; n++) boundedReceiver.Consume(Packet(4096, .5 + n * .001));
+        Check(boundedReceiver.ForecastCacheSize is { Packets: < 200, Bytes: <= 25165824 }, "Large 8-channel packets cannot grow the cache beyond 24 MiB");
+        boundedReceiver.Consume(Packet(4096, 1, 2));
+        boundedReceiver.Consume(Packet(4096, 1, 1));
+        Check(boundedReceiver.ForecastCacheSize.Packets == 1, "Mixer revision clears old raw PCM and rejects a late previous revision");
+        boundedReceiver.SetForecastEnabled(true);
+        boundedReceiver.Consume(VisualizerBridge.Encode(new VisualizerClock(1, 31, "Seek", "PCM", 48000, 3, 20, false, Environment.TickCount64)));
+        await Task.Delay(50);
+        using var afterSeek = JsonDocument.Parse(JsonSerializer.Serialize(boundedReceiver.Snapshot()));
+        Check(boundedReceiver.ForecastCacheSize.Packets == 0 && afterSeek.RootElement.GetProperty("lookahead").GetProperty("times").GetArrayLength() == 0,
+            "Seek cancels asynchronous warming and clears every cached old-session frame");
     }
     forecastReceiver.Consume(VisualizerBridge.Encode(new VisualizerClock(1, 26, "Seek", "PCM", 48000, 4, 10, false, Environment.TickCount64)));
     forecastReceiver.Consume(VisualizerBridge.Encode((25, changedFuture[^1])));
@@ -290,9 +326,33 @@ if (args.Length == 2 && args[0] is "--host" or "--host-stable")
         Check(ready, "Published viewer host starts independently");
         for (int i = 0; i < 100 && !bridge.IsConnected; i++) await Task.Delay(20);
         Check(bridge.IsConnected, "Separate viewer process connects to the player's pipe");
+        bridge.RequestOpen();
+        var viewerLog = Path.Combine(Path.GetDirectoryName(executable)!, "cache", "visualizer.log");
+        bool receivedOpen = false;
+        for (int i = 0; i < 100 && !receivedOpen; i++)
+        {
+            await Task.Delay(20);
+            receivedOpen = File.Exists(viewerLog) && File.ReadAllText(viewerLog).Contains("Viewer window reopen requested");
+        }
+        Check(receivedOpen, "Published host receives a reopen request through its actual named pipe");
         var script = await client.GetStringAsync("/app.js");
         Check(script.Contains("uniform mediump float uPoint") && script.Contains("function enterLive"), "Published assets include the shader fix and live controls");
-        Check(!script.Contains("ElectricFlow") && !script.Contains("AuroraRenderer"), "Public host retains the stable particle view");
+        if (args[0] == "--host-stable")
+        {
+            Check(!script.Contains("ElectricFlow") && !script.Contains("AuroraRenderer"), "Public host retains the stable particle view");
+        }
+        else
+        {
+        var veilScript = await client.GetStringAsync("/spectral-veil.js");
+        Check(veilScript.Contains("class BandMotion") && veilScript.Contains("gl.uniform4fv"), "Published host embeds independent band-driven veil rendering");
+        using var retiredScript = await client.GetAsync("/electric-flow.js");
+        Check(retiredScript.StatusCode == System.Net.HttpStatusCode.NotFound, "Retired Electric Flow code is not served");
+        using var analysisResponse = await client.PostAsync("/api/analysis-settings", null);
+        analysisResponse.EnsureSuccessStatusCode();
+        using var analysisSettings = JsonDocument.Parse(await analysisResponse.Content.ReadAsStringAsync());
+        Check(analysisSettings.RootElement.GetProperty("edges").GetArrayLength() == 17 &&
+            analysisSettings.RootElement.GetProperty("minimumDb").GetDouble() == -70, "Aurora receives actual configured FFT edges and power dB limits");
+        }
         bridge.PublishClock(21, "Published host integration", "PCM", 48000, .25, 1, false, codes,
             codes.Select(code => new SpeakerPlaybackState(code, code == "FC", false, code != "FC")).ToArray());
         foreach (var frame in tapped.Frames) { bridge.PublishPcm(21, frame); await Task.Delay(10); }

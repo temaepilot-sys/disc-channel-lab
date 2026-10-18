@@ -38,6 +38,12 @@ Space sketchでは、どのチャンネルが鳴っているのか、どの方�
 
 [使い方・ミキサーの反映範囲・動作条件](docs/visualizer.ja.md)。粒子の広がりは演出であり、精密な音場シミュレーションではありません。
 
+**Particles／Spark Field／Hybrid · Spectral Veil／Aurora + Spark Field** の4モードを選べます。小さな火花や柔らかい残光に、各スピーカーの帯域別の強弱・立ち上がりで揺れる幕を重ねられます。合成モードでは、幕の元の色調と、Sparkの周波数別の色調に合わせた表示を切り替えられます。上向き・下向きの光の流れも選べます。
+
+![周波数別の色を揃えたAuroraとSpark](docs/screenshots/aurora-spark-matched.png)
+
+[幕の元の色調](docs/screenshots/aurora-spark-original.png) · [Sparkに合わせた色調](docs/screenshots/aurora-spark-matched.png)。WASD・Q/E・Z/Xで空間を移動し、**Home**で現在のカメラモードの初期位置・正面方向へ戻れます。設定保存と、実行中のコンパニオンからのモード復元にも対応します。[操作・制約](docs/visualizer.ja.md) · [更新まとめ](docs/changes-2026-10-18.md)。
+
 ## ヘッドフォン — 音の方向へ顔を向ける
 
 **Directの角度ミックス**と**Steam Audio HRTF**で、マルチチャンネルをヘッドフォンでも探索できます。キーやopentrackで顔の向きを変えると、音の方向と3D表示が連動します。前方L・Rの分離角度も調整できます。通常再生も引き続き選べます。
@@ -238,4 +244,4 @@ python fetch-steamaudio.py
 
 ## 公開準備
 
-機能追加は、共通の `DiscChannelLab.App` プロジェクトに一度だけ行います。設定と曲情報の保存先は `%LOCALAPPDATA%\DiscChannelLab` です。旧 `BDDVD2Flac` フォルダーから、新しい保存先にない設定を起動時に引き継ぎます。自作コードには [Apache License 2.0](LICENSE) を適用し、外部ツールにはそれぞれのライセンスが適用されます。このリポジトリはソースコードの開発版で、バイナリ配布は含みません。正式なリリースに向けたコード出典と依存物の監査は継続中です。[公開前チェックリスト](PUBLICATION_CHECKLIST.md)を参照してください。
+機能追加は、共通の `DiscChannelLab.App` と `DiscChannelLab.Visualizer` プロジェクトに一度だけ行います。設定と曲情報の保存先は `%LOCALAPPDATA%\DiscChannelLab` です。旧 `BDDVD2Flac` フォルダーから、新しい保存先にない設定を起動時に引き継ぎます。自作コードには [Apache License 2.0](LICENSE) を適用し、外部ツールにはそれぞれのライセンスが適用されます。このリポジトリにはソースとドキュメントを置きます。バイナリ配布と依存物の梱包は別途扱います。[公開前チェックリスト](PUBLICATION_CHECKLIST.md)を参照してください。

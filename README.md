@@ -38,6 +38,12 @@ This companion window follows DiscChannelLab playback and lets you compare Input
 
 [Usage, mixer behavior and requirements](docs/visualizer.md). Particle spread is an artistic representation, not a precise acoustic simulation.
 
+Choose **Particles**, **Spark Field**, **Hybrid · Spectral Veil**, or **Aurora + Spark Field**. Tiny sparks and soft floating lights can share the scene with veils driven by each speaker's frequency-band energy and attacks. In the combined mode, keep the veil's original colors or choose **Match Spark Field** to align their frequency colors. Optional upward/downward light flow adds a waterfall-like motion.
+
+![Aurora and sparks with matching frequency colors](docs/screenshots/aurora-spark-matched.png)
+
+[Original veil palette](docs/screenshots/aurora-spark-original.png) · [Matching Spark palette](docs/screenshots/aurora-spark-matched.png). Explore with WASD, Q/E and Z/X; **Home** restores the current camera mode's initial position and forward view. Settings persist, and closing/reopening the viewer retains its current mode while the companion is running. [Controls and limitations](docs/visualizer.md) · [Update summary](docs/changes-2026-10-18.md).
+
 ## Headphones — turn toward the sound
 
 Explore multichannel audio through headphones with **Direct** angle-based mixing or **Steam Audio HRTF**. Turn with the keyboard or opentrack; hear the channels change direction and watch the same movement in the 3D viewer. Front L/R separation is adjustable. Ordinary playback remains available.
@@ -244,4 +250,4 @@ dotnet run --project DiscChannelLab.Verify -c Release -- settings-migration-test
 
 ## Development and publication status
 
-`DiscChannelLab.App` is the shared application project for both build modes. Feature changes belong there once, so the two builds stay in sync. User settings and saved track edits use `%LOCALAPPDATA%\DiscChannelLab`; startup imports missing settings from the former `BDDVD2Flac` folder without overwriting current edits. See [Settings and migration](#settings-and-migration). The original application source is offered under [Apache License 2.0](LICENSE); external tools remain under their own licenses. This repository is a development preview of the source code, with no binary release. Source-provenance and dependency review remain open before a tagged release. See [PUBLICATION_CHECKLIST.md](PUBLICATION_CHECKLIST.md).
+`DiscChannelLab.App` and `DiscChannelLab.Visualizer` are shared projects for both build modes. Feature changes belong in these projects once, so the two builds stay in sync. User settings and saved track edits use `%LOCALAPPDATA%\DiscChannelLab`; startup imports missing settings from the former `BDDVD2Flac` folder without overwriting current edits. See [Settings and migration](#settings-and-migration). The original application source is offered under [Apache License 2.0](LICENSE); external tools remain under their own licenses. This repository contains source and documentation. Binary releases and their dependency packaging are separate; see [PUBLICATION_CHECKLIST.md](PUBLICATION_CHECKLIST.md).

@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.IO.Pipes;
 using System.Text;
 using System.Text.Json;
+using System.Runtime.InteropServices;
 using System.Threading.Channels;
 
 namespace Disc2Flac;
@@ -26,6 +27,7 @@ public sealed record VisualizerClock(int Version, int Epoch, string Name, string
 public sealed record SpeakerPlaybackState(string Code, bool Muted, bool Solo, bool Enabled);
 public sealed record HeadphoneSpeaker(string Code, double X, double Y, double Z);
 public sealed record HeadphoneScene(bool RotateWorld, double FrontAngle, HeadphoneSpeaker[] Speakers);
+public sealed record VisualizerOpenRequest;
 
 public sealed class VisualizerBridge : IDisposable
 {
@@ -39,6 +41,9 @@ public sealed class VisualizerBridge : IDisposable
     private readonly object _forecastGate = new();
     private volatile bool _connected;
     private Process? _viewer;
+    private int _openRequested;
+    [DllImport("user32.dll")]
+    private static extern bool AllowSetForegroundWindow(int processId);
     public string PipeName { get; } = $"DiscChannelLab.SpaceSketch.v1.{Environment.ProcessId}.{Guid.NewGuid():N}";
     public bool IsConnected => _connected;
     public bool IsViewerRunning
@@ -55,13 +60,20 @@ public sealed class VisualizerBridge : IDisposable
     public void Open(string executable)
     {
         Start();
-        if (_viewer is { HasExited: false }) return;
+        if (IsViewerRunning)
+        {
+            AllowSetForegroundWindow(_viewer!.Id);
+            RequestOpen();
+            return;
+        }
         _viewer?.Dispose();
+        Interlocked.Exchange(ref _openRequested, 0);
         var start = new ProcessStartInfo(executable) { UseShellExecute = false };
         start.ArgumentList.Add("--live-pipe"); start.ArgumentList.Add(PipeName);
         start.ArgumentList.Add("--language"); start.ArgumentList.Add(LanguageService.Instance.IsJapanese ? "ja" : "en");
         _viewer = Process.Start(start) ?? throw new IOException("3D viewer を起動できません。");
     }
+    public void RequestOpen() => Interlocked.Exchange(ref _openRequested, 1);
 
     public void PublishClock(int epoch, string name, string codec, int sampleRate, double position, double duration, bool playing, IReadOnlyCollection<string>? channels = null,
         SpeakerPlaybackState[]? speakerStates = null)
@@ -103,15 +115,26 @@ public sealed class VisualizerBridge : IDisposable
                 _connected = true; LastError = null;
                 while (!_stop.IsCancellationRequested)
                 {
-                    if (!_messages.Reader.TryRead(out var message) && !_forecasts.Reader.TryRead(out message))
+                    object? message;
+                    bool reopening = Interlocked.Exchange(ref _openRequested, 0) != 0;
+                    if (reopening) message = new VisualizerOpenRequest();
+                    else if (!_messages.Reader.TryRead(out message) && !_forecasts.Reader.TryRead(out message))
                     {
                         await Task.Delay(5, _stop.Token).ConfigureAwait(false);
                         continue;
                     }
                     var payload = Encode(message);
                     byte[] length = new byte[4]; BinaryPrimitives.WriteInt32LittleEndian(length, payload.Length);
-                    await pipe.WriteAsync(length, _stop.Token).ConfigureAwait(false);
-                    await pipe.WriteAsync(payload, _stop.Token).ConfigureAwait(false);
+                    try
+                    {
+                        await pipe.WriteAsync(length, _stop.Token).ConfigureAwait(false);
+                        await pipe.WriteAsync(payload, _stop.Token).ConfigureAwait(false);
+                    }
+                    catch
+                    {
+                        if (reopening) RequestOpen();
+                        throw;
+                    }
                 }
             }
             catch (OperationCanceledException) when (_stop.IsCancellationRequested) { break; }
@@ -128,7 +151,8 @@ public sealed class VisualizerBridge : IDisposable
     {
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream, Encoding.UTF8, true);
-        if (message is VisualizerClock clock)
+        if (message is VisualizerOpenRequest) writer.Write((byte)4);
+        else if (message is VisualizerClock clock)
         {
             writer.Write((byte)1);
             writer.Write(JsonSerializer.SerializeToUtf8Bytes(clock));

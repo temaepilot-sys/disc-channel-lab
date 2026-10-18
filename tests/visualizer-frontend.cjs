@@ -4,9 +4,9 @@ const path = require('node:path');
 const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const root = process.env.LAB_VIEWER_ROOT || path.resolve(__dirname, '../DiscChannelLab.Visualizer');
-const output = path.resolve(__dirname, '../verification-output');
+const output = path.resolve(__dirname, '../verification-output/space-sketch/frontend');
 fs.mkdirSync(output, {recursive: true});
-const packet = fs.readFileSync(process.argv[2] || path.join(output, 'visualizer-demo.packet'));
+const packet = fs.readFileSync(process.argv[2] || path.resolve(__dirname, '../verification-output/visualizer-demo.packet'));
 const elements = new Map();
 const documentEvents = new Map(), windowEvents = new Map();
 let now = 0, drawCalls = 0, lastRaf;
@@ -16,28 +16,53 @@ let storedSettings = { version: 1, signal: 'post', view: 'bird', spread: 20, par
   camera: {yaw: 1.2, pitch: .9, distance: 13, target: [.2, .8, -.5]} };
 let failSettings = false;
 const simulateFailure = process.env.LAB_SHADER_FAILURE === '1';
+const gpu = { buffers: 0, deletedBuffers: 0, indexedDraws: 0, uploads: 0, programs: 0, state: new Map(), enabled: new Set(),
+  mask: [true, true, true, true], clearValue: [0, 0, 0, 0], pixel: [.1, .2, .3, .04], uniforms: new Map() };
+const constants = new Map();
 function validateSharedPrecision(program) {
   const uniforms = program.shaders.map(shader => {
     const precision = /precision\s+(\w+)\s+float/.exec(shader.code)?.[1] || 'highp';
-    return new Map(Array.from(shader.code.matchAll(/uniform\s+(?:(lowp|mediump|highp)\s+)?(float|vec[234])\s+(\w+)/g), m => [m[3], m[1] || precision]));
+    return new Map(Array.from(shader.code.matchAll(/uniform\s+(?:(lowp|mediump|highp)\s+)?(float|vec[234]|mat[234])\s+([^;]+);/g))
+      .flatMap(m => m[3].split(',').map(name => [name.trim().replace(/\[.*$/, ''), m[1] || precision])));
   });
   for (const [name, precision] of uniforms[0]) if (uniforms[1].has(name)) assert.equal(precision, uniforms[1].get(name), `Shared uniform precision: ${name}`);
-  return !simulateFailure;
+  return !simulateFailure && !(process.env.LAB_HYBRID_SHADER_FAILURE === '1' && program.shaders.some(s => s.code.includes('aUv'))) &&
+    !(process.env.LAB_SPARK_SHADER_FAILURE === '1' && program.shaders.some(s => s.code.includes('aVelocity')));
 }
 const gl = new Proxy({
   getShaderParameter: () => true, getProgramParameter: validateSharedPrecision, getProgramInfoLog: () => 'Simulated shader failure', getAttribLocation: () => 0,
   createShader: () => ({}), shaderSource: (shader, code) => { shader.code = code; },
-  createProgram: () => ({ shaders: [] }), attachShader: (program, shader) => program.shaders.push(shader), createBuffer: () => ({}), getUniformLocation: () => ({}),
-  bufferData: (_target, values) => { assert(values.every(Number.isFinite), 'Non-finite GPU vertex data'); },
+  createProgram: () => { gpu.programs++; return { shaders: [] }; }, attachShader: (program, shader) => program.shaders.push(shader), createBuffer: () => { gpu.buffers++; return {}; }, getUniformLocation: (_program, name) => ({name}),
+  deleteBuffer: () => gpu.deletedBuffers++,
+  bufferData: (_target, values) => { gpu.uploads++; assert(values.every(Number.isFinite), 'Non-finite GPU vertex data'); },
+  getParameter: key => gpu.state.get(key) ?? null, isEnabled: cap => gpu.enabled.has(cap),
+  enable: cap => gpu.enabled.add(cap), disable: cap => gpu.enabled.delete(cap),
+  useProgram: program => gpu.state.set(gl.CURRENT_PROGRAM, program),
+  bindBuffer: (target, buffer) => gpu.state.set(target === gl.ARRAY_BUFFER ? gl.ARRAY_BUFFER_BINDING : gl.ELEMENT_ARRAY_BUFFER_BINDING, buffer),
+  depthMask: value => gpu.state.set(gl.DEPTH_WRITEMASK, value),
+  colorMask: (...mask) => { gpu.mask = mask; }, clearColor: (...color) => { gpu.clearValue = color; },
+  clear: () => { for (let i = 0; i < 4; i++) if (gpu.mask[i]) gpu.pixel[i] = gpu.clearValue[i]; },
+  getContextAttributes: () => ({ alpha: true, premultipliedAlpha: false }), getError: () => 0,
+  readPixels: (_x, _y, _w, _h, _format, _type, pixels) => { for (let i = 0; i < pixels.length; i++) pixels[i] = Math.round(gpu.pixel[i % 4] * 255); },
+  blendFunc: (src, dst) => { for (const key of [gl.BLEND_SRC_RGB, gl.BLEND_SRC_ALPHA]) gpu.state.set(key, src); for (const key of [gl.BLEND_DST_RGB, gl.BLEND_DST_ALPHA]) gpu.state.set(key, dst); },
+  blendFuncSeparate: (src, dst, sa, da) => { for (const [k, v] of [[gl.BLEND_SRC_RGB, src], [gl.BLEND_DST_RGB, dst], [gl.BLEND_SRC_ALPHA, sa], [gl.BLEND_DST_ALPHA, da]]) gpu.state.set(k, v); },
+  uniform1f: (location, value) => { assert(Number.isFinite(value)); gpu.uniforms.set(location.name, value); },
+  uniform3f: (_location, ...values) => assert(values.every(Number.isFinite)),
+  uniform4fv: (_location, values) => assert(values.every(Number.isFinite), 'Non-finite band uniforms'),
+  uniform2f: (_location, ...values) => assert(values.every(Number.isFinite)),
   uniformMatrix4fv: (_location, _transpose, values) => { assert(values.every(Number.isFinite), 'Non-finite camera matrix'); },
-  drawArrays: () => { drawCalls++; }
-}, { get: (target, key) => key in target ? target[key] : key.toUpperCase() === key ? 1 : () => {} });
+  drawArrays: () => { drawCalls++; }, drawElements: () => { gpu.indexedDraws++; }
+}, { get: (target, key) => key in target ? target[key] : key.toUpperCase() === key ? (constants.has(key) ? constants.get(key) : (constants.set(key, constants.size + 1), constants.get(key))) : () => {} });
 class Element {
   constructor(id) { this.id = id; this.value = ''; this.hidden = false; this.checked = false; this.style = {}; this.textContent = ''; this.children = []; this.clientWidth = 1440; this.clientHeight = 780; this.tagName = 'BODY'; }
   addEventListener(name, handler) { (this.events ??= new Map()).set(name, handler); }
   focus() { sandbox.document.activeElement = this; }
   setAttribute(name, value) { (this.attributes ??= {})[name] = value; }
-  getContext() { return gl; }
+  getContext(type) {
+    if (type !== '2d') return gl;
+    return { fillRect() {}, drawImage() {}, fillText() {},
+      getImageData: (_x, _y, w, h) => ({ data: new Uint8Array(w * h * 4).fill(64) }) };
+  }
   append(child) { this.children.push(child); }
   replaceChildren() { this.children = []; }
   setPointerCapture() {}
@@ -68,6 +93,7 @@ const sandbox = {
   location: { hash: '#test-token' }, history: { replaceState() {} },
   setInterval(callback, interval) { if (interval === 50) pollLive = callback; }, requestAnimationFrame(callback) { lastRaf = callback; },
   fetch: async (url, options) => {
+    if (url === '/api/bootstrap') return {ok:true,json:async()=>({analysis:{edges:Array.from({length:17},(_,i)=>20*1000**(i/16)),minimumDb:-70,maximumDb:0},settings:JSON.parse(JSON.stringify(storedSettings)),live:JSON.parse(JSON.stringify(livePayload))})};
     if (url.startsWith('/api/settings/')) {
       assert.equal(options.headers['X-Visualizer-Token'], 'test-token');
       if (failSettings) return {ok: false, json: async () => ({error: 'Simulated read/write error'})};
@@ -82,6 +108,10 @@ const sandbox = {
 };
 sandbox.window = sandbox;
 vm.createContext(sandbox);
+for (const asset of ['spectral-veil.js', 'spark-field.js']) {
+  const filename = path.join(root, 'Web', asset);
+  if (fs.existsSync(filename)) vm.runInContext(fs.readFileSync(filename, 'utf8'), sandbox);
+}
 vm.runInContext(fs.readFileSync(path.join(root, 'Web/app.js'), 'utf8'), sandbox);
 function tick(seconds) { for (let i = 0; i < Math.ceil(seconds * 60); i++) { now += 1 / 60; lastRaf(now * 1000); } }
 
@@ -116,6 +146,42 @@ function tick(seconds) { for (let i = 0; i < Math.ceil(seconds * 60); i++) { now
   assert.equal(sandbox.lab.state.time, paused.time);
   assert.equal(sandbox.lab.state.particles, paused.particles);
   const renderer = vm.runInContext('renderer', sandbox);
+  if (process.env.LAB_AURORA_SPARK === '1') {
+    await require('./aurora-spark-checks.cjs')({sandbox,vm,renderer,element,tick,gpu,setLive:value=>{livePayload=value},poll:()=>pollLive(),output});return;
+  }
+  if (process.env.LAB_CAMERA_NAVIGATION === '1') {
+    await require('./camera-navigation-checks.cjs')({sandbox,vm,renderer,element,tick,documentEvents,windowEvents,output});return;
+  }
+  if (process.env.LAB_HYBRID_TESTS === '1') {
+    element('visual-style').value='hybrid';element('visual-style').onchange();
+    await sandbox.lab.play();tick(.4);renderer.draw(sandbox.lab.state.time);
+    if (process.env.LAB_HYBRID_SHADER_FAILURE === '1') {
+      assert.equal(renderer.visualStyle,'particles');assert(!renderer.aurora);
+      assert(sandbox.lab.state.playing,'A veil shader failure must not stop playback');
+      assert(!sandbox.document.body.classList.values.has('hybrid-mode'));
+      console.log('PASS Hybrid shader failure: audio continues, Particles restored');return;
+    }
+    assert.equal(renderer.visualStyle,'hybrid');assert.equal(renderer.aurora.motion.count,16);
+    assert(renderer.aurora.motion.packed.some(v=>v!==0));
+    const identity=renderer.aurora.program,created=gpu.buffers,deleted=gpu.deletedBuffers;
+    for(const quality of ['low','high','medium']){
+      element('aurora-quality').value=quality;element('aurora-quality').onchange();renderer.draw(sandbox.lab.state.time);
+      assert.equal(gpu.buffers-gpu.deletedBuffers,created-deleted,'Quality swaps must release old mesh buffers');
+    }
+    for(let i=0;i<5;i++){renderer.setVisualStyle('particles');renderer.setVisualStyle('hybrid');renderer.draw(sandbox.lab.state.time)}
+    assert.equal(renderer.aurora.program,identity,'Mode changes reuse the veil GPU program');
+    element('aurora-detail').value='.77';element('aurora-detail').oninput();
+    element('aurora-speed').value='.92';element('aurora-speed').oninput();
+    await element('save-settings').onclick();element('aurora-detail').value='.1';element('aurora-detail').oninput();await element('load-settings').onclick();
+    assert.equal(renderer.auroraSettings.detail,.77);assert.equal(renderer.auroraSettings.speed,.92);
+    assert.equal(renderer.visualStyle,'hybrid');
+    console.log('PASS Hybrid controls: band packets, bounded GPU resources, saved motion settings');return;
+  }
+  if (process.env.LAB_SPARK_TESTS === '1') {
+    await require('./spark-field-checks.cjs')({ sandbox, vm, renderer, element, tick, gl, gpu,
+      setLive: value => { livePayload = value; }, poll: () => pollLive(), output });
+    return;
+  }
   assert.equal(renderer.camera.yaw, 1.2, 'Startup restores exact camera, not just preset');
   const stride = vm.runInContext('PARTICLE_STRIDE', sandbox);
   const adjust = (id, value) => { element(id).value = String(value); element(id).oninput(); };

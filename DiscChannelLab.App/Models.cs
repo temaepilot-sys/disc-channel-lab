@@ -21,6 +21,8 @@ public sealed class PlaylistInfo : INotifyPropertyChanged
     public int DvdVideoTitle { get; init; }
     public SacdArea? SacdArea { get; init; }
     public PlaylistProbeResult? FileAnalysis { get; init; }
+    public bool IsAudioFolder { get; init; }
+    public int SkippedAudioFiles { get; init; }
     private int _displayOrder;
     private string? _titleName;
     private IReadOnlyList<string?> _chapterTitles = [];

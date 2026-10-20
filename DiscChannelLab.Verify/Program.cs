@@ -83,8 +83,13 @@ if (args is ["flac-sample-tests", var flacFixtures, var flacSampleOutput])
 }
 if (args is ["audio-file-tests", var audioFileOutput])
 {
-    await AudioFileTests.RunAsync(audioFileOutput);
-    return 0;
+    try { await AudioFileTests.RunAsync(audioFileOutput); return 0; }
+    catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
+}
+if (args is ["music-folder-tests", var musicFolderOutput])
+{
+    try { MusicFolderTests.Run(musicFolderOutput); return 0; }
+    catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
 }
 if (args is ["multichannel-export-tests", var multichannelOutput])
 {

@@ -59,7 +59,8 @@ public partial class MixerWindow : Window
     {
         if (!_model.CanExportMixer || !CommitInputs()) return;
         _model.SaveMixerDownmix = true;
-        await _model.ConvertAsync();
+        if (await _model.ConvertAsync())
+            MessageBox.Show(this, LanguageService.T("FLACの書き出しが完了しました。"), "DiscChannelLab", MessageBoxButton.OK, MessageBoxImage.Information);
     }
     public bool CommitInputs()
     {

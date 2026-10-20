@@ -171,14 +171,15 @@ public partial class MainWindow : Window
         CommitTrackEdits();
         // Use this selection, rather than a binding value that may still be updating.
         var source = SourceCombo.SelectedItem as string ?? "";
-        if (!DiscService.HasSupportedSource(source)) { _model.ClearCurrentDisc(); return; }
+        if (!DiscService.HasSupportedSource(source) && !Directory.Exists(source)) { _model.ClearCurrentDisc(); return; }
         await _model.OpenSourceAsync(source);
     }
 
     private async void Folder_Click(object sender, RoutedEventArgs e)
     {
-        var dialog = new OpenFolderDialog { Title = LanguageService.T("BDMV / AUDIO_TS / VIDEO_TS またはディスクのルートを選択") };
+        var dialog = new OpenFolderDialog { Title = LanguageService.T("ディスクまたは音楽フォルダーを選択") };
         if (dialog.ShowDialog(this) != true) return;
+        CommitTrackEdits();
         if (!_model.Sources.Contains(dialog.FolderName)) _model.Sources.Add(dialog.FolderName);
         await _model.OpenSourceAsync(dialog.FolderName);
     }
@@ -418,7 +419,8 @@ public partial class MainWindow : Window
     {
         if (_model.SaveMixerDownmix && _mixerWindow?.CommitInputs() == false) return;
         CommitTrackEdits();
-        await _model.ConvertAsync();
+        if (await _model.ConvertAsync())
+            MessageBox.Show(this, LanguageService.T("FLACの書き出しが完了しました。"), "DiscChannelLab", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
     private void CommitTrackEdits()

@@ -55,6 +55,10 @@ public sealed class LanguageService : INotifyPropertyChanged
 
     private static readonly Dictionary<string, string> English = new(StringComparer.Ordinal)
     {
+        ["ディスクまたは音楽フォルダーを選択"] = "Select a disc or music folder",
+        ["FLACの書き出しが完了しました。"] = "FLAC export completed.",
+        ["このフォルダーには対応する音声ファイルがありません。"] = "This folder contains no supported audio files.",
+        ["このフォルダーには再生できる音声ファイルがありません。"] = "This folder contains no playable audio files.",
         ["音響設定を標準に戻す"] = "Reset sound settings",
         ["↺：そのスライダーだけ標準値へ"] = "↺: reset this slider to its default",
         ["標準値に戻す"] = "Reset to default",
@@ -456,6 +460,7 @@ public sealed class LanguageService : INotifyPropertyChanged
 
     private static readonly (Regex Pattern, string Replacement)[] Patterns =
     [
+        (R(@"^(\d+) 曲を読み込みました。再生できない (\d+) ファイルをスキップしました。詳細はログを確認してください。$"), "Loaded $1 tracks. Skipped $2 unplayable files; see the log for details."),
         (R(@"^チャプター (\d+): (.*)$"), "Chapter $1: $2"),
         (R(@"^チャプター (\d+)–(\d+) にまたがる曲$"), "Track spanning chapters $1–$2"),
         (R(@"^(\d+)ch をチャンネルごとのモノラル FLAC に保存します。$"), "Save $1ch as separate mono FLAC files."),

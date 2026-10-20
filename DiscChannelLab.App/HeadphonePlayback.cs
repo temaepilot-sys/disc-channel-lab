@@ -77,7 +77,10 @@ public sealed partial class AudioNavigationService
                     var seekBefore = Math.Max(0, seek - 45000);
                     var arguments = new List<string>();
                     if (silent) arguments.AddRange(["-f", "lavfi"]);
-                    else arguments.AddRange(["-ss", (seekBefore / 45000m).ToString(CultureInfo.InvariantCulture)]);
+                    // File demuxers apply codec pre-skip themselves. A redundant -ss 0 can
+                    // discard AAC/MP3 priming twice; use normal opening plus the PCM trim.
+                    else if (seekBefore > 0 || segment.Clip.File is null)
+                        arguments.AddRange(["-ss", (seekBefore / 45000m).ToString(CultureInfo.InvariantCulture)]);
                     arguments.AddRange(["-i", path]);
                     await Decode(arguments, source, seek - seekBefore, segment.EndTicks - segment.StartTicks, null, silent);
                 }

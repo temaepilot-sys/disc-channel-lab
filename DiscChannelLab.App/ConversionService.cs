@@ -14,29 +14,17 @@ public sealed class ConversionService(ToolPaths paths, ProcessRunner runner, Ffp
         bool groupByChapter = false, bool saveStereoDownmix = false, StereoMixSettings? mix = null,
         bool saveIndividualChannels = false, ChannelMixExport? channelMix = null, bool saveMultichannelFlac = false)
     {
-        if (saveMultichannelFlac && (saveStereoDownmix || saveIndividualChannels || channelMix is not null || stream.Channels <= 2))
-            throw new InvalidOperationException("マルチチャンネル保存と2chミックス・個別保存は同時に選べません。");
-        if (quality == OutputQuality.OriginalPcm && (!saveMultichannelFlac || !stream.CanMakeOriginalPcm))
-            throw new InvalidOperationException("この音声は元のPCM音質で保存できません。");
-        if (channelMix is not null)
-        {
-            channelMix.Validate(stream);
-            saveStereoDownmix = true;
-        }
-        if (saveStereoDownmix && saveIndividualChannels)
-            throw new InvalidOperationException("2ch保存とチャンネル別保存は同時に選べません。");
-        if (saveIndividualChannels && !StereoMixSettings.Supports(stream))
-            throw new InvalidOperationException("この音声のチャンネル配置は個別保存に対応していません。");
-        if (saveStereoDownmix && !StereoMixSettings.Supports(stream))
-            throw new InvalidOperationException("この音声のチャンネル配置は2ch変換に対応していません。");
+        if (selected.Count == 0) throw new InvalidOperationException("保存する曲またはチャプターを選択してください。");
+        if (channelMix is not null) saveStereoDownmix = true;
+        var trackStreams = selected.Select(track => AudioFileReader.StreamForTrack(playlist, track, stream)).ToArray();
+        // Validate every selected file before creating any output; a folder may mix formats/layouts.
+        foreach (var source in trackStreams)
+            ValidateOptions(source, quality, saveStereoDownmix, saveIndividualChannels, channelMix, saveMultichannelFlac);
         mix ??= StereoMixSettings.Default;
         if (playlist.Format is not (DiscFormat.BluRay or DiscFormat.Sacd or DiscFormat.AudioFile))
             return await new DvdConversionService(paths, runner, probe, log).ConvertAsync(
                 disc, playlist, stream, selected, quality, outputRoot, progress, token, groupByChapter,
                 saveStereoDownmix, mix, saveIndividualChannels, channelMix, saveMultichannelFlac);
-        if (selected.Count == 0) throw new InvalidOperationException("保存する曲またはチャプターを選択してください。");
-        if (quality == OutputQuality.Cd && !stream.CanMakeCd) throw new InvalidOperationException("この音声はCD音質への変換条件を満たしていません。");
-        if (quality == OutputQuality.HighResolution && !stream.CanMakeHighResolution) throw new InvalidOperationException("この音声はハイレゾで保存できません。");
         if (!Directory.Exists(outputRoot)) Directory.CreateDirectory(outputRoot);
         var albumFolder = Path.Combine(outputRoot, SafeName(disc.AlbumTitle));
         var titleFolder = Path.Combine(albumFolder, SafeName(playlist.TitleName));
@@ -44,9 +32,6 @@ public sealed class ConversionService(ToolPaths paths, ProcessRunner runner, Ffp
         var stage = Path.Combine(albumFolder, $".Disc2Flac-{Guid.NewGuid():N}");
         Directory.CreateDirectory(stage);
         var produced = new List<(string staged, string final)>();
-        var expectedRate = quality == OutputQuality.Cd ? 44100 : stream.SampleRate;
-        var expectedDepth = quality == OutputQuality.Cd ? 16 : stream.BitDepth;
-        var channels = saveIndividualChannels ? StereoMixSettings.ChannelNames(stream).Cast<string?>().ToArray() : [null];
         try
         {
             var checkedClips = new Dictionary<string, AudioStreamInfo>(StringComparer.Ordinal);
@@ -54,6 +39,10 @@ public sealed class ConversionService(ToolPaths paths, ProcessRunner runner, Ffp
             {
                 token.ThrowIfCancellationRequested();
                 var track = selected[i];
+                stream = trackStreams[i];
+                var expectedRate = quality == OutputQuality.Cd ? 44100 : stream.SampleRate;
+                var expectedDepth = quality == OutputQuality.Cd ? 16 : stream.BitDepth;
+                var channels = saveIndividualChannels ? StereoMixSettings.ChannelNames(stream).Cast<string?>().ToArray() : [null];
                 if (track.StartTicks < 0 || track.EndTicks <= track.StartTicks || track.EndTicks > playlist.DurationTicks)
                     throw new InvalidDataException($"{track.Title} の曲境界を確定できません。");
                 var chapterRange = GetChapterRange(playlist, track);
@@ -119,7 +108,9 @@ public sealed class ConversionService(ToolPaths paths, ProcessRunner runner, Ffp
                         arguments.AddRange(["-f", "lavfi", "-t", Seconds(durationTicks + 4500), "-i", stream.SilenceInput]);
                         log.Write($"SILENT TAIL export clip={segment.Clip.Id} duration={durationTicks} samples={sampleCount}");
                     }
-                    else if (readToEnd) arguments.AddRange(["-i", sourcePath]);
+                    // Seeking even to zero can make FFmpeg discard codec priming twice (AAC/MP3).
+                    // Start complete files normally and let the sample trim set the exact end.
+                    else if (readToEnd || (segment.Clip.File is not null && seekTicks == 0)) arguments.AddRange(["-i", sourcePath]);
                     else arguments.AddRange(["-ss", Seconds(seekTicks), "-t", Seconds(durationTicks + 4500), "-i", sourcePath]);
                     // Keep FLAC block sizes consistent across real audio and generated silence.
                     // The concat demuxer shares the first part's STREAMINFO with later parts.
@@ -239,6 +230,25 @@ public sealed class ConversionService(ToolPaths paths, ProcessRunner runner, Ffp
                 }
             }
         }
+    }
+
+    private static void ValidateOptions(AudioStreamInfo stream, OutputQuality quality, bool stereo, bool individual,
+        ChannelMixExport? channelMix, bool multichannel)
+    {
+        if (multichannel && (stereo || individual || channelMix is not null || stream.Channels <= 2))
+            throw new InvalidOperationException("マルチチャンネル保存と2chミックス・個別保存は同時に選べません。");
+        if (quality == OutputQuality.OriginalPcm && (!multichannel || !stream.CanMakeOriginalPcm))
+            throw new InvalidOperationException("この音声は元のPCM音質で保存できません。");
+        channelMix?.Validate(stream);
+        if (stereo && individual) throw new InvalidOperationException("2ch保存とチャンネル別保存は同時に選べません。");
+        if (individual && !StereoMixSettings.Supports(stream))
+            throw new InvalidOperationException("この音声のチャンネル配置は個別保存に対応していません。");
+        if (stereo && !StereoMixSettings.Supports(stream))
+            throw new InvalidOperationException("この音声のチャンネル配置は2ch変換に対応していません。");
+        if (quality == OutputQuality.Cd && !stream.CanMakeCd)
+            throw new InvalidOperationException("この音声はCD音質への変換条件を満たしていません。");
+        if (quality == OutputQuality.HighResolution && !stream.CanMakeHighResolution)
+            throw new InvalidOperationException("この音声はハイレゾで保存できません。");
     }
 
     private static string Seconds(long ticks) => (ticks / 45000m).ToString("0.########", CultureInfo.InvariantCulture);

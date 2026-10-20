@@ -91,7 +91,10 @@ internal static class AudioFileTests
                 mixedLevels: (_, _) => levels++, visualization: new(() => true, chunks.Add));
         }
         finally { Environment.SetEnvironmentVariable("SDL_AUDIODRIVER", previousDriver); }
-        Check(segments == 2 && levels > 0 && chunks.Count > 0 && chunks.All(c => c.Channels.SequenceEqual(StereoMixSettings.ChannelNames(stream))),
+        // Native playback retains one output session across clip boundaries; its start callback
+        // describes that session, not each decoder. Verify PCM actually reaches the second file.
+        Check(segments >= 1 && levels > 0 && chunks.Any(c => c.Seconds >= playlist.Clips[1].PlaylistStartTicks / 45000d) &&
+            chunks.All(c => c.Channels.SequenceEqual(StereoMixSettings.ChannelNames(stream))),
             "Seeking and playback across two files feed synchronized mixer meters and visualizer PCM");
         Check(chunks.SelectMany(c => c.Output.Where((_, i) => i % 4 >= 2)).All(b => b == 0), "Live PCM mixer pan also applies to file playback");
         foreach (var fixture in new[] {

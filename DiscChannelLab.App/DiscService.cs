@@ -13,6 +13,12 @@ public sealed class DiscService(FfprobeService probe, AppLog log, SacdService? s
         if (AudioFileReader.CanOpen(path)) return await AnalyzeAudioFilesAsync([path], token);
         if (SacdService.IsSacdIso(path))
             return await (sacd ?? throw new InvalidOperationException("SACD reader is not configured.")).AnalyzeAsync(path, token);
+        if (Directory.Exists(path))
+        {
+            // Disc structures take priority, including the BDMV / AUDIO_TS / VIDEO_TS subfolders.
+            try { NormalizeDiscRoot(path); }
+            catch (InvalidDataException) { return await new AudioFileReader(probe, log).AnalyzeFolderAsync(path, token); }
+        }
         return await Task.Run(() => Analyze(path, token), token);
     }
     public Task<DiscAnalysis> AnalyzeAudioFilesAsync(IReadOnlyList<string> paths, CancellationToken token) =>

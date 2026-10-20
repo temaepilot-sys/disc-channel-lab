@@ -222,6 +222,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
             SplitCandidates.Clear();
             SelectedCandidate = null;
             PreviewSeconds = 0;
+            RefreshAudioFolderStreams();
             Changed(nameof(PreviewMax));
             Changed(nameof(PreviewLengthText));
             Changed(nameof(PreviewTimeText));
@@ -344,7 +345,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
     public bool IsHighResSelected { get => _quality is OutputQuality.HighResolution or OutputQuality.OriginalPcm; set { if (value && CanChooseHighRes) { _quality = SaveMultichannelFlac ? OutputQuality.OriginalPcm : OutputQuality.HighResolution; Changed(); Changed(nameof(IsCdSelected)); Changed(nameof(CanConvert)); Changed(nameof(CanExportMixer)); Changed(nameof(SelectedStreamNote)); } } }
     private bool HasVerifiedAudio => _loadedPlaylist?.Availability is AudioAvailability.Ready or AudioAvailability.Partial;
     public bool CanConvert => !IsPlaying && CanPrepareConversion;
-    private bool CanPrepareConversion => !IsBusy && HasVerifiedAudio && _disc is not null && _loadedPlaylist is not null && SelectedStream is not null && !string.IsNullOrWhiteSpace(OutputFolder) && Tracks.Any(x => x.IsSelected) && Tracks.Where(x => x.IsSelected).All(x => SelectedStream.Covers(_loadedPlaylist, x)) && QualityAvailable(SelectedStream);
+    private bool CanPrepareConversion => !IsBusy && HasVerifiedAudio && _disc is not null && _loadedPlaylist is not null && SelectedStream is not null && !string.IsNullOrWhiteSpace(OutputFolder) && Tracks.Any(x => x.IsSelected) && Tracks.Where(x => x.IsSelected).All(CanExportAudioTrack);
     public bool CanEditTracks => !IsBusy && !IsPlaying && Tracks.Count > 0;
     public bool CanPlay => (!HeadphonesEnabled || SelectedStream is { } headphoneStream && HeadphoneGeometry.Channels(headphoneStream).Length == headphoneStream.Channels) && !IsBusy && HasVerifiedAudio && SelectedTrack is not null && SelectedStream is not null && _disc is not null && _loadedPlaylist is not null && (_loadedPlaylist.Format != DiscFormat.AudioFile || AudioFileReader.IsUsable(SelectedStream)) && SelectedStream.Covers(_loadedPlaylist, SelectedTrack) && _navigation.CanPlay;
     public bool CanSeek => !IsBusy && SelectedTrack is not null;
@@ -422,7 +423,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
     {
         var drives = DriveInfo.GetDrives().Where(x => x.DriveType == DriveType.CDRom).Select(x => x.RootDirectory.FullName).ToArray();
         foreach (var drive in drives) if (!Sources.Contains(drive)) Sources.Add(drive);
-        foreach (var entry in Sources.Where(x => !drives.Contains(x) && !DiscService.HasSupportedSource(x)).ToArray()) Sources.Remove(entry);
+        foreach (var entry in Sources.Where(x => !drives.Contains(x) && !DiscService.HasSupportedSource(x) && !Directory.Exists(x)).ToArray()) Sources.Remove(entry);
         if (string.IsNullOrEmpty(Source) && drives.Length > 0) Source = drives[0];
     }
 
@@ -433,7 +434,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
         // Keep an explicitly opened audio collection selected while optical discs are present.
         if (_disc?.Format == DiscFormat.AudioFile && Source == _disc.Root)
         {
-            if (File.Exists(_disc.Root)) return;
+            if (File.Exists(_disc.Root) || Directory.Exists(_disc.Root)) return;
             ClearCurrentDisc();
         }
         if (_isoRoot is not null)
@@ -534,6 +535,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
                 await LoadPlaylistCoreAsync(first, _work.Token);
             }
             Status = PlaylistStatus(ambiguous);
+            if (_loadedPlaylist?.IsAudioFolder == true) ContinuousPlayback = true;
             opened = true;
         }
         catch (Exception ex) { HandleError(ex); }
@@ -633,9 +635,12 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
         var result = await _discService.AnalyzePlaylistAsync(_disc, playlist, token);
         playlist.ChapterTitles = _editStore.LoadChapterTitles(_disc, playlist) ?? playlist.ChapterTitles;
         RefreshMetadata();
+        Streams.Clear();
+        SelectedStream = null;
         foreach (var stream in result.Streams) Streams.Add(stream);
         SelectedStream = Streams.FirstOrDefault();
         ReplaceTracks(savedTracks ?? result.Tracks);
+        RefreshAudioFolderStreams();
         UpdateActions();
     }
 
@@ -653,6 +658,8 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 
     private string PlaylistStatus(bool ambiguous)
     {
+        if (_loadedPlaylist is { IsAudioFolder: true, SkippedAudioFiles: > 0 } folder)
+            return LanguageService.T($"{Tracks.Count} 曲を読み込みました。再生できない {folder.SkippedAudioFiles} ファイルをスキップしました。詳細はログを確認してください。");
         if (_loadedPlaylist?.Availability is not (AudioAvailability.Ready or AudioAvailability.Partial))
             return $"{_loadedPlaylist?.AvailabilityLabel} · {LanguageService.T("チャプター情報を表示しています。音声は再解析できます。")}";
         if (_loadedPlaylist is { } playlist && Tracks.Count == 1 &&
@@ -1105,12 +1112,12 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
         Changed(nameof(CanConvert));
     }
 
-    public async Task ConvertAsync()
+    public async Task<bool> ConvertAsync()
     {
-        if (!(SaveMixerDownmix ? CanPrepareConversion : CanConvert) || _disc is null || _loadedPlaylist is null || SelectedStream is null) return;
+        if (!(SaveMixerDownmix ? CanPrepareConversion : CanConvert) || _disc is null || _loadedPlaylist is null || SelectedStream is null) return false;
         ChannelMixExport? channelMix;
         try { channelMix = SaveMixerDownmix ? CaptureMixerExport() : null; }
-        catch (Exception ex) { HandleError(ex); return; }
+        catch (Exception ex) { HandleError(ex); return false; }
         BeginWork("FLAC に変換しています");
         SavedFolder = "";
         Progress = 0;
@@ -1121,8 +1128,9 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
             SavedFolder = await _conversion.ConvertAsync(_disc, _loadedPlaylist, SelectedStream, chosen, _quality,
                 OutputFolder, progress, _work!.Token, GroupByChapter, SaveStereoDownmix || channelMix is not null, CurrentMix,
                 SaveIndividualChannels, channelMix, SaveMultichannelFlac);
+            return true;
         }
-        catch (Exception ex) { HandleError(ex); }
+        catch (Exception ex) { HandleError(ex); return false; }
         finally { EndWork(); }
     }
 

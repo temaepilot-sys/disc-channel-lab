@@ -58,6 +58,8 @@ Use the built-in HRTF or choose an **external SOFA** and replay the same marked 
 
 ## Playback reliability
 
+With **Continuous play** enabled, adjacent tracks with the same speaker layout share one native output and DSP session. Disc chapters can stay in a single decode; separate compatible files use bounded PCM read-ahead, including codec/sample-rate changes. Track names and elapsed time advance on the output clock while mixer settings, HRTF state and visualizer synchronization are retained. No crossfade or artificial gap is added, and silence recorded in the source is kept. Turning Continuous play off finishes the current track. SACD prepares one upcoming track in the background; an uncached conversion that cannot finish in time may still cause a wait. Channel-layout changes, non-contiguous selections and the legacy preview path use the regular track switch.
+
 Pause and resume retain the native decoder and Windows audio device in Stereo, Direct and HRTF modes. Metering and visualization run separately from audio output; slow display updates are dropped instead of blocking sound. The viewer also reduces redundant FFT work and caps particle rendering at 30 fps. [Playback behavior and diagnostic checks](docs/headphones.md#playback-transitions).
 
 ## Features

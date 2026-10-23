@@ -20,7 +20,7 @@ public sealed partial class MainViewModel
             return new SpeakerPlaybackState(code, muted, setting?.Solo == true, enabled);
         }).ToArray();
         Visualization.PublishClock(_transportVersion, SelectedTrack?.Title ?? "DiscChannelLab", SelectedStream?.Codec ?? "",
-            SelectedStream?.SampleRate ?? 48000, MeterPlaybackPosition, PreviewMax, IsPlaying && _playClock.IsRunning,
+            SelectedStream?.SampleRate ?? 48000, MeterPlaybackPosition, PlaybackTimelineMax, IsPlaying && _playClock.IsRunning,
             channels, states);
     }
 }

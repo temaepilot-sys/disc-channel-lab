@@ -44,22 +44,30 @@ public sealed class PreviewAudioObserver : IDisposable
         if (Volatile.Read(ref write) - Volatile.Read(ref read) >= Capacity)
         { DroppedPackets++; partial = 0; return; }
         if (partial > 0 && firstFrame != nextFrame) partial = 0;
-        var packet = packets[write & (Capacity - 1)];
-        if (partial == 0) packet.FirstFrame = firstFrame;
-        for (int f = 0; f < frames; f++)
+        int offset = 0;
+        while (offset < frames)
         {
-            int target = partial + f;
-            packet.Output[target * 2] = output[f * 2]; packet.Output[target * 2 + 1] = output[f * 2 + 1];
-            for (int c = 0; c < channels.Length; c++)
+            if (Volatile.Read(ref write) - Volatile.Read(ref read) >= Capacity)
+            { DroppedPackets++; partial = 0; return; }
+            var packet = packets[write & (Capacity - 1)];
+            if (partial == 0) packet.FirstFrame = firstFrame + offset;
+            int count = Math.Min(frames - offset, Frames - partial);
+            for (int f = 0; f < count; f++)
             {
-                int k = target * channels.Length + c;
-                packet.Input[k] = input[c][f]; packet.Left[k] = renderer.ChannelLeft[c][f]; packet.Right[k] = renderer.ChannelRight[c][f];
-                packet.Post[k] = renderer.PostSample(c, f);
+                int source = offset + f, target = partial + f;
+                packet.Output[target * 2] = output[source * 2]; packet.Output[target * 2 + 1] = output[source * 2 + 1];
+                for (int c = 0; c < channels.Length; c++)
+                {
+                    int k = target * channels.Length + c;
+                    packet.Input[k] = input[c][source]; packet.Left[k] = renderer.ChannelLeft[c][source]; packet.Right[k] = renderer.ChannelRight[c][source];
+                    packet.Post[k] = renderer.PostSample(c, source);
+                }
             }
+            partial += count; offset += count;
+            packet.PlayedFrames = playedFrames; packet.Clips = renderer.ClippedSamples; packet.Gaps = gaps;
+            if (partial == Frames) Commit();
         }
-        partial += frames; nextFrame = firstFrame + frames;
-        packet.PlayedFrames = playedFrames; packet.Clips = renderer.ClippedSamples; packet.Gaps = gaps;
-        if (partial == Frames) Commit();
+        nextFrame = firstFrame + frames;
     }
     void Commit()
     {

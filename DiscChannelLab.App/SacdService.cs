@@ -151,7 +151,7 @@ public sealed class SacdService(ToolPaths paths, ProcessRunner runner, AppLog lo
         };
     }
 
-    public async Task<string> PrepareAsync(SacdTrackSource source, CancellationToken token)
+    public async Task<string> PrepareAsync(SacdTrackSource source, CancellationToken token, bool reportProgress = true)
     {
         var gate = Gates.GetOrAdd(source.PcmPath, _ => new SemaphoreSlim(1));
         await gate.WaitAsync(token);
@@ -176,7 +176,7 @@ public sealed class SacdService(ToolPaths paths, ProcessRunner runner, AppLog lo
             Directory.CreateDirectory(job);
             try
             {
-                Progress?.Report(LanguageService.T("SACDの選択曲を準備しています"));
+                if (reportProgress) Progress?.Report(LanguageService.T("SACDの選択曲を準備しています"));
                 // -t/-y require the EuFlo 0.3.9.x command line. Run in a private working
                 // directory so another program's sacd_extract.cfg cannot override choices.
                 await RunToolAsync([source.Multichannel ? "-m" : "-2", "-s", "-c", "-t",

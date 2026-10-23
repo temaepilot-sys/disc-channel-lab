@@ -77,20 +77,35 @@ public sealed partial class AudioNavigationService
                     }
                     await Decode(arguments, stream, skip, endTicks - startTicks, feed, streamMap: streamMap);
                 }
-                else foreach (var segment in PlaylistSegments.ForRange(playlist, startTicks, endTicks))
+                else
                 {
-                    token.ThrowIfCancellationRequested();
-                    var silent = stream.IsSilentTail(playlist, segment.Clip);
-                    var (path, seek, source) = silent ? (stream.SilenceInput, 0L, stream) : await GetSourceAsync(disc, stream, segment, token);
-                    var seekBefore = Math.Max(0, seek - 45000);
-                    var arguments = new List<string>();
-                    if (silent) arguments.AddRange(["-f", "lavfi"]);
-                    // File demuxers apply codec pre-skip themselves. A redundant -ss 0 can
-                    // discard AAC/MP3 priming twice; use normal opening plus the PCM trim.
-                    else if (seekBefore > 0 || segment.Clip.File is null)
-                        arguments.AddRange(["-ss", (seekBefore / 45000m).ToString(CultureInfo.InvariantCulture)]);
-                    arguments.AddRange(["-i", path]);
-                    await Decode(arguments, source, seek - seekBefore, segment.EndTicks - segment.StartTicks, null, silent);
+                    var segments = PlaylistSegments.ForRange(playlist, startTicks, endTicks);
+                    Task<string>? preparedNext = null;
+                    for (int segmentIndex = 0; segmentIndex < segments.Count; segmentIndex++)
+                    {
+                        var segment = segments[segmentIndex];
+                        token.ThrowIfCancellationRequested();
+                        if (preparedNext is not null) { await preparedNext; preparedNext = null; }
+                        var silent = stream.IsSilentTail(playlist, segment.Clip);
+                        var (path, seek, source) = silent ? (stream.SilenceInput, 0L, stream) : await GetSourceAsync(disc, stream, segment, token);
+                        if (segmentIndex + 1 < segments.Count && segments[segmentIndex + 1].Clip.Sacd is { } upcoming)
+                        {
+                            // One upcoming SACD track only: extraction/conversion overlaps the
+                            // current song, without rendering audio or changing playback status.
+                            preparedNext = _sacd.PrepareAsync(upcoming, token, reportProgress: false);
+                            _ = preparedNext.ContinueWith(t => log.Write($"SACD read-ahead: {t.Exception!.GetBaseException().Message}"),
+                                CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
+                        }
+                        var seekBefore = Math.Max(0, seek - 45000);
+                        var arguments = new List<string>();
+                        if (silent) arguments.AddRange(["-f", "lavfi"]);
+                        // File demuxers apply codec pre-skip themselves. A redundant -ss 0 can
+                        // discard AAC/MP3 priming twice; use normal opening plus the PCM trim.
+                        else if (seekBefore > 0 || segment.Clip.File is null)
+                            arguments.AddRange(["-ss", (seekBefore / 45000m).ToString(CultureInfo.InvariantCulture)]);
+                        arguments.AddRange(["-i", path]);
+                        await Decode(arguments, source, seek - seekBefore, segment.EndTicks - segment.StartTicks, null, silent);
+                    }
                 }
                 if (carried % (channels.Length * 4) != 0) throw new InvalidDataException("Incomplete floating-point audio frame.");
                 if (carried > 0)
@@ -179,8 +194,11 @@ public sealed partial class AudioNavigationService
                     foreach (var block in pcm.ReadAll(token, () => transport?.Apply(output, token)))
                     {
                         delivery.Record(PlaybackDeliveryStats.Stage.Decode, readyAt + (transport?.PauseTicks ?? 0) - pausedBeforeRead, Stopwatch.GetTimestamp());
-                        try { Render(block, HeadphoneRenderer.BlockSize); }
+                        int frames = (int)Math.Min(HeadphoneRenderer.BlockSize, Math.Max(0,
+                            (transport?.EndFrame ?? long.MaxValue) - output.SubmittedFrames));
+                        try { if (frames > 0) Render(block, frames); }
                         finally { pcm.Recycle(block); }
+                        if (frames < HeadphoneRenderer.BlockSize || output.SubmittedFrames >= (transport?.EndFrame ?? long.MaxValue)) break;
                         readyAt = Stopwatch.GetTimestamp(); pausedBeforeRead = transport?.PauseTicks ?? 0;
                     }
                     // Preserve the final HRIR / delay-line decay without discarding partial source blocks.
@@ -192,6 +210,9 @@ public sealed partial class AudioNavigationService
                     output.Drain(token);
                     if (!announced && output.HasStarted) started?.Invoke(startTicks);
                     playbackPosition?.Invoke(startTicks, output.PlayedFrames / 48000d);
+                    // A user can turn continuous play off while later tracks are already
+                    // buffered. Stop that producer only after the current output has drained.
+                    stop.Cancel();
                 }
                 finally
                 {

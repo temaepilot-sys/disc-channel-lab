@@ -186,7 +186,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
     public bool IsBusy { get => _isBusy; private set { if (Set(ref _isBusy, value)) UpdateActions(); } }
     public bool IsPlaying { get => _isPlaying; private set { if (Set(ref _isPlaying, value)) { Changed(nameof(PlayPauseText)); UpdateActions(); } } }
     public string PlayPauseText => LanguageService.T(IsPlaying ? "一時停止" : "再生");
-    public bool ContinuousPlayback { get => _continuousPlayback; set => Set(ref _continuousPlayback, value); }
+    public bool ContinuousPlayback { get => _continuousPlayback; set { if (Set(ref _continuousPlayback, value)) UpdateContinuousLimit(); } }
     public double Volume
     {
         get => Volatile.Read(ref _volume);
@@ -218,7 +218,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
         set
         {
             if (!Set(ref _selectedTrack, value)) return;
-            StopPlayback();
+            if (!_switchingContinuousTrack) StopPlayback();
             SplitCandidates.Clear();
             SelectedCandidate = null;
             PreviewSeconds = 0;
@@ -287,6 +287,11 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
         set
         {
             if (!Set(ref _selectedStream, value)) return;
+            if (_switchingContinuousTrack)
+            {
+                Changed(nameof(CanChooseHighRes)); Changed(nameof(SelectedStreamNote)); UpdateActions();
+                return;
+            }
             StopPlayback();
             SaveStereoDownmix = false;
             SaveIndividualChannels = false;
@@ -809,8 +814,9 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
             _activePlaybackMix = CurrentMix;
             _activePreviewChannel = SelectedPreviewChannel?.Code;
             Volatile.Write(ref _livePreviewMix, PreviewState(_activePlaybackMix, _activePreviewChannel));
-            PreviewSeconds = Math.Clamp(_playbackStartSeconds + held.Position, 0, PreviewMax);
-            _playClockBase = PreviewSeconds; _playClock.Restart();
+            var position = _playbackStartSeconds + held.Position;
+            UpdateContinuousPosition(position);
+            _playClockBase = position; _playClock.Restart();
             IsPlaying = true; held.Resume();
             Status = $"{SelectedTrack?.Title} を再生しています";
             _log.Write("TRANSPORT resume: retained decoder, DSP and output device");
@@ -874,6 +880,9 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
         var control = new PreviewPlaybackControl();
         _playbackControl = control; _playbackEngineOptions = HeadphoneSession.Current.Options;
         _playbackStartSeconds = (start - track.StartTicks) / 45000d;
+        _continuousOriginTicks = track.StartTicks;
+        _continuousRun = PlanContinuousRun(playlist, track, stream);
+        UpdateContinuousLimit();
         _playback = session;
         ResetMeterLevels();
         IsPlaying = true;
@@ -890,7 +899,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
         var uiContext = SynchronizationContext.Current;
         try
         {
-            await _navigation.PlayAsync(disc, playlist, stream, startTicks, track.EndTicks, session.Token,
+            await _navigation.PlayAsync(disc, playlist, stream, startTicks, _continuousRun[^1].EndTicks, session.Token,
                 positionTicks =>
                 {
                     uiContext?.Post(_ =>
@@ -914,7 +923,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
                         if (!ReferenceEquals(_playback, session) || !IsPlaying || version != _transportVersion ||
                             !_playClock.IsRunning) return;
                         _playClockBase = Math.Clamp((segmentStart - track.StartTicks) / 45000d + seconds +
-                            (control.CanPause ? control.EstimatedPosition - seconds : Stopwatch.GetElapsedTime(sampledAt).TotalSeconds), 0, PreviewMax);
+                            (control.CanPause ? control.EstimatedPosition - seconds : Stopwatch.GetElapsedTime(sampledAt).TotalSeconds), 0, PlaybackTimelineMax);
                         _playClock.Restart();
                         AdvancePlaybackClock();
                     }, null);
@@ -928,6 +937,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
             if (ReferenceEquals(_playback, session) && IsPlaying)
             {
                 completed = true;
+                UpdateContinuousPosition(Math.Min(PlaybackTimelineMax, _playbackStartSeconds + control.EndFrame / 48000d));
                 PreviewSeconds = PreviewMax;
                 Status = "再生が終わりました";
             }
@@ -936,9 +946,9 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
         catch (Exception ex) { if (ReferenceEquals(_playback, session)) HandleError(ex); }
         finally
         {
-            var nextIndex = Tracks.IndexOf(track) + 1;
+            var nextIndex = Tracks.IndexOf(SelectedTrack!) + 1;
             var advance = completed && ContinuousPlayback && version == _transportVersion &&
-                          ReferenceEquals(_playback, session) && SelectedTrack == track &&
+                          ReferenceEquals(_playback, session) && SelectedTrack is not null &&
                           nextIndex > 0 && nextIndex < Tracks.Count;
             if (ReferenceEquals(_playback, session))
             {
@@ -964,9 +974,9 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
     public void AdvancePlaybackClock()
     {
         if (!IsScrubbing && _playbackControl is { CanPause: true, HasStarted: true } deviceClock)
-            PreviewSeconds = Math.Clamp(_playbackStartSeconds + deviceClock.EstimatedPosition, 0, PreviewMax);
+            UpdateContinuousPosition(_playbackStartSeconds + deviceClock.EstimatedPosition);
         else if (IsPlaying && !IsScrubbing && _playClock.IsRunning)
-            PreviewSeconds = Math.Min(PreviewMax, _playClockBase + _playClock.Elapsed.TotalSeconds);
+            UpdateContinuousPosition(_playClockBase + _playClock.Elapsed.TotalSeconds);
         ApplyMeterFrames();
         ApplyMixedFrames();
         PublishVisualizationClock();
@@ -993,9 +1003,9 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
     // Dragging the seek bar changes PreviewSeconds before playback seeks. Meters must
     // continue to follow the sound being played, not the temporary slider position.
     private double MeterPlaybackPosition => _playbackControl is { CanPause: true, HasStarted: true } native
-        ? Math.Clamp(_playbackStartSeconds + native.EstimatedPosition, 0, PreviewMax) : IsPlaying && _playClock.IsRunning
-        ? Math.Clamp(_playClockBase + _playClock.Elapsed.TotalSeconds, 0, PreviewMax)
-        : PreviewSeconds;
+        ? Math.Clamp(_playbackStartSeconds + native.EstimatedPosition, 0, PlaybackTimelineMax) : IsPlaying && _playClock.IsRunning
+        ? Math.Clamp(_playClockBase + _playClock.Elapsed.TotalSeconds, 0, PlaybackTimelineMax)
+        : PreviewSeconds + (_continuousRun.Length > 0 && SelectedTrack is { } track ? (track.StartTicks - _continuousOriginTicks) / 45000d : 0);
 
     private void ResetMeterLevels()
     {
@@ -1078,6 +1088,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
         _playClock.Stop();
         _playback?.Cancel();
         _playbackControl = null;
+        _continuousRun = [];
         IsPlaying = false;
         PreviewSeconds = 0;
         ResetMeterLevels();

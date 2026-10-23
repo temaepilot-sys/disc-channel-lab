@@ -100,7 +100,7 @@ internal static class MusicFolderTests
             var played = new List<(string Title, int Channels, int Rate)>(); var devices = new List<FastOutput>();
             PropertyChangedEventHandler record = (_, e) =>
             {
-                if (e.PropertyName == nameof(model.IsPlaying) && model.IsPlaying)
+                if ((e.PropertyName == nameof(model.IsPlaying) || e.PropertyName == nameof(model.SelectedTrackTitle)) && model.IsPlaying)
                     played.Add((model.SelectedTrack!.Title, model.SelectedStream!.Channels, model.SelectedStream.SampleRate));
             };
             try
@@ -119,7 +119,7 @@ internal static class MusicFolderTests
                     played.Select(p => p.Rate).SequenceEqual(new[] { 88200, 48000, 44100, 44100 }) &&
                     model.Status == LanguageService.T("再生が終わりました"),
                     "One Play traverses the folder in order, switching codec/rate/layout for each track and stopping at the end");
-                Check(devices.Count == 3 && devices.All(d => d.Peak > .001), "Multichannel/stereo files deliver non-silent native PCM; mono finishes through the existing dummy FFplay path");
+                Check(devices.Count == 2 && devices.All(d => d.Peak > .001), "Compatible stereo files share one non-silent native output; mono finishes through the existing dummy FFplay path");
                 model.SelectedTrack = model.Tracks[0];
                 await model.NextTrackAsync(); await model.PreviousTrackAsync();
                 Check(model.SelectedTrack == model.Tracks[0] && model.SelectedStream!.Channels == 6,

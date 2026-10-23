@@ -9,6 +9,8 @@ public sealed class PreviewPlaybackControl : IDisposable
     int attached, requestedPause, paused, started;
     long playedFrames, sampledAt;
     long requestedAt, pauseTicks;
+    long endFrame = long.MaxValue;
+    public long EndFrame { get => Interlocked.Read(ref endFrame); set => Interlocked.Exchange(ref endFrame, Math.Max(0, value)); }
     public long PauseTicks => Interlocked.Read(ref pauseTicks);
     public double PauseAppliedMilliseconds { get; private set; }
     public double ResumeAppliedMilliseconds { get; private set; }

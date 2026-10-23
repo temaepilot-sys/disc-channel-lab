@@ -42,6 +42,7 @@ public static class DvdVideoReader
                 {
                     Id = 20000 + title, Format = DiscFormat.DvdVideo,
                     DvdVideoTitle = title, DisplayOrder = result.Count + 1,
+                    DvdVideoCells = DvdVideoSectors.TryRead(root, title, chapters.Count, log),
                     Clips = [], ChapterStarts = chapters, DurationTicks = duration
                 });
             }

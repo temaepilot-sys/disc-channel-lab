@@ -55,6 +55,7 @@ public sealed class LanguageService : INotifyPropertyChanged
 
     private static readonly Dictionary<string, string> English = new(StringComparer.Ordinal)
     {
+        ["このタイトルには暗号化された音声・映像データが含まれるため処理できません。保護の解除は行いません。"] = "This title contains encrypted audio/video data and cannot be processed. Copy protection is not removed.",
         ["ディスクまたは音楽フォルダーを選択"] = "Select a disc or music folder",
         ["FLACの書き出しが完了しました。"] = "FLAC export completed.",
         ["このフォルダーには対応する音声ファイルがありません。"] = "This folder contains no supported audio files.",

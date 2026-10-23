@@ -19,6 +19,7 @@ public sealed class PlaylistInfo : INotifyPropertyChanged
     public DiscFormat Format { get; init; } = DiscFormat.BluRay;
     public DvdAudioTitle? DvdAudio { get; init; }
     public int DvdVideoTitle { get; init; }
+    public DvdVideoCellTitle? DvdVideoCells { get; set; }
     public SacdArea? SacdArea { get; init; }
     public PlaylistProbeResult? FileAnalysis { get; init; }
     public bool IsAudioFolder { get; init; }

@@ -163,6 +163,11 @@ if (args is ["dvd-audio-integrity-test", var integrityRoot, var integrityOutput]
     await DvdAudioIntegrityTests.RunAsync(integrityRoot, integrityOutput);
     return 0;
 }
+if (args is ["dvd-cell-tests", var cellDisc, var cellOutput])
+{
+    try { await DvdCellPlaybackTests.RunAsync(cellDisc, cellOutput); return 0; }
+    catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
+}
 
 if (args is ["mixer-export-test", var exportTestRoot])
 {

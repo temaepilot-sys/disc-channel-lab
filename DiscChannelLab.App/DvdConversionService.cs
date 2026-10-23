@@ -51,6 +51,7 @@ public sealed class DvdConversionService(ToolPaths paths, ProcessRunner runner, 
                 var channel = channels[channelIndex];
                 var staged = Path.Combine(stage, $"{index + 1:000}-{channelIndex + 1:00}.flac");
                 var arguments = new List<string> { "-hide_banner", "-v", "error" };
+                var streamMap = $"0:{stream.Index}";
                 long firstChapterTicks;
                 if (playlist.Format == DiscFormat.DvdAudio && playlist.DvdAudio is { } audio)
                 {
@@ -58,6 +59,12 @@ public sealed class DvdConversionService(ToolPaths paths, ProcessRunner runner, 
                     firstChapterTicks = track.StartTicks - range.SkipTicks;
                     arguments.AddRange(["-f", "mpeg", "-probesize", "4000000", "-analyzeduration", "10000000",
                                         "-i", "pipe:0"]);
+                }
+                else if (playlist.Format == DiscFormat.DvdVideo && playlist.DvdVideoCells is not null)
+                {
+                    firstChapterTicks = playlist.ChapterStarts[chapterRange.Start - 1];
+                    streamMap = DvdVideoSectors.StreamMap(stream);
+                    arguments.AddRange(["-f", "mpeg", "-probesize", "4000000", "-analyzeduration", "10000000", "-i", "pipe:0"]);
                 }
                 else if (playlist.Format == DiscFormat.DvdVideo)
                 {
@@ -75,7 +82,7 @@ public sealed class DvdConversionService(ToolPaths paths, ProcessRunner runner, 
                     : $"atrim=start_sample={skipSamples}:end_sample={skipSamples + sampleCount},asetpts=PTS-STARTPTS";
                 if (channel is not null) filter = StereoMixSettings.SoloFilter(stream, channel, stereo: false) + "," + filter;
                 else if (saveStereoDownmix) filter = (channelMix?.Filter(stream) ?? mix.PanFilter(stream)) + "," + filter;
-                arguments.AddRange(["-map", $"0:{stream.Index}", "-vn", "-sn", "-dn", "-af", filter,
+                arguments.AddRange(["-map", streamMap, "-vn", "-sn", "-dn", "-af", filter,
                     "-c:a", "flac", "-sample_fmt", bitDepth <= 16 ? "s16" : "s32",
                     "-metadata", $"title={title}", "-metadata", $"track={track.Number}",
                     "-metadata", $"album={playlist.TitleName}"]);
@@ -101,6 +108,9 @@ public sealed class DvdConversionService(ToolPaths paths, ProcessRunner runner, 
                         (input, ct) => DvdAudioSectors.CopyAsync(disc.Root, audioTitle.TitleSet,
                             range.FirstSector, range.LastSector, input, ct), token);
                 }
+                else if (playlist.DvdVideoCells is { } cells)
+                    await runner.RunWithInputAsync(paths.Ffmpeg, arguments,
+                        (input, ct) => DvdVideoSectors.CopyAsync(disc.Root, cells, chapterRange.Start, chapterRange.End, input, ct), token);
                 else await runner.RunAsync(paths.Ffmpeg, arguments.Prepend("-nostdin"), token);
 
                 var actual = await probe.ProbeFileAsync(staged, token);

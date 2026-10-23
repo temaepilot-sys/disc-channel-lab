@@ -166,8 +166,9 @@ public static class DvdAudioSectors
             while (bytes > 0)
             {
                 token.ThrowIfCancellationRequested();
-                var read = await input.ReadAsync(buffer.AsMemory(0, (int)Math.Min(buffer.Length, bytes)), token);
-                if (read == 0) throw new EndOfStreamException($"AOB を最後まで読めませんでした: {file.FullName}");
+                var read = (int)Math.Min(buffer.Length, bytes);
+                await input.ReadExactlyAsync(buffer.AsMemory(0, read), token);
+                DvdProgramStreamProtection.RequireClear(buffer.AsSpan(0, read));
                 await destination.WriteAsync(buffer.AsMemory(0, read), token);
                 bytes -= read;
                 remaining -= read;

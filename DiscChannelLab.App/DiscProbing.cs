@@ -166,6 +166,8 @@ public sealed partial class FfprobeService
     {
         var args = new List<string> { "-hide_banner", "-nostdin", "-v", "error", "-progress", "pipe:1" };
         var index = stream.Index;
+        int? cellChapter = null;
+        string? streamMap = null;
         if (playlist.Format == DiscFormat.BluRay)
         {
             ClipInfo? chosen = null;
@@ -186,11 +188,16 @@ public sealed partial class FfprobeService
         {
             var count = playlist.EffectiveChapterStarts.Count;
             var chapter = sample == 0 ? 1 : sample == 1 ? Math.Max(1, count / 2) : Math.Max(1, count);
-            args.AddRange(["-f", "dvdvideo", "-title", playlist.DvdVideoTitle.ToString(),
+            if (playlist.DvdVideoCells is not null)
+            {
+                cellChapter = chapter; streamMap = DvdVideoSectors.StreamMap(stream);
+                args.AddRange(["-f", "mpeg", "-probesize", "4000000", "-analyzeduration", "10000000", "-i", "pipe:0"]);
+            }
+            else args.AddRange(["-f", "dvdvideo", "-title", playlist.DvdVideoTitle.ToString(),
                 "-chapter_start", chapter.ToString(), "-chapter_end", chapter.ToString(), "-i", DvdVideoReader.InputPath(root)]);
         }
         else args.AddRange(["-f", "mpeg", "-i", "pipe:0"]);
-        args.AddRange(["-map", $"0:{index}", "-t", "0.2", "-c:a", "pcm_s16le", "-f", "null", "NUL"]);
+        args.AddRange(["-map", streamMap ?? $"0:{index}", "-t", "0.2", "-c:a", "pcm_s16le", "-f", "null", "NUL"]);
         ProcessResult result;
         if (playlist.Format == DiscFormat.DvdAudio && playlist.DvdAudio is { } audio)
         {
@@ -199,6 +206,9 @@ public sealed partial class FfprobeService
                 (input, ct) => DvdAudioSectors.CopyAsync(root, audio.TitleSet, program.StartSector, program.EndSector,
                     input, ct, 8 * 1024 * 1024), token);
         }
+        else if (cellChapter is { } chapter && playlist.DvdVideoCells is { } cells)
+            result = await runner.RunWithInputAsync(paths.Ffmpeg, args,
+                (input, ct) => DvdVideoSectors.CopyAsync(root, cells, chapter, chapter, input, ct, 8 * 1024 * 1024), token);
         else result = await runner.RunAsync(paths.Ffmpeg, args, token);
         return result.Output.Split(['\r', '\n']).Any(line => line.StartsWith("out_time_us=", StringComparison.Ordinal) &&
             long.TryParse(line.AsSpan(12), out var time) && time > 0);

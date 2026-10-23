@@ -147,6 +147,7 @@ public sealed class DiscService(FfprobeService probe, AppLog log, SacdService? s
                 var structure = await FfprobeService.WithTimeout(ct => probe.ProbeDvdVideoTitleAsync(disc.Root, playlist.DvdVideoTitle, ct), token, force ? 25 : 10);
                 playlist.DurationTicks = structure.DurationTicks;
                 playlist.ChapterStarts = structure.Chapters;
+                playlist.DvdVideoCells = DvdVideoSectors.TryRead(disc.Root, playlist.DvdVideoTitle, structure.Chapters.Count, log.Write);
                 playlist.ChapterTitles = Enumerable.Repeat<string?>(null, structure.Chapters.Count).ToArray();
                 playlist.RefreshLanguage();
             }

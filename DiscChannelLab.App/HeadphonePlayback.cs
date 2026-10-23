@@ -49,12 +49,20 @@ public sealed partial class AudioNavigationService
             {
                 if (playlist.Format is DiscFormat.DvdAudio or DiscFormat.DvdVideo)
                 {
-                    var arguments = new List<string>(); Func<Stream, CancellationToken, Task>? feed = null; long skip;
+                    var arguments = new List<string>(); Func<Stream, CancellationToken, Task>? feed = null; long skip; string? streamMap = null;
                     if (playlist.Format == DiscFormat.DvdAudio && playlist.DvdAudio is { } audio)
                     {
                         var range = DvdAudioSectors.Range(audio, startTicks, endTicks); skip = range.SkipTicks;
                         arguments.AddRange(["-f", "mpeg", "-probesize", "4000000", "-analyzeduration", "10000000", "-i", "pipe:0"]);
                         feed = (destination, ct) => DvdAudioSectors.CopyAsync(disc.Root, audio.TitleSet, range.FirstSector, range.LastSector, destination, ct);
+                    }
+                    else if (playlist.DvdVideoCells is { } cells)
+                    {
+                        var range = DvdVideoSectors.Range(playlist, startTicks, endTicks);
+                        skip = startTicks - range.StartTicks;
+                        arguments.AddRange(["-f", "mpeg", "-probesize", "4000000", "-analyzeduration", "10000000", "-i", "pipe:0"]);
+                        streamMap = DvdVideoSectors.StreamMap(stream);
+                        feed = (destination, ct) => DvdVideoSectors.CopyAsync(disc.Root, cells, range.First, range.Last, destination, ct);
                     }
                     else
                     {
@@ -67,7 +75,7 @@ public sealed partial class AudioNavigationService
                         skip = startTicks - playlist.ChapterStarts[first - 1];
                         arguments.AddRange(["-f", "dvdvideo", "-title", playlist.DvdVideoTitle.ToString(), "-chapter_start", first.ToString(), "-chapter_end", last.ToString(), "-i", DvdVideoReader.InputPath(disc.Root)]);
                     }
-                    await Decode(arguments, stream, skip, endTicks - startTicks, feed);
+                    await Decode(arguments, stream, skip, endTicks - startTicks, feed, streamMap: streamMap);
                 }
                 else foreach (var segment in PlaylistSegments.ForRange(playlist, startTicks, endTicks))
                 {
@@ -97,11 +105,11 @@ public sealed partial class AudioNavigationService
             catch (Exception ex) { pcm.Complete(ex); }
 
             async Task Decode(List<string> arguments, AudioStreamInfo source, long skipTicks, long durationTicks,
-                Func<Stream, CancellationToken, Task>? feed, bool silent = false)
+                Func<Stream, CancellationToken, Task>? feed, bool silent = false, string? streamMap = null)
             {
                 var skip = ConversionService.ToSample(skipTicks, 48000); var count = ConversionService.ToSample(durationTicks, 48000);
                 arguments.InsertRange(0, ["-hide_banner", "-nostdin", "-v", "error"]);
-                arguments.AddRange(["-map", $"0:{(silent ? 0 : source.Index)}", "-vn", "-sn", "-dn", "-af", $"aresample=48000,atrim=start_sample={skip}:end_sample={skip + count},asetpts=PTS-STARTPTS",
+                arguments.AddRange(["-map", streamMap ?? $"0:{(silent ? 0 : source.Index)}", "-vn", "-sn", "-dn", "-af", $"aresample=48000,atrim=start_sample={skip}:end_sample={skip + count},asetpts=PTS-STARTPTS",
                     "-ac", channels.Length.ToString(), "-ar", "48000", "-c:a", "pcm_f32le"]);
                 if (channels.Length > 2) arguments.AddRange(["-ch_layout", source.ChannelLayout]);
                 arguments.AddRange(["-f", "f32le", "pipe:1"]);

@@ -90,6 +90,7 @@ public sealed partial class AudioNavigationService(ToolPaths paths, ProcessRunne
     {
         var inputArgs = new List<string>();
         Func<Stream, CancellationToken, Task>? writeInput = null;
+        var streamMap = $"0:{stream.Index}";
         long sourceStart;
         if (playlist.Format == DiscFormat.DvdAudio && playlist.DvdAudio is { } audio)
         {
@@ -98,6 +99,14 @@ public sealed partial class AudioNavigationService(ToolPaths paths, ProcessRunne
             inputArgs.AddRange(["-f", "mpeg", "-probesize", "4000000", "-analyzeduration", "10000000", "-i", "pipe:0"]);
             writeInput = (input, ct) => DvdAudioSectors.CopyAsync(disc.Root, audio.TitleSet,
                 range.FirstSector, range.LastSector, input, ct);
+        }
+        else if (playlist.Format == DiscFormat.DvdVideo && playlist.DvdVideoCells is { } cells)
+        {
+            var range = DvdVideoSectors.Range(playlist, startTicks, endTicks);
+            sourceStart = range.StartTicks;
+            streamMap = DvdVideoSectors.StreamMap(stream);
+            inputArgs.AddRange(["-f", "mpeg", "-probesize", "4000000", "-analyzeduration", "10000000", "-i", "pipe:0"]);
+            writeInput = (input, ct) => DvdVideoSectors.CopyAsync(disc.Root, cells, range.First, range.Last, input, ct);
         }
         else if (playlist.Format == DiscFormat.DvdVideo)
         {
@@ -117,7 +126,7 @@ public sealed partial class AudioNavigationService(ToolPaths paths, ProcessRunne
         var sampleCount = ConversionService.ToSample(endTicks - startTicks, 48000);
         var liveChannels = liveMix is not null && StereoMixSettings.Supports(stream);
         var filter = PreviewFilter(stream, skipSamples, sampleCount, liveChannels, mix, soloChannel, channelLevels is not null);
-        var outputArgs = new List<string> { "-map", $"0:{stream.Index}", "-af", filter };
+        var outputArgs = new List<string> { "-map", streamMap, "-af", filter };
         outputArgs.AddRange(["-vn", "-sn", "-dn", "-ac", liveChannels ? stream.Channels.ToString() : "2",
             "-c:a", "pcm_s16le",
             "-t", Seconds(endTicks - startTicks), "-f", "s16le", "pipe:1"]);
@@ -448,6 +457,16 @@ public sealed partial class AudioNavigationService(ToolPaths paths, ProcessRunne
             result = await runner.RunWithInputAsync(paths.Ffmpeg, arguments,
                 (input, ct) => DvdAudioSectors.CopyAsync(disc.Root, audio.TitleSet,
                     range.FirstSector, range.LastSector, input, ct), token);
+        }
+        else if (playlist.DvdVideoCells is { } cells)
+        {
+            var range = DvdVideoSectors.Range(playlist, track.StartTicks, track.EndTicks);
+            arguments.AddRange(["-f", "mpeg", "-probesize", "4000000", "-analyzeduration", "10000000", "-i", "pipe:0",
+                "-ss", ((track.StartTicks - range.StartTicks) / 45000m).ToString(CultureInfo.InvariantCulture),
+                "-t", track.DurationSeconds.ToString(CultureInfo.InvariantCulture), "-map", DvdVideoSectors.StreamMap(stream),
+                "-vn", "-sn", "-dn", "-af", "silencedetect=noise=-45dB:duration=0.8", "-f", "null", "-"]);
+            result = await runner.RunWithInputAsync(paths.Ffmpeg, arguments,
+                (input, ct) => DvdVideoSectors.CopyAsync(disc.Root, cells, range.First, range.Last, input, ct), token);
         }
         else
         {

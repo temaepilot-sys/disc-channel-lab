@@ -40,6 +40,14 @@ public sealed partial class FfprobeService
         }
         if (streams.FirstOrDefault() is { SampleCount: > 0 } first)
             duration = checked((long)Math.Round(first.SampleCount.Value * 45000m / first.SampleRate, MidpointRounding.AwayFromZero));
+        if (duration <= 0 && streams.FirstOrDefault() is { Codec: "truehd" or "mlp" } rawStream)
+        {
+            // Elementary TrueHD/MLP has no container duration. Count its decoded timeline
+            // without retaining PCM; do not invent a duration from compressed file size.
+            var scan = await runner.RunAsync(paths.Ffmpeg, ["-nostdin", "-v", "error", "-i", path, "-map", $"0:{rawStream.Index}", "-vn", "-progress", "pipe:1", "-f", "null", "NUL"], token);
+            var times = scan.Output.Split(['\r', '\n']).Where(l => l.StartsWith("out_time_us=", StringComparison.Ordinal)).Select(l => long.TryParse(l.AsSpan(12), out var n) ? n : 0);
+            duration = (long)Math.Round(times.DefaultIfEmpty().Max() * 45000m / 1000000m);
+        }
         if (duration <= 0) throw new InvalidDataException("音声ファイルの再生時間を確認できません。");
         var chapters = new Dictionary<int, ChapterMetadata>();
         if (root.TryGetProperty("chapters", out var chapterElements))

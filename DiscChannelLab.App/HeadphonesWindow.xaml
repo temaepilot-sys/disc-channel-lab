@@ -39,6 +39,7 @@
                 <ComboBox x:Name="MethodCombo" MinHeight="32" Width="300" HorizontalAlignment="Left" SelectionChanged="Method_Changed">
                     <ComboBoxItem Content="{local:Loc Key='Direct — 角度・パン・緩やかなフィルター'}"/>
                     <ComboBoxItem Content="{local:Loc Key='Steam Audio — バイノーラルHRTF'}"/>
+                    <ComboBoxItem Content="Measured BRIR — fixed measured room"/>
                 </ComboBox>
                 <TextBlock x:Name="MethodHint" Margin="12,0,0,0" VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}"/>
             </DockPanel>
@@ -120,6 +121,16 @@
                                            FontSize="12" Foreground="{DynamicResource MutedBrush}"/>
                             </StackPanel>
                         </TabItem>
+                        <TabItem Header="BRIR">
+                            <StackPanel Margin="10">
+                                <TextBlock Text="Measured BRIR · fixed speaker room" FontWeight="SemiBold"/>
+                                <TextBlock Text="Load speaker / ear mappings in Spatial Lab → Measured BRIR. This replaces HRIR; no extra room reflection, direction filter or head tracking is applied." Margin="0,10"/>
+                                <TextBox Text="{Binding Options.BrirPath, Source={x:Static local:HeadphoneSession.Current}}" IsReadOnly="True" TextWrapping="Wrap"/>
+                                <TextBlock x:Name="BrirTrimLabel" Text="BRIR comparison trim" Margin="0,12,0,0"/>
+                                <Slider x:Name="BrirTrim" Minimum="-12" Maximum="12" ValueChanged="Options_Changed"/>
+                                <TextBlock Text="Headroom, mixer Mute / Solo / polarity and master volume still apply. Front angle and head rotation cannot move a measured room." Foreground="{DynamicResource MutedBrush}"/>
+                            </StackPanel>
+                        </TabItem>
                         <TabItem Header="{local:Loc Key='トラッキング'}">
                             <StackPanel Margin="10">
                                 <CheckBox x:Name="UseTracker" Content="{local:Loc Key='opentrack UDPを受信'}" Checked="Tracker_Changed" Unchecked="Tracker_Changed"/>
@@ -167,7 +178,7 @@
             </WrapPanel>
             <TextBlock x:Name="NoteText" Foreground="{DynamicResource MutedBrush}" FontSize="12"/>
             <TextBlock x:Name="OutputStatusText" Foreground="{DynamicResource MutedBrush}" FontSize="12" Margin="0,3,0,0"/>
-            <TextBlock Text="{local:Loc Key='ヘッドフォン処理は再生に適用します。FLAC保存は元音源・ステレオミキサーの設定を使用します。出力先：Windowsの既定のデバイス。'}"
+            <TextBlock Text="FLAC export: use the main window. Enable headphone / reflection rendering to save this processing with a fixed head pose. ADM uses the selected preview renderer. Output: Windows default device."
                        Foreground="{DynamicResource MutedBrush}" FontSize="12" Margin="0,4,0,0"/>
         </StackPanel>
     </Grid>

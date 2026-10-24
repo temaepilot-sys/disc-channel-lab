@@ -13,7 +13,7 @@ internal static class HeadphoneRestartTests
         var channels = new[] { "FL", "FR", "FC", "LFE", "SL", "SR" };
         var input = channels.Select(_ => new float[256]).ToArray();
         var stereo = new float[512];
-        foreach (var method in Enum.GetValues<HeadphoneMethod>())
+        foreach (var method in new[] { HeadphoneMethod.Direct, HeadphoneMethod.SteamAudio })
         {
             double restartedPeak = 0;
             var options = new HeadphoneOptions { Enabled = true, Method = method };
@@ -100,7 +100,7 @@ internal static class HeadphoneRestartTests
             await runner.RunAsync(tools.Ffmpeg, ["-v", "error", "-f", "lavfi", "-i", signal, "-t", "0.2", "-c:a", "flac", "-y", file], CancellationToken.None);
         try
         {
-            foreach (var method in Enum.GetValues<HeadphoneMethod>())
+            foreach (var method in new[] { HeadphoneMethod.Direct, HeadphoneMethod.SteamAudio })
             {
                 session.SetOptions(new HeadphoneOptions { Enabled = true, Method = method });
                 foreach (var file in new[] { music, silence, music, silence })

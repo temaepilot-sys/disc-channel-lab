@@ -5,6 +5,9 @@ namespace Disc2Flac;
 /// <summary>Transport commands only; all device calls stay on the audio thread.</summary>
 public sealed class PreviewPlaybackControl : IDisposable
 {
+    readonly bool allowPendingPause;
+    public bool SupportsPendingPause => allowPendingPause;
+    public PreviewPlaybackControl(bool startPaused = false, bool allowPendingPause = false) { requestedPause = startPaused ? 1 : 0; this.allowPendingPause = allowPendingPause; }
     readonly AutoResetEvent wake = new(false);
     int attached, requestedPause, paused, started;
     long playedFrames, sampledAt;
@@ -23,7 +26,7 @@ public sealed class PreviewPlaybackControl : IDisposable
         Math.Clamp(Stopwatch.GetElapsedTime(Interlocked.Read(ref sampledAt)).TotalSeconds, 0, .05));
     public bool Pause()
     {
-        if (!CanPause) return false;
+        if (!CanPause && !allowPendingPause) return false;
         Interlocked.Exchange(ref requestedAt, Stopwatch.GetTimestamp());
         Volatile.Write(ref requestedPause, 1); Signal(); return true;
     }

@@ -56,6 +56,7 @@ public partial class HeadphonesWindow : Window
         Delay.IsChecked = o.InterauralDelay; Headroom.Value = o.HeadroomDb; Lfe.Value = o.LfeGain * 100;
         DirectTrim.Value = o.DirectTrimDb; SteamTrim.Value = o.Hrtf == HeadphoneHrtf.Sofa ? o.SofaTrimDb : o.SteamTrimDb; Smooth.Value = o.SmoothingMs;
         FrontAngle.Value = o.FrontAngle;
+        BrirTrim.Value = o.BrirTrimDb;
     }
     private void ReadHrtfOptions()
     {
@@ -78,6 +79,7 @@ public partial class HeadphonesWindow : Window
         DirectTrimLabel.Text = $"{HeadphoneText.T("Direct comparison trim")} · {DirectTrim.Value:+0.0;-0.0;0.0} dB";
         SteamTrimLabel.Text = $"{(_session.Options.Hrtf == HeadphoneHrtf.Sofa ? LanguageService.T("SOFA比較トリム") : HeadphoneText.T("HRTF comparison trim"))} · {SteamTrim.Value:+0.0;-0.0;0.0} dB";
         SmoothLabel.Text = $"{HeadphoneText.T("Orientation smoothing")} · {Smooth.Value:0} ms";
+        BrirTrimLabel.Text = $"BRIR comparison trim · {BrirTrim.Value:+0.0;-0.0;0.0} dB";
         FrontAngleLabel.Text = $"{HeadphoneText.T("Front L/R angle")} · ±{FrontAngle.Value:0}° ({HeadphoneText.T("apart")} {FrontAngle.Value * 2:0}°)";
         foreach (var (name, value) in SliderDefaults)
         {
@@ -99,7 +101,7 @@ public partial class HeadphonesWindow : Window
             InterauralDelay = Delay.IsChecked == true, HeadroomDb = Headroom.Value, LfeGain = Lfe.Value / 100,
             DirectTrimDb = DirectTrim.Value, SteamTrimDb = current.Hrtf == HeadphoneHrtf.BuiltIn ? SteamTrim.Value : current.SteamTrimDb,
             SofaTrimDb = current.Hrtf == HeadphoneHrtf.Sofa ? SteamTrim.Value : current.SofaTrimDb,
-            SmoothingMs = Smooth.Value, FrontAngle = FrontAngle.Value
+            SmoothingMs = Smooth.Value, FrontAngle = FrontAngle.Value, BrirTrimDb = BrirTrim.Value
         });
         UpdateLabels();
     }
@@ -178,6 +180,8 @@ public partial class HeadphonesWindow : Window
     {
         if (_updating || MethodCombo.SelectedIndex < 0) return;
         if (!_model.CanChoosePreviewMode) { _updating = true; MethodCombo.SelectedIndex = (int)_session.Options.Method; _updating = false; return; }
+        if (MethodCombo.SelectedIndex == 2 && string.IsNullOrEmpty(_session.Options.BrirHash))
+        { NoteText.Text = "Load and apply a BRIR profile in Spatial Lab first."; ReadOptions(); return; }
         _session.SetOptions(_session.Options with { Method = (HeadphoneMethod)MethodCombo.SelectedIndex });
         SettingsTabs.SelectedIndex = MethodCombo.SelectedIndex;
         Refresh();
@@ -286,9 +290,11 @@ public partial class HeadphonesWindow : Window
         if (SofaPathText.Text != sofaText) { SofaPathText.Text = sofaText; SofaPathText.ToolTip = sofaText; }
         DirectControls.IsEnabled = _session.Options.Method == HeadphoneMethod.Direct;
         MethodHint.Text = !_session.Options.Enabled ? HeadphoneText.T("Headphones are disabled; standard playback is active.") : _model.IsPlaying ? HeadphoneText.T("Stop or pause before changing renderer.") : HeadphoneText.T("Renderer can be changed while stopped.");
-        ManualControls.IsEnabled = !_session.Options.UseTracker;
+        bool brir = _session.Options.Method == HeadphoneMethod.MeasuredBrir;
+        ManualControls.IsEnabled = !_session.Options.UseTracker && !brir;
+        UseTracker.IsEnabled = !brir; FrontAngle.IsEnabled = ResetFrontAngle.IsEnabled = ResetPlacementButton.IsEnabled = !brir;
         TrackingStatus.Text = _session.TrackerStatus;
-        RoomModeText.Text = _session.Options.UseTracker ? HeadphoneText.T("ROOM FIXED / HEAD TRACKING") : HeadphoneText.T("LISTENER FIXED / ROOM ROTATES");
+        RoomModeText.Text = brir ? "MEASURED BRIR / FIXED HEAD" : _session.Options.UseTracker ? HeadphoneText.T("ROOM FIXED / HEAD TRACKING") : HeadphoneText.T("LISTENER FIXED / ROOM ROTATES");
         OutputStatusText.Text = _session.AudioStatus;
         var p = _session.Pose;
         PoseText.Text = $"Yaw {p.Yaw:+0.0;-0.0;0.0}°  ·  Pitch {p.Pitch:+0.0;-0.0;0.0}°  ·  Roll {p.Roll:+0.0;-0.0;0.0}°";
@@ -321,7 +327,7 @@ public partial class HeadphonesWindow : Window
         var hasSolo = _model.ExperimentalMixerEnabled && _model.MixerStrips.Any(s => s.Solo);
         foreach (var code in channels)
         {
-            var speaker = HeadphoneGeometry.DisplaySpeaker(code, _session.Pose, _session.Options, channels);
+            var speaker = HeadphoneGeometry.DisplaySpeaker(code, _session.Options.Method == HeadphoneMethod.MeasuredBrir ? new(0,0,0) : _session.Pose, _session.Options, channels);
             var x = cx + radius * speaker.X; var y = cy - radius * speaker.Z;
             if (code == "LFE") { x = cx; y = cy + 38; }
             var meter = _model.ChannelMeters.FirstOrDefault(m => m.Code == code);

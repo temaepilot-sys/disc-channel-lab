@@ -11,6 +11,12 @@
     <Product>DiscChannelLab</Product>
   </PropertyGroup>
 
+  <ItemGroup><PackageReference Include="PureHDF" Version="2.2.0" /></ItemGroup>
+  <ItemGroup><EmbeddedResource Include="../third_party/libadm-common-definitions/common_definitions.xml" LogicalName="SpatialLab.CommonDefinitions.xml" /></ItemGroup>
+  <ItemGroup><Content Include="../docs/object-audio.md;../docs/object-audio.ja.md" Link="Guides/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" /></ItemGroup>
+  <ItemGroup><Content Include="../docs/brir.md;../docs/brir.ja.md;../docs/brir-profile.example.json" Link="Guides/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" /></ItemGroup>
+  <ItemGroup><Content Include="../docs/comparison.md;../docs/comparison.ja.md" Link="Guides/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" /></ItemGroup>
+
   <ItemGroup Condition="'$(ToolsBundleId)' != '' and Exists('obj/embedded-tools/tools.bundle.zip')">
     <EmbeddedResource Include="obj/embedded-tools/tools.bundle.zip"
                       LogicalName="Disc2Flac.tools.$(ToolsBundleId).zip" />

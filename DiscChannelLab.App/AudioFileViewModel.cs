@@ -16,6 +16,7 @@ public sealed partial class MainViewModel
 
     private void RefreshAudioFolderStreams()
     {
+        if (IsAtmosStreamingEnabled) return;
         if (_loadedPlaylist is not { IsAudioFolder: true } folder || SelectedTrack is null) return;
         var available = AudioFileReader.StreamsForTrack(folder, SelectedTrack);
         // Keep the controls and mixer settings intact between files with the same format.
@@ -31,6 +32,7 @@ public sealed partial class MainViewModel
 
     private bool CanExportAudioTrack(TrackRow track)
     {
+        if (IsAtmosStreamingEnabled) return SelectedStream is not null && QualityAvailable(SelectedStream);
         if (_loadedPlaylist is null || SelectedStream is null) return false;
         if (_loadedPlaylist.IsAudioFolder && !AudioFileReader.StreamsForTrack(_loadedPlaylist, track).Any(AudioFileReader.IsUsable)) return false;
         var stream = AudioFileReader.StreamForTrack(_loadedPlaylist, track, SelectedStream);

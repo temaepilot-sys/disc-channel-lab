@@ -174,7 +174,7 @@ public sealed class AudioStreamInfo : INotifyPropertyChanged
     public bool CanMakeCd => HasSupportedChannels && BitDepth >= 16 && SampleRate >= 44100;
     public bool CanMakeHighResolution => HasSupportedChannels && !UsesDecodedPcmDepth && BitDepth == 24 && SampleRate >= 88200;
     public bool CanMakeOriginalPcm => HasSupportedChannels && !UsesDecodedPcmDepth && BitDepth is 16 or 24 && SampleRate >= 44100;
-    public string DisplayName => $"{CodecLabel} · {(Channels == 1 ? "Mono" : IsStereo ? "Stereo" : $"{Channels}ch ({ChannelLayout})")} · {SampleRate / 1000d:0.0}kHz / {(BitDepth is null ? LanguageService.T("深度不明") : $"{BitDepth}bit{(UsesDecodedPcmDepth ? " PCM" : "")}")}" +
+    public string DisplayName => Codec == "adm" ? Profile : $"{CodecLabel} · {(Channels == 1 ? "Mono" : IsStereo ? "Stereo" : $"{Channels}ch ({ChannelLayout})")} · {SampleRate / 1000d:0.0}kHz / {(BitDepth is null ? LanguageService.T("深度不明") : $"{BitDepth}bit{(UsesDecodedPcmDepth ? " PCM" : "")}")}" +
         (HasPartialCoverage ? $" · {LanguageService.T("一部区間のみ")} #{Index}" : "") +
         (SilentTailClipId is not null ? $" · {LanguageService.T("末尾の映像区間は無音")}" : "");
     private string CodecLabel => LanguageService.T(Codec switch

@@ -6,6 +6,7 @@ public interface IPreviewPcmRenderer : IDisposable
     IReadOnlyList<float[]> ChannelRight { get; }
     long ClippedSamples { get; }
     int TailBlocks { get; }
+    void BeginTail() { }
     float PostSample(int channel, int frame);
     void Render(float[][] input, float[] output, HeadPose pose, HeadphoneOptions options, PreviewMixState state, double master);
 }

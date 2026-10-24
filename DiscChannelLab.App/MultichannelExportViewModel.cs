@@ -12,7 +12,7 @@ public sealed partial class MainViewModel
             if (!Set(ref _saveMultichannelFlac, value && CanSaveMultichannel)) return;
             if (_saveMultichannelFlac)
             {
-                SaveStereoDownmix = false; SaveIndividualChannels = false; SaveMixerDownmix = false;
+                SaveStereoDownmix = false; SaveIndividualChannels = false; SaveMixerDownmix = false; SaveBinauralFlac = false;
                 if (_quality == OutputQuality.HighResolution)
                     _quality = SelectedStream?.CanMakeOriginalPcm == true ? OutputQuality.OriginalPcm : OutputQuality.Cd;
             }
@@ -23,12 +23,12 @@ public sealed partial class MainViewModel
             Changed(nameof(SelectedStreamNote)); Changed(nameof(CanConvert)); Changed(nameof(CanExportMixer));
         }
     }
-    public string HighResOptionText => LanguageService.T(SaveMultichannelFlac ? "元のPCM音質" : "ハイレゾ · 元の形式");
-    public string HighResHelpText => LanguageService.T(SaveMultichannelFlac
+    public string HighResOptionText => SaveBinauralFlac ? "Binaural PCM · 24-bit / 48 kHz" : LanguageService.T(SaveMultichannelFlac ? "元のPCM音質" : "ハイレゾ · 元の形式");
+    public string HighResHelpText => SaveBinauralFlac ? "Spatial rendering runs at 48 kHz. CD quality exports 16-bit / 44.1 kHz; PCM exports 24-bit / 48 kHz. Save ADM retains the decoded multitrack audio and positions." : LanguageService.T(SaveMultichannelFlac
         ? _disc?.Format == DiscFormat.Sacd ? "チャンネル数と配置を維持。SACDの元のPCMは24bit / 88.2kHzです。"
             : "元のPCM音質では、入力のサンプリング周波数・16/24bit・チャンネル配置を維持します。"
         : "ハイレゾは元音源が24bit / 88.2kHz以上のときに選べます。");
-    private bool QualityAvailable(AudioStreamInfo stream) => _quality switch
+    private bool QualityAvailable(AudioStreamInfo stream) => stream.Codec == "adm" || SaveBinauralFlac ? stream.CanMakeCd && _quality is OutputQuality.Cd or OutputQuality.HighResolution : _quality switch
     {
         OutputQuality.Cd => stream.CanMakeCd,
         OutputQuality.HighResolution => stream.CanMakeHighResolution,

@@ -32,6 +32,13 @@ public sealed partial class AudioNavigationService
         var channels = HeadphoneGeometry.Channels(stream);
         if (channels.Length != stream.Channels) throw new InvalidOperationException("Unknown headphone speaker layout.");
         var session = HeadphoneSession.Current;
+        // IR file I/O and FFT preparation must finish before the MMCSS output thread starts.
+        using var preparedBrir = spatial && session.Options.Method == HeadphoneMethod.MeasuredBrir
+            ? await Task.Run(() =>
+            {
+                BrirLibrary.Prepare(session.Options.BrirPath, session.Options.BrirHash, token);
+                return new HeadphoneRenderer(channels, session.Options);
+            }, token) : null;
         using var stop = CancellationTokenSource.CreateLinkedTokenSource(token);
         token = stop.Token;
         using var pcm = new HeadphonePcmBuffer(HeadphoneRenderer.BlockSize * channels.Length * 4);
@@ -173,7 +180,7 @@ public sealed partial class AudioNavigationService
                 pcm.WaitUntilReady(token);
                 token.ThrowIfCancellationRequested();
                 using var scheduling = new HeadphoneAudioThread.Scheduling();
-                using IPreviewPcmRenderer renderer = spatial ? new HeadphoneRenderer(channels, session.Options) : new StereoPcmRenderer(channels);
+                using IPreviewPcmRenderer renderer = preparedBrir ?? (spatial ? (IPreviewPcmRenderer)new HeadphoneRenderer(channels, session.Options) : new StereoPcmRenderer(channels));
                 using var output = new HeadphonePlaybackOutput(HeadphoneOutputFactory());
                 session.ReportOutput(output.BufferMilliseconds, 0);
                 log.Write($"{(spatial ? "HEADPHONES " + session.Options.Method : "STEREO PCM")}, 48000 Hz float, {channels.Length}ch, endpoint buffer {output.BufferMilliseconds:0.0} ms, " +
@@ -204,7 +211,9 @@ public sealed partial class AudioNavigationService
                     // Preserve the final HRIR / delay-line decay without discarding partial source blocks.
                     var silence = pcm.Rent();
                     Array.Clear(silence);
-                    for (int i = 0, blocks = renderer.TailBlocks; i < blocks; i++) Render(silence, HeadphoneRenderer.BlockSize);
+                    int blocks = renderer.TailBlocks;
+                    renderer.BeginTail();
+                    for (int i = 0; i < blocks; i++) Render(silence, HeadphoneRenderer.BlockSize);
                     pcm.Recycle(silence);
                     transport?.Apply(output, token);
                     output.Drain(token);

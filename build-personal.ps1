@@ -1,7 +1,8 @@
 param(
     [ValidateSet('Debug', 'Release')]
     [string]$Configuration = 'Release',
-    [string]$OutputDirectory = 'artifacts\personal-win-x64'
+    [string]$OutputDirectory = 'artifacts\personal-win-x64',
+    [string[]]$PackageSources = @()
 )
 
 $ErrorActionPreference = 'Stop'
@@ -69,9 +70,29 @@ if (($probeProtocols -join "`n") -notmatch 'bluray') { throw 'ffprobe に bluray
 
 New-Item -ItemType Directory -Path $bundleDirectory -Force | Out-Null
 # The compressed bundle is embedded as a resource and extracted to LocalAppData on first launch.
-Compress-Archive -LiteralPath $ffmpeg.Source, $ffprobe.Source, $ffplay.Source -DestinationPath $bundlePath -CompressionLevel Optimal -Force
+$reuseBundle = $false
+if (Test-Path -LiteralPath $bundlePath) {
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $archive = [IO.Compression.ZipFile]::OpenRead($bundlePath)
+    try {
+        $reuseBundle = $archive.Entries.Count -eq 3
+        foreach ($tool in @($ffmpeg, $ffprobe, $ffplay)) {
+            $entry = $archive.GetEntry([IO.Path]::GetFileName($tool.Source))
+            if (!$entry) { $reuseBundle = $false; break }
+            $stream = $entry.Open()
+            $algorithm = [Security.Cryptography.SHA256]::Create()
+            try { $embeddedHash = [BitConverter]::ToString($algorithm.ComputeHash($stream)).Replace('-', '') }
+            finally { $algorithm.Dispose(); $stream.Dispose() }
+            if ($embeddedHash -ne (Get-FileHash -LiteralPath $tool.Source -Algorithm SHA256).Hash) { $reuseBundle = $false; break }
+        }
+    } finally { $archive.Dispose() }
+}
+if (!$reuseBundle) { Compress-Archive -LiteralPath $ffmpeg.Source, $ffprobe.Source, $ffplay.Source -DestinationPath $bundlePath -CompressionLevel Optimal -Force }
 $bundleId = (Get-FileHash -LiteralPath $bundlePath -Algorithm SHA256).Hash.Substring(0, 16).ToLowerInvariant()
-& $dotnetExe restore $project -r win-x64 -p:SelfContained=true --source $offlineSource
+if ($PackageSources.Count -eq 0) { $PackageSources = @($offlineSource, 'https://api.nuget.org/v3/index.json') }
+$restoreArguments = @()
+foreach ($source in $PackageSources) { $restoreArguments += @('--source', $source) }
+& $dotnetExe restore $project -r win-x64 -p:SelfContained=true @restoreArguments
 if ($LASTEXITCODE -ne 0) { throw 'dotnet restore に失敗しました。' }
 & $dotnetExe publish $project -c $Configuration --no-restore -r win-x64 -o $destination `
     -p:PublishSingleFile=false -p:SelfContained=true -p:DebugType=None `
@@ -90,4 +111,16 @@ foreach ($name in @('README.md', 'README.ja.md', 'LICENSE', 'NOTICE')) {
     Copy-Item -LiteralPath (Join-Path $root $name) -Destination $destination -Force
 }
 Copy-Item -LiteralPath (Join-Path $root 'docs') -Destination $destination -Recurse -Force
+$thirdParty = Join-Path $destination 'third_party'
+New-Item -ItemType Directory -Path $thirdParty -Force | Out-Null
+foreach ($name in @('PureHDF','libadm-common-definitions')) { Copy-Item -LiteralPath (Join-Path $root "third_party/$name") -Destination $thirdParty -Recurse -Force }
+# Optional, locally supplied object decoder and room presets are personal resources only.
+foreach ($folder in @('truehdd','brir-profiles')) {
+    $source = Join-Path $root "tools/$folder"
+    if (Test-Path -LiteralPath $source) {
+        $target = if ($folder -eq 'truehdd') { Join-Path $destination 'tools/truehdd' } else { Join-Path $destination 'Presets/BRIR' }
+        New-Item -ItemType Directory -Path $target -Force | Out-Null
+        foreach ($item in Get-ChildItem -LiteralPath $source -File) { Copy-Item -LiteralPath $item.FullName -Destination $target -Force }
+    }
+}
 Write-Output "個人用ビルド完了 (.NET同梱、フォルダー全体を保持): $(Join-Path $destination 'DiscChannelLab.exe')"

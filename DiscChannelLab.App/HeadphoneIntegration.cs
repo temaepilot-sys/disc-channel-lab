@@ -2,7 +2,7 @@ using System.ComponentModel;
 
 namespace Disc2Flac;
 
-public enum PreviewAudioMode { Stereo, HeadphonesDirect, HeadphonesHrtf }
+public enum PreviewAudioMode { Stereo, HeadphonesDirect, HeadphonesHrtf, HeadphonesBrir }
 
 public sealed class PreviewModeChoice(PreviewAudioMode mode, string label) : INotifyPropertyChanged
 {
@@ -18,23 +18,26 @@ public sealed partial class MainViewModel
     [
         new(PreviewAudioMode.Stereo, "2ch Stereo"),
         new(PreviewAudioMode.HeadphonesDirect, "ヘッドフォン · Direct"),
-        new(PreviewAudioMode.HeadphonesHrtf, "ヘッドフォン · HRTF")
+        new(PreviewAudioMode.HeadphonesHrtf, "ヘッドフォン · HRTF"),
+        new(PreviewAudioMode.HeadphonesBrir, "Headphones · Measured BRIR")
     ];
-    public bool CanChoosePreviewMode => !IsBusy && !IsPlaying;
+    public bool CanChoosePreviewMode => !IsBusy && !IsPlaying && !IsAtmosStreamingEnabled && (CurrentAdm is null || IsAdmPlaybackEnabled);
     public PreviewAudioMode SelectedPreviewMode
     {
-        get => !HeadphonesEnabled ? PreviewAudioMode.Stereo : HeadphoneSession.Current.Options.Method == HeadphoneMethod.Direct
-            ? PreviewAudioMode.HeadphonesDirect : PreviewAudioMode.HeadphonesHrtf;
+        get => IsAtmosStreamingEnabled && SelectedAtmosPresentation == AtmosPresentation.Stereo || !HeadphonesEnabled ? PreviewAudioMode.Stereo : HeadphoneSession.Current.Options.Method == HeadphoneMethod.Direct
+            ? PreviewAudioMode.HeadphonesDirect : HeadphoneSession.Current.Options.Method == HeadphoneMethod.MeasuredBrir ? PreviewAudioMode.HeadphonesBrir : PreviewAudioMode.HeadphonesHrtf;
         set
         {
             if (value == SelectedPreviewMode) return;
             if (!CanChoosePreviewMode || !Enum.IsDefined(value)) { Changed(); return; }
             var session = HeadphoneSession.Current;
+            if (value == PreviewAudioMode.HeadphonesBrir && string.IsNullOrEmpty(session.Options.BrirHash))
+            { Status = "Load and apply a BRIR profile in Spatial Lab → Measured BRIR first."; Changed(); return; }
             session.SetOptions(session.Options with
             {
                 Enabled = value != PreviewAudioMode.Stereo,
                 Method = value == PreviewAudioMode.Stereo ? session.Options.Method : value == PreviewAudioMode.HeadphonesDirect
-                    ? HeadphoneMethod.Direct : HeadphoneMethod.SteamAudio
+                    ? HeadphoneMethod.Direct : value == PreviewAudioMode.HeadphonesBrir ? HeadphoneMethod.MeasuredBrir : HeadphoneMethod.SteamAudio
             });
         }
     }
@@ -50,6 +53,8 @@ public sealed partial class MainViewModel
     private void HeadphoneOptionsChanged(object? sender, PropertyChangedEventArgs e)
     {
         Changed(nameof(SelectedPreviewMode));
+        if (!HeadphonesEnabled && CurrentAdm is null) SaveBinauralFlac = false;
+        Changed(nameof(CanChooseBinauralFlac)); Changed(nameof(SelectedStreamNote));
         if (_mixerIsHeadphone == HeadphonesEnabled) { PublishVisualizationClock(); return; }
         // A format change is only made between playback sessions.
         if (IsPlaying) PausePlayback();

@@ -18,12 +18,18 @@ public sealed partial class MainViewModel
         {
             var next = Tracks[i];
             if (next.StartTicks != run[^1].EndTicks || !stream.Covers(playlist, next)) break;
-            if (playlist.Format == DiscFormat.AudioFile)
+            if (playlist.Format == DiscFormat.AudioFile && !IsAtmosStreamingEnabled)
             {
                 try
                 {
                     var source = AudioStreamMatcher.Resolve(stream, AudioFileReader.StreamsForTrack(playlist, next));
                     if (!layout.SequenceEqual(HeadphoneGeometry.Channels(source))) break;
+                    if (stream.Codec == "adm" || source.Codec == "adm")
+                    {
+                        var a = playlist.Clips.First(c => c.PlaylistStartTicks <= first.StartTicks && c.PlaylistStartTicks + c.OutTicks - c.InTicks > first.StartTicks);
+                        var b = playlist.Clips.First(c => c.PlaylistStartTicks <= next.StartTicks && c.PlaylistStartTicks + c.OutTicks - c.InTicks > next.StartTicks);
+                        if (a.File?.Adm?.Path != b.File?.Adm?.Path || stream.Codec != source.Codec) break;
+                    }
                 }
                 catch (InvalidDataException) { break; }
             }

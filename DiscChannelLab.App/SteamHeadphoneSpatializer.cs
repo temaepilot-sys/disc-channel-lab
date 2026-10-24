@@ -70,6 +70,15 @@ public sealed unsafe class SteamHeadphoneSpatializer : IHeadphoneSpatializer
         if (_context != IntPtr.Zero) iplContextRelease(ref _context);
         if (_sofaData.IsAllocated) _sofaData.Free();
     }
+    public void Flush(int channel, float[] left, float[] right)
+    {
+        fixed (float* l = left, r = right)
+        {
+            float** targets = stackalloc float*[2]; targets[0] = l; targets[1] = r;
+            var buffer = new AudioBuffer { Channels = 2, Frames = left.Length, Data = targets };
+            iplBinauralEffectGetTail(_effects[channel], ref buffer);
+        }
+    }
     private static void Check(int error, string action) { if (error != 0) throw new InvalidOperationException($"Steam Audio: {action} failed ({error})."); }
     [StructLayout(LayoutKind.Sequential)] private struct ContextSettings { public uint Version; public IntPtr Log, Allocate, Free; public int Simd, Flags; }
     [StructLayout(LayoutKind.Sequential)] private struct AudioSettings { public int Rate, Frames; }
@@ -86,4 +95,5 @@ public sealed unsafe class SteamHeadphoneSpatializer : IHeadphoneSpatializer
     [DllImport("phonon", CallingConvention = CallingConvention.StdCall)] private static extern void iplBinauralEffectRelease(ref IntPtr effect);
     [DllImport("phonon", CallingConvention = CallingConvention.StdCall)] private static extern int iplBinauralEffectApply(IntPtr effect, ref EffectParameters parameters, ref AudioBuffer input, ref AudioBuffer output);
     [DllImport("phonon", CallingConvention = CallingConvention.StdCall)] private static extern int iplBinauralEffectGetTailSize(IntPtr effect);
+    [DllImport("phonon", CallingConvention = CallingConvention.StdCall)] private static extern int iplBinauralEffectGetTail(IntPtr effect, ref AudioBuffer output);
 }

@@ -34,5 +34,16 @@
 - [x] Retain ordinary playback, standard coefficients and independent in-session fader banks.
 - [x] Add English/Japanese controls, one-time trial settings import and metadata backup.
 - [x] Pin the external Steam Audio SDK download and retain upstream licensing/dependency notices.
-- [x] Document playback-only processing, model approximations, opentrack protocol and viewer timing.
+- [x] Document playback/export processing, model approximations, opentrack protocol and viewer timing.
 - [ ] Broaden physical tracker, headphone and individual HRTF listening checks before a binary release.
+
+## Spatial Lab integration
+
+- [x] Integrate SOFA comparison, shared binaural export, optional reflections, measured BRIR and supported ADM playback into the common source.
+- [x] Keep ordinary stereo as the startup mode and make source presentation selection available in the comparison view.
+- [x] Import the approved trial's settings once with metadata backups; retain the old profile and omit caches.
+- [x] Retain PureHDF / EBU Common Definitions provenance and license notices.
+- [x] Document independent BRIR, fixed head orientation, the ADM subset, buffering and external decoder requirements in English and Japanese.
+- [x] Exclude third-party codec executables, recordings, SOFA data and personal presets from the public build recipe.
+- [ ] Verify codec patent/license obligations and intended distribution regions before publishing an object-decoding binary package.
+- [ ] Broaden real dataset, hardware and perceptual checks; numerical tests are not a certification.

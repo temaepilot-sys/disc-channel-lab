@@ -6,6 +6,7 @@
         WindowStartupLocation="CenterScreen" Background="{DynamicResource AppBackgroundBrush}"
         Loaded="Window_Loaded" Closing="Window_Closing">
     <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolVisibility"/>
         <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
             <Setter Property="Padding" Value="10,5"/>
             <Setter Property="Margin" Value="0,0,6,0"/>
@@ -59,6 +60,37 @@
                     </WrapPanel>
                     <Button x:Name="OpenAudioFilesButton" Content="{local:Loc Key='音声ファイルを開く'}"
                             Click="AudioFiles_Click" HorizontalAlignment="Left" Margin="0,0,0,8"/>
+                    <Button x:Name="AdmPlaybackButton" Content="{Binding AdmPlaybackButtonText}" Click="SpatialSource_Click" IsEnabled="{Binding CanChooseSpatialSource}" HorizontalAlignment="Left"/>
+                    <WrapPanel><Button x:Name="OpenAdmSceneButton" Content="ADM scene…" Click="OpenAdmScene_Click" IsEnabled="{Binding CanOpenAdmScene}"/><Button Content="Save ADM…" Click="ExportAdm_Click" IsEnabled="{Binding CanExportAdm}"/></WrapPanel>
+                    <StackPanel x:Name="AtmosPresentationPanel" Margin="0,4,0,8">
+                        <TextBlock Text="Compare source presentation" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                        <ComboBox x:Name="AtmosPresentationCombo" ItemsSource="{Binding AtmosPreviewChoices}" DisplayMemberPath="Label"
+                                  SelectedItem="{Binding SelectedAtmosPreview, Mode=OneWay}" SelectionChanged="AtmosPresentation_Changed" IsEnabled="{Binding CanChooseAtmosPresentation}" MinHeight="32"/>
+                        <TextBlock Text="{Binding AtmosPresentationHint}" TextWrapping="Wrap" FontSize="11" Foreground="{DynamicResource MutedBrush}" Margin="0,4,0,0"/>
+                    </StackPanel>
+                    <TextBlock Text="{Binding SpatialSourceDescription}" TextWrapping="Wrap" FontSize="11" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,6"/>
+                    <TextBlock x:Name="PreparedTimeText" Text="{Binding AtmosBufferDescription}" TextWrapping="Wrap" Margin="0,0,0,6"
+                               Visibility="{Binding IsAtmosStreamingEnabled, Converter={StaticResource BoolVisibility}}">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Foreground" Value="{DynamicResource MutedBrush}"/>
+                                <Setter Property="FontSize" Value="11"/>
+                                <Setter Property="FontWeight" Value="Normal"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsAtmosPreparationPending}" Value="True">
+                                        <Setter Property="Foreground" Value="{DynamicResource ErrorBrush}"/>
+                                        <Setter Property="FontSize" Value="13"/>
+                                        <Setter Property="FontWeight" Value="Bold"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                    <Border x:Name="AtmosPreparationNotice" BorderBrush="{DynamicResource ErrorBrush}" BorderThickness="3,0,0,0"
+                            Padding="8,3,0,3" Margin="0,0,0,8" Visibility="{Binding IsAtmosPreparationPending, Converter={StaticResource BoolVisibility}}">
+                        <TextBlock Text="{Binding AtmosPreparationHint}" Foreground="{DynamicResource ErrorBrush}" FontWeight="Bold" FontSize="12" TextWrapping="Wrap"/>
+                    </Border>
+                    <Button Content="Object audio guide…" Click="ObjectAudioGuide_Click" HorizontalAlignment="Left" Margin="0,0,0,8"/>
                     <Button Content="{local:Loc Key='SACD抽出ツール'}" Click="SacdTool_Click"
                             HorizontalAlignment="Left" Margin="0,4,0,8">
                         <Button.ToolTip>
@@ -110,6 +142,7 @@
                     </ComboBox>
                     <TextBlock Text="{local:Loc Key='音声'}" Margin="0,0,0,4"/>
                     <ComboBox ItemsSource="{Binding Streams}" SelectedItem="{Binding SelectedStream, Mode=TwoWay}"
+                              IsEnabled="{Binding CanChooseAudioStream}"
                               ToolTip="{Binding SelectedStream.DisplayName}" MinHeight="32" Margin="0,0,0,5"/>
                     <TextBlock Text="{Binding SelectedStreamNote}" FontSize="12" Foreground="{DynamicResource MutedBrush}"
                                TextWrapping="Wrap" Margin="0,0,0,14"/>
@@ -263,6 +296,7 @@
                         <WrapPanel Margin="0,0,0,6">
                             <Button x:Name="OpenMixerButton" Content="{local:Loc Key='ミキサーを開く'}" Click="OpenMixer_Click"/>
                             <Button x:Name="OpenHeadphonesButton" Content="{local:Loc Key='ヘッドフォン'}" Click="OpenHeadphones_Click"/>
+                            <Button x:Name="OpenSpatialLabButton" Content="HRTF / room…" Click="OpenSpatialLab_Click" IsEnabled="{Binding CanOpenSpatialLab}"/>
                             <Button Content="{local:Loc Key='3Dビューアー'}" Click="OpenVisualizer_Click"/>
                         </WrapPanel>
                         <Border Background="{DynamicResource InputBrush}" BorderBrush="{DynamicResource BorderBrush}"
@@ -341,6 +375,8 @@
                     <CheckBox Content="{local:Loc Key='さらにチャプター別フォルダーを作成する'}"
                               IsChecked="{Binding GroupByChapter, Mode=TwoWay}"
                               Margin="0,0,0,5"/>
+                    <CheckBox x:Name="BinauralFlacCheck" Content="{Binding BinauralFlacOptionText}" IsChecked="{Binding SaveBinauralFlac, Mode=TwoWay}"
+                              IsEnabled="{Binding CanChooseBinauralFlac}" Margin="0,0,0,5"/>
                     <CheckBox Content="{local:Loc Key='チャンネル別のモノラルFLACを曲ごとに保存'}"
                               IsChecked="{Binding SaveIndividualChannels, Mode=TwoWay}"
                               IsEnabled="{Binding CanDownmixStereo}" Margin="0,0,0,5"/>

@@ -18,6 +18,28 @@ public partial class MainWindow : Window
     private MixerWindow? _mixerWindow;
     private HeadphonesWindow? _headphonesWindow;
     private CacheWindow? _cacheWindow;
+    private SpatialLabWindow? _spatialLab;
+    private void OpenSpatialLab_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_model.CanOpenSpatialLab) return;
+        if (_spatialLab is { IsWindowClosed: false } existing)
+        {
+            if (existing.WindowState == WindowState.Minimized) existing.WindowState = WindowState.Normal;
+            if (!existing.IsVisible) existing.Show(); existing.Activate(); return;
+        }
+        _spatialLab = null;
+        var window = new SpatialLabWindow(_model) { Owner = this };
+        window.Closed += (_, _) => { if (ReferenceEquals(_spatialLab, window)) _spatialLab = null; };
+        _spatialLab = window;
+        try { window.Show(); }
+        catch { if (ReferenceEquals(_spatialLab, window)) _spatialLab = null; throw; }
+    }
+    private void OpenAdmScene_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_model.CanOpenAdmScene) return;
+        OpenSpatialLab_Click(sender, e);
+        _spatialLab?.ShowAdmScene();
+    }
     private bool _mixerOpened;
     private readonly DispatcherTimer _driveTimer = new() { Interval = TimeSpan.FromSeconds(3) };
     private readonly DispatcherTimer _playTimer = new() { Interval = TimeSpan.FromMilliseconds(30) };
@@ -41,6 +63,7 @@ public partial class MainWindow : Window
         PlayerSeekSlider.KeyUp += SeekSlider_KeyUp;
         PlaylistCombo.DropDownOpened += (_, _) => UpdatePlaylistDropDownWidth();
         SizeChanged += (_, _) => { if (PlaylistCombo.IsDropDownOpen) UpdatePlaylistDropDownWidth(); };
+        if (Environment.GetCommandLineArgs().Contains("--spatial-lab")) Loaded += (_, _) => OpenSpatialLab_Click(this, new RoutedEventArgs());
     }
 
     private void OpenMixer_Click(object sender, RoutedEventArgs e)
@@ -114,10 +137,11 @@ public partial class MainWindow : Window
 
     private async void Window_Loaded(object sender, RoutedEventArgs e)
     {
-        _driveTimer.Start();
+        bool autoDisc = !Environment.GetCommandLineArgs().Contains("--no-auto-disc");
+        if (autoDisc) _driveTimer.Start();
         _playTimer.Start();
         HeadphoneSession.Current.RestartTracker();
-        await Task.WhenAll(_model.RefreshCacheSizeAsync(), _model.DetectInsertedDiscAsync());
+        await Task.WhenAll(_model.RefreshCacheSizeAsync(), autoDisc ? _model.DetectInsertedDiscAsync() : Task.CompletedTask);
     }
 
     private void ThemeToggle_Changed(object sender, RoutedEventArgs e)
@@ -133,6 +157,7 @@ public partial class MainWindow : Window
 
     private void Window_Closing(object? sender, CancelEventArgs e)
     {
+        _spatialLab?.Close();
         _cacheWindow?.Close();
         _headphonesWindow?.Close();
         HeadphoneSession.Current.Dispose();
@@ -141,7 +166,9 @@ public partial class MainWindow : Window
         _driveTimer.Stop();
         _playTimer.Stop();
         _model.Cancel();
+        _model.ReleaseAtmosStreaming();
         _model.Visualization.Dispose();
+        _model.ChooseSpatialInput = null;
         _model.DetachLanguage();
     }
 
@@ -195,6 +222,31 @@ public partial class MainWindow : Window
         if (dialog.ShowDialog(this) != true) return;
         CommitTrackEdits();
         await _model.OpenAudioFilesAsync(dialog.FileNames);
+    }
+
+    private async void SpatialSource_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_model.CanChooseSpatialSource) return;
+        if (_model.CurrentAdm is null && AtmosImportService.FindTool() is null)
+        {
+            var tool = new OpenFileDialog { Title = "Select truehdd 0.6.2", Filter = "truehdd.exe|truehdd.exe", CheckFileExists = true };
+            if (tool.ShowDialog(this) != true) return;
+            AtmosImportService.SaveTool(tool.FileName);
+        }
+        await _model.ChooseSpatialSourceAsync();
+    }
+    private async void AtmosPresentation_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (_model is null || sender is not System.Windows.Controls.ComboBox { SelectedItem: AtmosPreviewChoice choice }) return;
+        await _model.ChangeAtmosPresentationAsync(choice);
+    }
+    private void ObjectAudioGuide_Click(object sender, RoutedEventArgs e) => new ObjectAudioGuideWindow { Owner = this }.Show();
+    private async void ExportAdm_Click(object sender, RoutedEventArgs e)
+    {
+        CommitTrackEdits();
+        var dialog = new SaveFileDialog { Title = "Save position-aware ADM — all chapters", Filter = "ADM BWF / BW64 (*.wav)|*.wav", FileName = "Position-aware-ADM.wav", OverwritePrompt = true };
+        if (dialog.ShowDialog(this) == true && await _model.ExportAdmAsync(dialog.FileName))
+            MessageBox.Show(this, LanguageService.Instance.IsJapanese ? "全曲の位置情報付きADMを保存しました。" : "Position-aware ADM saved, including all chapters.", "ADM", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
     private async void Iso_Click(object sender, RoutedEventArgs e)

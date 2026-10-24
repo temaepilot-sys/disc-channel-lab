@@ -10,3 +10,13 @@ This application is not affiliated with or endorsed by Valve Corporation.
 FFmpeg and sacd_extract are separate tools with their own licenses. The public
 build does not include them. The application's Apache 2.0 license does not
 relicense external programs or third-party components.
+
+SOFA and BRIR inspection uses PureHDF 2.2.0 under the MIT license.
+Retained notices: third_party/PureHDF/.
+ADM Common Definitions are derived from EBU libadm; the source revision,
+license and notices are retained in third_party/libadm-common-definitions/.
+
+The optional TrueHD object-audio adapter invokes external truehdd 0.6.2.
+The external program has its own Apache 2.0 license. The public build does
+not include its executable. No Dolby affiliation or certification is claimed.
+Dolby and Dolby Atmos are trademarks of Dolby Laboratories.

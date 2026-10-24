@@ -6,12 +6,13 @@ namespace Disc2Flac;
 public sealed record AudioFileSource(string Path, long Length, long WriteTicks, long? SampleCount, int SampleRate)
 {
     public IReadOnlyList<AudioStreamInfo> Streams { get; init; } = [];
+    public AdmWave? Adm { get; init; }
 }
 
 /// <summary>Local audio files use the same bounded clip, PCM playback and export paths as disc tracks.</summary>
 public sealed class AudioFileReader(FfprobeService probe, AppLog log)
 {
-    public const string Extensions = "*.flac;*.wav;*.wave;*.w64;*.aif;*.aiff;*.aifc;*.wv;*.ape;*.m4a;*.m4b;*.mp4;*.mka;*.caf;*.ogg;*.oga;*.opus;*.aac;*.mp3;*.wma";
+    public const string Extensions = "*.flac;*.wav;*.wave;*.bwf;*.bw64;*.rf64;*.w64;*.aif;*.aiff;*.aifc;*.wv;*.ape;*.m4a;*.m4b;*.mp4;*.mka;*.mkv;*.m2ts;*.thd;*.truehd;*.mlp;*.ec3;*.eac3;*.caf;*.ogg;*.oga;*.opus;*.aac;*.mp3;*.wma";
     public static bool CanOpen(string path) => File.Exists(path) && Extensions.Split(';')
         .Any(extension => Path.GetExtension(path).Equals(extension[1..], StringComparison.OrdinalIgnoreCase));
     public static bool IsUsable(AudioStreamInfo stream) => stream.Channels is 1 or 2 || StereoMixSettings.Supports(stream);
@@ -40,15 +41,16 @@ public sealed class AudioFileReader(FfprobeService probe, AppLog log)
             {
                 if (!CanOpen(path)) throw new InvalidDataException(LanguageService.T("対応する音声ファイルが見つかりません。") + " " + path);
                 var info = new FileInfo(path);
-                var data = await probe.ProbeAudioFileAsync(path, token);
+                AdmWave? adm = await Task.Run(() => AdmWave.HasMetadata(path) ? AdmWave.Open(path) : null, token);
+                var data = adm is null ? await probe.ProbeAudioFileAsync(path, token) : AdmFileFormat.Probe(adm);
                 if (data.Analysis.DetectedAudioCount == 0) throw new InvalidDataException(LanguageService.T("音声ストリームがありません。") + " " + path);
                 if (folder is not null)
                 {
                     var playable = data.Analysis.Streams.FirstOrDefault(IsUsable)
                         ?? throw new InvalidDataException(LanguageService.T("チャンネル配置が不明または未対応の音声は自動ミックスしません。"));
-                    await probe.VerifyAudioFileAsync(path, playable, token);
+                    if (adm is null) await probe.VerifyAudioFileAsync(path, playable, token);
                 }
-                files.Add(new(path, info.Length, info.LastWriteTimeUtc.Ticks, data));
+                files.Add(new(path, info.Length, info.LastWriteTimeUtc.Ticks, data, adm));
             }
             catch (Exception ex) when (folder is not null && FfprobeService.IsRecoverable(ex))
             {
@@ -85,7 +87,7 @@ public sealed class AudioFileReader(FfprobeService probe, AppLog log)
                 var stream = item.Data.Analysis.Streams.FirstOrDefault();
                 clips.Add(new(clips.Count.ToString("00000"), 0, item.Data.DurationTicks, position, File:
                     new(item.Path, item.Length, item.WriteTicks, stream?.SampleCount, stream?.SampleRate ?? 0)
-                    { Streams = item.Data.Analysis.Streams }));
+                    { Streams = item.Data.Analysis.Streams, Adm = item.Adm }));
                 position = checked(position + item.Data.DurationTicks);
             }
             playlists.Add(new()
@@ -122,7 +124,7 @@ public sealed class AudioFileReader(FfprobeService probe, AppLog log)
         {
             try
             {
-                await probe.VerifyAudioFileAsync(playlist.Clips[0].File!.Path, stream, token);
+                if (stream.Codec != "adm") await probe.VerifyAudioFileAsync(playlist.Clips[0].File!.Path, stream, token);
                 verified.Add(stream);
             }
             catch (Exception ex) when (FfprobeService.IsRecoverable(ex)) { notes.Add(ex.Message); log.Write("AUDIO FILE: " + ex.Message); }
@@ -166,7 +168,7 @@ public sealed class AudioFileReader(FfprobeService probe, AppLog log)
     private static int TrackNumber(string? text, int fallback = int.MaxValue) =>
         int.TryParse(text?.Split('/')[0].Trim(), out var value) && value > 0 ? value : fallback;
     private static string? Tag(IReadOnlyDictionary<string, string> tags, string name) => tags.TryGetValue(name, out var value) && !string.IsNullOrWhiteSpace(value) ? value.Trim() : null;
-    private sealed record Input(string Path, long Length, long WriteTicks, AudioFileProbe Data);
+    private sealed record Input(string Path, long Length, long WriteTicks, AudioFileProbe Data, AdmWave? Adm);
 }
 
 /// <summary>Numeric runs compare by value without integer overflow: Track 2 precedes Track 10.</summary>

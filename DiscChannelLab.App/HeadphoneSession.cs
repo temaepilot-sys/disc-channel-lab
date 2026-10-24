@@ -7,7 +7,7 @@ using System.Text.Json;
 
 namespace Disc2Flac;
 
-public enum HeadphoneMethod { Direct, SteamAudio }
+public enum HeadphoneMethod { Direct, SteamAudio, MeasuredBrir }
 public enum HeadphoneHrtf { BuiltIn, Sofa }
 public sealed record HeadphoneOptions
 {
@@ -24,6 +24,9 @@ public sealed record HeadphoneOptions
     public double SofaTrimDb { get; init; }
     public HeadphoneHrtf Hrtf { get; init; }
     public string SofaPath { get; init; } = "";
+    public string BrirPath { get; init; } = "";
+    public string BrirHash { get; init; } = "";
+    public double BrirTrimDb { get; init; }
     public double SmoothingMs { get; init; } = 8;
     public double LfeGain { get; init; } = .7;
     public double FrontAngle { get; init; } = 30;
@@ -32,16 +35,19 @@ public sealed record HeadphoneOptions
     public bool InvertPitch { get; init; }
     public bool InvertRoll { get; init; }
     public bool UseTracker { get; init; }
+    public SpatialRoomOptions Room { get; init; } = new();
 
     public HeadphoneOptions Validated() => this with
     {
         Method = Enum.IsDefined(Method) ? Method : HeadphoneMethod.Direct,
         Hrtf = Enum.IsDefined(Hrtf) ? Hrtf : HeadphoneHrtf.BuiltIn,
-        SofaPath = SofaPath?.Trim() ?? "",
+        SofaPath = SofaPath?.Trim() ?? "", Room = Room ?? new(),
         ShadowStrength = Limit(ShadowStrength, 0, 1, .35), RearCutDb = Limit(RearCutDb, 0, 18, 6),
         RearFrequency = Limit(RearFrequency, 500, 12000, 4000), HeadRadius = Limit(HeadRadius, .06, .12, .0875),
         HeadroomDb = Limit(HeadroomDb, -30, 0, -12), DirectTrimDb = Limit(DirectTrimDb, -12, 12, 0), SteamTrimDb = Limit(SteamTrimDb, -12, 12, 0),
-        SofaTrimDb = Limit(SofaTrimDb, -12, 12, 0),
+        SofaTrimDb = Limit(SofaTrimDb, -12, 12, 0), BrirTrimDb = Limit(BrirTrimDb, -12, 12, 0),
+        BrirPath = BrirPath?.Trim() ?? "", BrirHash = BrirHash?.Trim() ?? "",
+        UseTracker = Method != HeadphoneMethod.MeasuredBrir && UseTracker,
         SmoothingMs = Limit(SmoothingMs, 0, 100, 8), LfeGain = Limit(LfeGain, 0, 1, .7),
         FrontAngle = Limit(FrontAngle, 15, 90, 30), UdpPort = Math.Clamp(UdpPort, 1024, 65535)
     };
@@ -51,7 +57,7 @@ public sealed record HeadphoneOptions
         return this with { ShadowStrength = defaults.ShadowStrength, RearCutDb = defaults.RearCutDb,
             RearFrequency = defaults.RearFrequency, HeadRadius = defaults.HeadRadius, InterauralDelay = defaults.InterauralDelay,
             HeadroomDb = defaults.HeadroomDb, DirectTrimDb = defaults.DirectTrimDb, SteamTrimDb = defaults.SteamTrimDb,
-            SofaTrimDb = defaults.SofaTrimDb, SmoothingMs = defaults.SmoothingMs, LfeGain = defaults.LfeGain, FrontAngle = defaults.FrontAngle };
+            SofaTrimDb = defaults.SofaTrimDb, BrirTrimDb = defaults.BrirTrimDb, SmoothingMs = defaults.SmoothingMs, LfeGain = defaults.LfeGain, FrontAngle = defaults.FrontAngle };
     }
     private static double Limit(double value, double low, double high, double fallback) => double.IsFinite(value) ? Math.Clamp(value, low, high) : fallback;
 }
@@ -86,6 +92,7 @@ public sealed class HeadphoneSession : INotifyPropertyChanged, IDisposable
     public string TrackerStatus => !Options.UseTracker ? HeadphoneText.T("Keyboard") : _error is not null ? _error : PacketAgeSeconds > .5 ? HeadphoneText.T("Waiting / tracking lost — holding pose") : $"opentrack · {PacketAgeSeconds * 1000:0} ms";
     public HeadphoneSession()
     {
+        AppDataPaths.Current.ImportSpatialSettings();
         AppDataPaths.Current.ImportHeadphoneSettings();
         // Keep tuning preferences, but always start a new session in ordinary stereo.
         try { if (File.Exists(_path)) _options = (JsonSerializer.Deserialize<HeadphoneOptions>(File.ReadAllText(_path)) ?? new()).Validated() with { Enabled = false }; }
@@ -100,7 +107,7 @@ public sealed class HeadphoneSession : INotifyPropertyChanged, IDisposable
     }
     public void SetKeyboard(double yaw, double pitch, double roll)
     {
-        if (Options.UseTracker) return;
+        if (Options.UseTracker || Options.Method == HeadphoneMethod.MeasuredBrir) return;
         if (!double.IsFinite(yaw + pitch + roll)) return;
         Volatile.Write(ref _pose, new(Math.IEEERemainder(yaw, 360), Math.Clamp(pitch, -89, 89), Math.IEEERemainder(roll, 360)));
     }

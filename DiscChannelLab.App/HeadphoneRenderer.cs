@@ -43,6 +43,7 @@ public interface IHeadphoneSpatializer : IDisposable
 {
     int TailSamples => 0;
     void Process(int channel, float[] input, float[] left, float[] right, Vector3 direction, HeadphoneOptions options);
+    void Flush(int channel, float[] left, float[] right) { Array.Clear(left); Array.Clear(right); }
 }
 
 public sealed class DirectHeadphoneSpatializer : IHeadphoneSpatializer
@@ -94,6 +95,12 @@ public sealed class HeadphoneRenderer : IPreviewPcmRenderer
     private readonly HeadphoneMethod _method;
     private readonly HeadphoneHrtf _hrtf;
     private readonly IHeadphoneSpatializer _engine;
+    private SpatialScene? _scene;
+    private readonly EarlyReflections? _reflections;
+    private readonly bool _clampOutput;
+    private long _samplePosition;
+    private bool _tailMode;
+    private int _reflectionTailBlocks;
     private readonly float[][] _left, _right, _scaled;
     private readonly double[] _gains;
     private Quaternion _pose = Quaternion.Identity;
@@ -105,11 +112,35 @@ public sealed class HeadphoneRenderer : IPreviewPcmRenderer
     public IReadOnlyList<float[]> ChannelRight => _right;
     public float PostSample(int channel, int frame) => (_left[channel][frame] + _right[channel][frame]) * .70710678f;
     public long ClippedSamples { get; private set; }
-    public int TailBlocks => Math.Max(4, (_engine.TailSamples + BlockSize - 1) / BlockSize);
-    public HeadphoneRenderer(string[] channels, HeadphoneOptions options)
+    public int TailBlocks => Math.Max(4, (_engine.TailSamples + (_reflections?.TailFrames ?? 0) + BlockSize - 1) / BlockSize);
+    public void BeginTail() { _tailMode = true; _reflectionTailBlocks = ((_reflections?.TailFrames ?? 0) + 255) / 256; }
+    public void UpdateScene(SpatialScene scene)
     {
-        _channels = channels; _method = options.Method; _hrtf = options.Hrtf;
-        _engine = _method == HeadphoneMethod.SteamAudio ? new SteamHeadphoneSpatializer(channels.Length, options) : new DirectHeadphoneSpatializer(channels.Length);
+        if (ReferenceEquals(_scene, scene)) return;
+        if (scene.Sources.Length != _channels.Length) throw new InvalidDataException("Live scene/source count changed.");
+        for (int i = 0; i < _channels.Length; i++)
+            if (scene.Sources[i].Id != _channels[i]) throw new InvalidDataException("Live scene/source identity changed.");
+        _scene = scene;
+    }
+    public HeadphoneRenderer(string[] channels, HeadphoneOptions options, SpatialScene? scene = null, bool clampOutput = true, long startSample = 0)
+    {
+        _channels = channels; _method = options.Method; _hrtf = options.Hrtf; _scene = scene; _clampOutput = clampOutput; _samplePosition = startSample;
+        if (scene is not null && scene.Sources.Length != channels.Length) throw new ArgumentException("Scene/source count differs.");
+        options.Room.Validate();
+        if (options.Room.Enabled && _method != HeadphoneMethod.MeasuredBrir)
+        {
+            for (int i = 0; i < channels.Length; i++)
+            {
+                if (scene is null ? channels[i] == "LFE" : scene.Sources[i].IsLfe) continue;
+                var positions = scene is null ? new[] { HeadphoneGeometry.Speaker(channels[i], channels, options.FrontAngle) }
+                    : scene.Sources[i].Blocks.Select(SpatialSource.ToWorld);
+                foreach (var position in positions) EarlyReflections.Path(position * (float)options.Room.SpeakerRadius, options.Room, 0);
+            }
+            _reflections = new(channels.Length, options.Room);
+        }
+        int effects = channels.Length * (_reflections is null ? 1 : 7);
+        _engine = _method switch { HeadphoneMethod.SteamAudio => new SteamHeadphoneSpatializer(effects, options),
+            HeadphoneMethod.MeasuredBrir => new BrirSpatializer(channels, options, scene), _ => new DirectHeadphoneSpatializer(effects) };
         _left = channels.Select(_ => new float[BlockSize]).ToArray(); _right = channels.Select(_ => new float[BlockSize]).ToArray();
         _scaled = channels.Select(_ => new float[BlockSize]).ToArray(); _gains = new double[channels.Length];
     }
@@ -123,7 +154,7 @@ public sealed class HeadphoneRenderer : IPreviewPcmRenderer
             (1 - Math.Exp(-BlockSize / (SampleRate * .008)));
         var hasSolo = state.Channels?.Any(c => c.Solo) == true;
         Array.Clear(output);
-        var trim = _method == HeadphoneMethod.Direct ? options.DirectTrimDb : _hrtf == HeadphoneHrtf.Sofa ? options.SofaTrimDb : options.SteamTrimDb;
+        var trim = _method == HeadphoneMethod.MeasuredBrir ? options.BrirTrimDb : _method == HeadphoneMethod.Direct ? options.DirectTrimDb : _hrtf == HeadphoneHrtf.Sofa ? options.SofaTrimDb : options.SteamTrimDb;
         var global = Math.Pow(10, (options.HeadroomDb + trim) / 20) * Math.Clamp(double.IsFinite(master) ? master : 1, 0, 2);
         if (_first) _master = global;
         for (var frame = 0; frame < BlockSize; frame++)
@@ -133,20 +164,37 @@ public sealed class HeadphoneRenderer : IPreviewPcmRenderer
         }
         for (var channel = 0; channel < _channels.Length; channel++)
         {
-            var code = _channels[channel]; var setting = state.Channels?.FirstOrDefault(c => c.Code == code);
+            var code = _channels[channel]; ExperimentalChannel? setting = null;
+            if (state.Channels is { } strips) for (int i = 0; i < strips.Length; i++) if (strips[i].Code == code) { setting = strips[i]; break; }
             var gain = state.Channels is null ? 1 : setting is null || setting.Muted || hasSolo && !setting.Solo ? 0 : Math.Clamp(double.IsFinite(setting.Gain) ? setting.Gain : 0, 0, 1) * (setting.InvertPolarity ? -1 : 1);
             if (state.SoloChannel is { } solo && solo != code) gain = 0;
-            if (code == "LFE") gain *= options.LfeGain;
+            bool isLfe = _scene is null ? code == "LFE" : _scene.Sources[channel].IsLfe;
+            if (isLfe) gain *= options.LfeGain;
             if (_first) _gains[channel] = gain;
             for (var frame = 0; frame < BlockSize; frame++)
             {
                 _gains[channel] += (gain - _gains[channel]) / 240;
                 var value = input[channel][frame];
-                _scaled[channel][frame] = (float)((float.IsFinite(value) ? value : 0) * _gains[channel]);
+                float sceneGain = _scene?.Sources[channel].GainAt(_samplePosition + frame) ?? 1;
+                _scaled[channel][frame] = (float)((float.IsFinite(value) ? value : 0) * _gains[channel] * sceneGain);
             }
-            if (code == "LFE")
-                for (int frame = 0; frame < BlockSize; frame++) _left[channel][frame] = _right[channel][frame] = _scaled[channel][frame] * .70710678f;
-            else _engine.Process(channel, _scaled[channel], _left[channel], _right[channel], HeadphoneGeometry.Relative(code, _pose, _channels, _frontAngle), options);
+            if (isLfe && _method != HeadphoneMethod.MeasuredBrir)
+                for (int frame = 0; frame < BlockSize; frame++) _left[channel][frame] = _right[channel][frame] =
+                    _reflections is not null && options.Room.SoloReflections ? 0 : _scaled[channel][frame] * .70710678f;
+            else
+            {
+                var world = _scene?.Sources[channel].At(_samplePosition + BlockSize / 2).Position ?? HeadphoneGeometry.Speaker(code, _channels, _frontAngle);
+                var direction = world.LengthSquared() < 1e-10 ? Vector3.UnitZ : Vector3.Normalize(world);
+                if (_tailMode && _method == HeadphoneMethod.SteamAudio) _engine.Flush(channel, _left[channel], _right[channel]);
+                else _engine.Process(channel, _scaled[channel], _left[channel], _right[channel], Vector3.Transform(direction, Quaternion.Conjugate(_pose)), options);
+                if (_reflections is not null)
+                {
+                    if (options.Room.SoloReflections) { Array.Clear(_left[channel]); Array.Clear(_right[channel]); }
+                    if (_tailMode && _reflectionTailBlocks <= 0 && _method == HeadphoneMethod.SteamAudio)
+                        _reflections.Flush(channel, _left[channel], _right[channel], _engine, _channels.Length);
+                    else _reflections.Add(channel, _scaled[channel], _left[channel], _right[channel], world * (float)options.Room.SpeakerRadius, _pose, options, _engine, _channels.Length);
+                }
+            }
             for (var frame = 0; frame < BlockSize; frame++)
             {
                 _left[channel][frame] *= _envelope[frame]; _right[channel][frame] *= _envelope[frame];
@@ -156,9 +204,11 @@ public sealed class HeadphoneRenderer : IPreviewPcmRenderer
         for (var i = 0; i < output.Length; i++)
         {
             if (!float.IsFinite(output[i])) output[i] = 0;
-            if (Math.Abs(output[i]) > 1) { ClippedSamples++; output[i] = Math.Clamp(output[i], -1, 1); }
+            if (Math.Abs(output[i]) > 1) { ClippedSamples++; if (_clampOutput) output[i] = Math.Clamp(output[i], -1, 1); }
         }
         _first = false;
+        _samplePosition += BlockSize;
+        if (_tailMode) _reflectionTailBlocks--;
     }
     public void Dispose() => _engine.Dispose();
 }

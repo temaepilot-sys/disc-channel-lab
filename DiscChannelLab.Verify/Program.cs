@@ -10,6 +10,104 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Threading;
 
+if (args is ["spatial-window-tests", var windowOutput])
+{ try { SpatialWindowLifecycleTests.Run(windowOutput); return 0; } catch(Exception e) { Console.Error.WriteLine(e); return 1; } }
+if (args is ["spatial-window-tests", var realWindowOutput, var windowAdm])
+{ try { SpatialWindowLifecycleTests.Run(realWindowOutput,windowAdm); return 0; } catch(Exception e) { Console.Error.WriteLine(e); return 1; } }
+
+if (args is ["distribution-tests", var personalFolder, var publicFolder, var distributionOutput])
+{ try { DistributionTests.Run(personalFolder,publicFolder,distributionOutput); return 0; } catch(Exception e) { Console.Error.WriteLine(e); return 1; } }
+
+if (args is ["adm-demo", var demoOutput])
+{ AdmDemo.Create(Path.GetFullPath(demoOutput)); return 0; }
+
+if (args is ["spatial-promotion-tests", var promotionOutput])
+{ try { SpatialPromotionTests.Run(promotionOutput); return 0; } catch(Exception e) { Console.Error.WriteLine(e); return 1; } }
+
+if (args is ["comparison-presentation-ui-tests", var presentationOutput, var presentationSource, var presentationBrir])
+{ try { ComparisonPresentationUiTests.Run(presentationOutput,presentationSource,presentationBrir); return 0; } catch(Exception e) { Console.Error.WriteLine(e); return 1; } }
+
+if (args is ["comparison-ui-tests", var comparisonOutput, var comparisonAudio, var comparisonBrir])
+{ try { ComparisonUiTests.Run(comparisonOutput,comparisonAudio,comparisonBrir); return 0; } catch(Exception e) { Console.Error.WriteLine(e); return 1; } }
+
+if (args is ["brir-inspect", var inspectBrirFile, var inspectBrirOutput])
+{ try { BrirFileInspection.Run(inspectBrirFile,inspectBrirOutput); return 0; } catch(Exception e) { Console.Error.WriteLine(e); return 1; } }
+
+if (args is ["brir-tests", var brirOutput])
+{ try { await BrirTests.Run(brirOutput); return 0; } catch(Exception e) { Console.Error.WriteLine(e); return 1; } }
+if (args is ["brir-gui-tests", var brirGuiOutput, var brirFixture])
+{ try { BrirGuiTests.Run(brirGuiOutput,brirFixture); return 0; } catch(Exception e) { Console.Error.WriteLine(e); return 1; } }
+if (args is ["brir-gui-tests", var realBrirGuiOutput, var realBrirFixture, var realBrirProfile])
+{ try { BrirGuiTests.Run(realBrirGuiOutput,realBrirFixture,realBrirProfile); return 0; } catch(Exception e) { Console.Error.WriteLine(e); return 1; } }
+if (args is ["brir-d1-tests", var d1Output, var d1Directory, var d1Manifest, var d1Pcm])
+{ try { await BrirD1Tests.Run(d1Output,d1Directory,d1Manifest,d1Pcm); return 0; } catch(Exception e) { Console.Error.WriteLine(e); return 1; } }
+if (args is ["brir-atmos-tests", var brirAtmosOutput, var brirAtmosSource, var brirAtmosManifest])
+{ try { BrirAtmosTests.Run(brirAtmosOutput,brirAtmosSource,brirAtmosManifest); return 0; } catch(Exception e) { Console.Error.WriteLine(e); return 1; } }
+
+if (args is ["reference-audio-audit", var referenceOutput, var referencePrior, var referenceSofa])
+{ try { await ReferenceAudioAudit.Run(referenceOutput, referencePrior, referenceSofa); return 0; } catch(Exception e) { Console.Error.WriteLine(e); return 1; } }
+if (args is ["atmos-stream-ui-tests", var atmosUiOutput, var atmosUiRaw])
+{ try { AtmosStreamingUiTests.Run(atmosUiOutput, atmosUiRaw); return 0; } catch(Exception e) { Console.Error.WriteLine(e); return 1; } }
+if (args is ["atmos-stream-tests", var atmosStreamOutput, var atmosStreamRaw, var atmosStreamReference])
+{ try { await AtmosStreamingTests.Run(atmosStreamOutput, atmosStreamRaw, atmosStreamReference); return 0; } catch(Exception e) { Console.Error.WriteLine(e); return 1; } }
+if (args is ["adm-scene-tests", var admSceneOutput, var admSceneTrueHd])
+{ try { AdmSceneInteractionTests.Run(admSceneOutput, admSceneTrueHd); return 0; } catch(Exception e) { Console.Error.WriteLine(e); return 1; } }
+if (args is ["spatial-review-tests", var spatialReviewOutput, var spatialReviewAdm])
+{ try { SpatialReviewTests.Run(spatialReviewOutput, spatialReviewAdm); return 0; } catch(Exception e) { Console.Error.WriteLine(e); return 1; } }
+if (args is ["spatial-hrtf-switch-tests", var hrtfSwitchOutput, var hrtfSwitchFixtures])
+{ try { SpatialHrtfSwitchTests.Run(hrtfSwitchOutput, hrtfSwitchFixtures); return 0; } catch(Exception e) { Console.Error.WriteLine(e); return 1; } }
+if (args is ["adm-integrated-tests", var admTestOutput, var smallAdm, var fullAdm])
+{ try { AdmIntegratedTests.Run(admTestOutput, smallAdm, fullAdm); return 0; } catch(Exception e) { Console.Error.WriteLine(e); return 1; } }
+if (args is ["adm-boundary-tests", var admBoundaryOutput, var damfFixtureRoot])
+{ try { await AdmBoundaryTests.Run(admBoundaryOutput, damfFixtureRoot); return 0; } catch(Exception e) { Console.Error.WriteLine(e); return 1; } }
+if (args is ["adm-full-album-test", var albumTestOutput, var albumAdm])
+{ try { AdmIntegratedTests.Run(albumTestOutput, albumAdm, albumAdm, true); return 0; } catch(Exception e) { Console.Error.WriteLine(e); return 1; } }
+if (args is ["adm-drive-routing-test", var driveTestOutput, var driveTestAdm])
+{ try { AdmIntegratedTests.Run(driveTestOutput, driveTestAdm, driveTestAdm, false, true); return 0; } catch(Exception e) { Console.Error.WriteLine(e); return 1; } }
+if (args is ["adm-register", var registerDrive, var registerFile, var registerLibrary])
+{
+    var regLog = new AppLog(Path.Combine(Path.GetDirectoryName(Path.GetFullPath(registerLibrary))!, "logs")); var regTools = new ToolPaths(); var regService = new DiscService(new FfprobeService(regTools, new ProcessRunner(regLog)), regLog);
+    var regDisc = regService.Analyze(registerDrive); var regWave = AdmWave.Open(registerFile); var regPlaylist = regDisc.Playlists.OrderBy(p => Math.Abs(p.DurationTicks / 45000d - regWave.Scene.DurationSamples / 48000d)).First();
+    var regAnalysis = await regService.AnalyzePlaylistAsync(regDisc, regPlaylist, CancellationToken.None); AtmosImportService.RegisterPrepared(regDisc, regPlaylist, regAnalysis.Streams.First(AtmosImportService.IsAtmos), registerFile, registerLibrary); Console.WriteLine("Registered existing full-title ADM"); return 0;
+}
+
+if (args is ["damf-import", var damfPath, var admDestination, var chapterJson])
+{
+    try { await DamfImporter.WriteAsync(damfPath, admDestination, JsonSerializer.Deserialize<AdmAlbumMetadata>(File.ReadAllText(chapterJson), SpatialJson.Options)!, new Progress<ConversionProgress>(p => Console.WriteLine($"{p.Fraction:P0} {p.Message}")), CancellationToken.None); var imported = AdmWave.Open(admDestination); Console.WriteLine($"Imported {imported.Channels} sources / {imported.Scene.DurationSamples} samples / {imported.Album?.Chapters.Length} chapters"); return 0; }
+    catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
+}
+if (args is ["adm-disc-metadata", var admDrive, var tagsProbe, var albumOutput])
+{
+    var logger = new AppLog(Path.Combine(Path.GetDirectoryName(Path.GetFullPath(albumOutput))!, "logs"));
+    var ds = new DiscService(new FfprobeService(new ToolPaths(), new ProcessRunner(logger)), logger); var admSourceDisc = ds.Analyze(admDrive);
+    using var tags = JsonDocument.Parse(File.ReadAllText(tagsProbe)); var files = tags.RootElement.EnumerateArray().ToArray();
+    var title = admSourceDisc.Playlists.Where(p => p.ChapterStarts.Count == files.Length).OrderByDescending(p => p.DurationTicks).First();
+    var chapters = title.ChapterStarts.Select((t, i) => new AdmChapter(ConversionService.ToSample(t, 48000), files[i].GetProperty("format").GetProperty("tags").GetProperty("title").GetString()!, files[i].GetProperty("format").GetProperty("tags").GetProperty("artist").GetString())).ToArray();
+    SpatialJson.Save(albumOutput, new AdmAlbumMetadata(files[0].GetProperty("format").GetProperty("tags").GetProperty("album").GetString()!, admSourceDisc.Artist, admDrive, chapters));
+    Console.WriteLine(JsonSerializer.Serialize(new { title.Id, title.DurationTicks, clips = title.Clips, chapters = chapters.Length }, SpatialJson.Options)); return 0;
+}
+
+if (args is ["spatial-lab-tests", var spatialOutput, var spatialFixtures])
+{
+    try { await SpatialLabTests.Run(spatialOutput, spatialFixtures); return 0; }
+    catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
+}
+if (args is ["spatial-lab-gui-tests", var spatialGui, var spatialAdm, var spatialGuiFixtures])
+{
+    try { SpatialGuiTests.Run(spatialGui, spatialAdm, spatialGuiFixtures); return 0; }
+    catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
+}
+if (args is ["spatial-lab-soak", var soakOutput, var soakSeconds, var soakSofa])
+{
+    try { await SpatialSoakTest.Run(soakOutput,int.Parse(soakSeconds),soakSofa); return 0; }
+    catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
+}
+if (args is ["spatial-lab-edge-tests", var edgeOutput, var edgeDemo])
+{
+    try { await SpatialEdgeTests.Run(edgeOutput,edgeDemo); return 0; }
+    catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
+}
+
 if (args.Length is 2 or 3 && args[0] == "playback-gui-tests")
 {
     try { PlaybackGuiTests.Run(args[1], args.Length == 3 ? args[2] : null); return 0; }

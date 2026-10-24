@@ -1,0 +1,15 @@
+{
+  "Name": "My measured room — replace paths and verify the measurement documentation",
+  "Routes": [
+    { "Channel": "FL", "File": "responses/front-left.wav", "Measurement": 0, "LeftEar": 0, "RightEar": 1 },
+    { "Channel": "FR", "File": "responses/front-right.wav", "Measurement": 0, "LeftEar": 0, "RightEar": 1 },
+    { "Channel": "FC", "File": "responses/front-center.wav", "Measurement": 0, "LeftEar": 0, "RightEar": 1 },
+    { "Channel": "SL", "File": "responses/side-left.wav", "Measurement": 0, "LeftEar": 0, "RightEar": 1 },
+    { "Channel": "SR", "File": "responses/side-right.wav", "Measurement": 0, "LeftEar": 0, "RightEar": 1 }
+  ],
+  "Source": "Replace with measurement documentation / URL",
+  "License": "Record the measurement usage terms here",
+  "Version": 1,
+  "LayoutConfirmed": false,
+  "CenteredDryLfe": true
+}

@@ -1,7 +1,8 @@
 param(
     [ValidateSet('Debug', 'Release')]
     [string]$Configuration = 'Release',
-    [string]$OutputDirectory = 'artifacts\public-win-x64'
+    [string]$OutputDirectory = 'artifacts\public-win-x64',
+    [string[]]$PackageSources = @()
 )
 
 $ErrorActionPreference = 'Stop'
@@ -33,8 +34,10 @@ foreach ($name in @('phonon.dll', 'LICENSE.txt', 'THIRDPARTY.md', 'provenance.js
 }
 
 # This publish mode deliberately excludes FFmpeg and the local embedded-tools bundle.
+$restoreArguments = @()
+foreach ($source in $PackageSources) { $restoreArguments += @('--source', $source) }
 & $dotnetExe publish $project -c $Configuration -r win-x64 --self-contained false `
-    -o $destination '-p:PublishSingleFile=false' '-p:ToolsBundleId=' '-p:DebugType=None'
+    -o $destination '-p:PublishSingleFile=false' '-p:ToolsBundleId=' '-p:DebugType=None' @restoreArguments
 if ($LASTEXITCODE -ne 0) { throw 'Public build failed.' }
 
 # An earlier local build may have left a symbols file containing local paths.
@@ -51,7 +54,7 @@ Write-Output "Public build complete: $destination"
 # The viewer is a separate process, auto-detected beside the player in SpaceSketch/.
 $viewerDestination = Join-Path $destination 'SpaceSketch'
 & $dotnetExe publish (Join-Path $projectRoot 'DiscChannelLab.Visualizer\DiscChannelLab.Visualizer.csproj') `
-    -c $Configuration -r win-x64 --self-contained false -o $viewerDestination '-p:DebugType=None'
+    -c $Configuration -r win-x64 --self-contained false -o $viewerDestination '-p:DebugType=None' @restoreArguments
 if ($LASTEXITCODE -ne 0) { throw 'Visualizer build failed.' }
 $analysisSettings = Join-Path $viewerDestination 'AudioVisualizationSettings.json'
 if (-not (Test-Path -LiteralPath $analysisSettings)) {
@@ -62,3 +65,11 @@ foreach ($name in @('README.md', 'README.ja.md', 'LICENSE', 'NOTICE')) {
     Copy-Item -LiteralPath (Join-Path $projectRoot $name) -Destination $destination -Force
 }
 Copy-Item -LiteralPath (Join-Path $projectRoot 'docs') -Destination $destination -Recurse -Force
+$thirdParty = Join-Path $destination 'third_party'
+New-Item -ItemType Directory -Path $thirdParty -Force | Out-Null
+foreach ($name in @('PureHDF','libadm-common-definitions')) { Copy-Item -LiteralPath (Join-Path $projectRoot "third_party/$name") -Destination $thirdParty -Recurse -Force }
+$forbidden = Get-ChildItem -LiteralPath $destination -Recurse -File | Where-Object {
+    $_.Name -in @('ffmpeg.exe','ffprobe.exe','ffplay.exe','truehdd.exe','sacd_extract.exe','prepared-adm-library.json') -or
+    $_.Extension.ToLowerInvariant() -in @('.sofa','.thd','.caf','.m2ts','.flac','.wav','.f32','.pdb')
+}
+if ($forbidden) { throw ('Unexpected external tools, private data or symbols in public output: ' + ($forbidden.Name -join ', ')) }

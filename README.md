@@ -50,11 +50,23 @@ Explore multichannel audio through headphones with **Direct** angle-based mixing
 
 ![Headphones Lab with virtual speakers, HRTF model selection and reset controls](docs/screenshots/headphones.png)
 
-The player always starts in **2ch Stereo**. Under **Preview Audio**, select **2ch Stereo**, **Headphones · Direct** or **Headphones · HRTF** while stopped or paused. Open **Headphones** for tuning; it no longer opens automatically. Keyboard mode keeps the listener fixed and rotates the room; tracking mode keeps the room fixed and turns the head. Headphone processing affects playback; existing FLAC exports use their source or stereo-mixer settings.
+The player always starts in **2ch Stereo**. Under **Preview Audio**, choose ordinary stereo or a headphone renderer while stopped or paused. Open **Headphones** for tuning; it does not open automatically. Keyboard mode keeps the listener fixed and rotates the room; tracking mode keeps the room fixed and turns the head. Selected-track FLAC can use the same headphone, HRTF, reflection or measured BRIR processing when **Render headphone / reflection settings to stereo FLAC** is enabled. Original-channel and channel-mixer export remain separate options.
 
 [Setup, controls, speaker placement, theory and limitations](docs/headphones.md).
 
 Use the built-in HRTF or choose an **external SOFA** and replay the same marked passage to compare. Standard and SOFA retain separate comparison trims. Every Lab slider has an individual **↺** reset, and **Reset sound settings** restores the audio defaults together.
+
+## Spatial Lab — listen, compare and save
+
+Spatial Lab is now integrated into the main DiscChannelLab application. Open **HRTF / room…** for the SOFA library, loudness-matched A/B, initial reflections, independent measured BRIR and the ADM scene inspector. The five tabs are HRTF Library, Compare / Export, HRIR / Reflections, Measured BRIR, and ADM scene.
+
+- Register and validate multiple SOFA HRIRs. Compare the same 5–60 second interval with fixed pose and gain; preparation and audition have separate controls. [A/B instructions](docs/comparison.md).
+- Save the shared headphone-rendered signal as selected-track 2ch FLAC or fixed-pose 48 kHz float WAV, with reproducibility settings in JSON. Optional early reflections use a six-surface first-order room model; Pure HRTF remains available.
+- **Measured BRIR** replaces HRIR processing with explicit speaker-to-ear room responses. It preserves measured delays and room tails without adding a second HRTF. Head orientation is fixed; moving ADM objects are unsupported by this mode. [Routing, supported files and limits](docs/brir.md).
+- Open supported ADM BWF/BW64 or opt into progressive TrueHD object playback through an external **truehdd 0.6.2** decoder. Main playback and seeking follow source timestamps; far first seeks may need preparation. Inspect moving sources, rotate the diagram, and Solo sources for preview. Save a full-title position-aware ADM separately. [Object audio / ADM guide](docs/object-audio.md).
+- During progressive Atmos playback, compare Objects, the six-channel presentation and the direct stereo presentation. On the A/B page, **Use 5.1 for HRIR / BRIR** selects the fixed speakers required by measured BRIR.
+
+The ADM renderer supports a documented Objects / DirectSpeakers subset, up to 64 stored tracks and 32 source streams at 48 kHz. It is not a certified Dolby Atmos renderer and does not recover original production stems. External codecs and third-party HRIR/BRIR recordings are not bundled in the public build. [Release notes and verification scope](docs/changes-2026-10-24.md).
 
 ## Playback reliability
 
@@ -241,6 +253,8 @@ The output is in `artifacts/public-win-x64`, with the separate viewer in its `Sp
 For personal use, `./build-personal.ps1` builds a self-contained application folder from **the same source files**. It embeds the FFmpeg executables installed on the builder's computer. Keep the complete folder, including `tools` and `SpaceSketch`. Its output is local and is excluded from this repository; it is not the public distribution build. Before distributing it, review the licenses and corresponding-source obligations of every included component.
 
 ## Settings and migration
+
+The approved Spatial Lab profile is imported once from `%LOCALAPPDATA%\DiscChannelLab.SpatialLab`. SOFA/BRIR profiles, tool selections, tuning and newer disc/track edits migrate to the normal DiscChannelLab profile; newer formal edits take precedence. Replaced files are retained under `imports/spatial-lab-backup`, and the trial profile is left intact. Audio caches, logs and tool executables are not copied. Startup remains ordinary stereo. Saved tracker ports are preserved; fresh installations use UDP 4242.
 
 The player stores language (`language.txt`), theme (`theme-v2.txt`) and disc/track edits (`track-edits`) under `%LOCALAPPDATA%\DiscChannelLab`. New logs and the personal build’s extracted tool cache also use this folder; temporary fallbacks use `%TEMP%\DiscChannelLab`.
 

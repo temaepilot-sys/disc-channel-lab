@@ -152,7 +152,7 @@ internal static class AudioFileTests
             MainWindow? window = null;
             try
             {
-                var app = new App(); app.InitializeComponent();
+                var app = new App(); app.InitializeComponent(); WpfTestApplication.SuppressStartupWindow(app);
                 SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext());
                 var edits = new TrackEditsStore(log, Path.Combine(root, "edits")); var model = new MainViewModel(edits);
                 window = new MainWindow(model);

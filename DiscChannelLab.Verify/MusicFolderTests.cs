@@ -20,7 +20,7 @@ internal static class MusicFolderTests
         {
             try
             {
-                var app = new App(); app.InitializeComponent();
+                var app = new App(); app.InitializeComponent(); WpfTestApplication.SuppressStartupWindow(app);
                 SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext());
                 Pump(Test());
             }

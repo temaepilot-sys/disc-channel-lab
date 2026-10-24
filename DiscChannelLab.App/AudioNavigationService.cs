@@ -27,6 +27,10 @@ public sealed partial class AudioNavigationService(ToolPaths paths, ProcessRunne
         Func<PreviewMixState>? liveMix = null, Action<long, MixerMeterFrame>? mixedLevels = null,
         PreviewPcmTap? visualization = null, PreviewPlaybackControl? transport = null)
     {
+        if (stream.Codec == "adm")
+        {
+            await Task.Run(() => PlayAdmAsync(playlist, startTicks, endTicks, token, segmentStarted, volume, playbackPosition, mixedLevels, channelLevels, visualization, transport, liveMix), token); return;
+        }
         if (HeadphoneSession.Current.Options.Enabled || stream.Channels == 2 || StereoMixSettings.Supports(stream))
         {
             var spatial = HeadphoneSession.Current.Options.Enabled;

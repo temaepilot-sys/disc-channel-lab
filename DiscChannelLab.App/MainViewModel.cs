@@ -26,7 +26,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
     public Task InspectionTask { get; private set; } = Task.CompletedTask;
     private string _inspectionProgress = "";
     public string InspectionProgress { get => _inspectionProgress; private set => Set(ref _inspectionProgress, value); }
-    public bool CanInspect => !IsBusy && !IsPlaying && _disc is not null;
+    public bool CanInspect => !IsBusy && !IsPlaying && !IsAtmosStreamingEnabled && _disc is not null;
     public bool CanToggleTail => CanInspect && _loadedPlaylist?.HasShortTail == true;
     public bool MergeShortTail => _loadedPlaylist?.MergeShortTail ?? true;
     public string ChapterCorrectionNote => _loadedPlaylist?.HasShortTail == true
@@ -127,6 +127,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
             if (!Set(ref _saveStereoDownmix, enabled)) return;
             if (enabled) SaveMultichannelFlac = false;
             if (enabled) SaveMixerDownmix = false;
+            if (enabled) SaveBinauralFlac = false;
             if (enabled && _saveIndividualChannels)
             {
                 _saveIndividualChannels = false;
@@ -144,6 +145,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
             if (!Set(ref _saveIndividualChannels, enabled)) return;
             if (enabled) SaveMultichannelFlac = false;
             if (enabled) SaveMixerDownmix = false;
+            if (enabled) SaveBinauralFlac = false;
             if (enabled && _saveStereoDownmix)
             {
                 _saveStereoDownmix = false;
@@ -228,6 +230,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
             Changed(nameof(PreviewTimeText));
             Changed(nameof(SelectedTrackTitle));
             Changed(nameof(SelectedChapterText));
+            Changed(nameof(CurrentAdm));
             UpdateActions();
         }
     }
@@ -270,6 +273,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
             Changed(nameof(PreviewTimeText));
             Changed(nameof(CanSplit));
             Changed(nameof(CanPlay));
+            if (!IsPlaying || IsScrubbing || _playbackControl is not { HasStarted: true }) RefreshAtmosPreparationDisplay();
         }
     }
     public string PreviewTimeText
@@ -322,8 +326,8 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
             UpdateActions();
         }
     }
-    public bool CanChooseHighRes => !IsBusy && (SaveMultichannelFlac ? SelectedStream?.CanMakeOriginalPcm == true : SelectedStream?.CanMakeHighResolution == true);
-    public string SelectedStreamNote => (HeadphonesEnabled ? HeadphoneText.T("Headphone rendering is for playback; FLAC export uses the source or stereo mixer.") + " " : "") + LanguageService.T(SelectedStream is { } available && _loadedPlaylist is { } loaded &&
+    public bool CanChooseHighRes => !IsBusy && (SaveBinauralFlac || (SaveMultichannelFlac ? SelectedStream?.CanMakeOriginalPcm == true : SelectedStream?.CanMakeHighResolution == true));
+    public string SelectedStreamNote => CurrentAdm is not null ? "ADM: main Play uses object positions. FLAC uses the selected headphone / stereo renderer; Save ADM preserves the multitrack PCM and position metadata. Main meters show the rendered stereo bus." : SaveBinauralFlac ? "FLAC uses the current headphone renderer, HRTF, reflections, mixer and master, with a fixed head pose. Spatial processing runs at 48 kHz." : (HeadphonesEnabled ? "Headphone rendering is active. Enable headphone / reflection FLAC below to export it; otherwise FLAC uses source / stereo mixer settings. " : "") + LanguageService.T(SelectedStream is { } available && _loadedPlaylist is { } loaded &&
         Tracks.Any(track => track.IsSelected && !available.Covers(loaded, track))
         ? "選択中の曲に、この音声が存在しない区間があります。保存する曲または音声を変更してください。"
         : SelectedStream is { HasSupportedChannels: false }
@@ -364,7 +368,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
             return index >= 0 && index < Tracks.Count - 1;
         }
     }
-    public bool CanDetectSilence => CanPlay && !IsPlaying;
+    public bool CanDetectSilence => CanPlay && !IsPlaying && !IsAtmosStreamingEnabled;
     public bool CanSplit => CanDetectSilence && PreviewSeconds >= 0.5 && PreviewSeconds <= PreviewMax - 0.5;
     public bool CanMerge
     {
@@ -420,6 +424,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
                 nameof(SelectedTrackTitle), nameof(SelectedChapterText), nameof(SelectedStreamNote),
                 nameof(PreviewChannelHint), nameof(HeadphoneMixerHint), nameof(MixerBypassHint), nameof(VolumeDetails), nameof(ChapterCorrectionNote), nameof(CacheSizeText), nameof(CacheDetailsText),
                 nameof(CacheClearHint), nameof(HighResOptionText), nameof(HighResHelpText) }) Changed(name);
+            RefreshAtmosPreparationDisplay();
         }
         finally { IsRefreshingLanguage = false; }
     }
@@ -545,7 +550,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
         }
         catch (Exception ex) { HandleError(ex); }
         finally { EndWork(); }
-        if (opened) StartBackgroundInspection();
+        if (opened) { await OfferSpatialInputAsync(); StartBackgroundInspection(); }
         if (_disc?.Format == DiscFormat.Sacd) await RefreshCacheSizeAsync();
     }
 
@@ -619,6 +624,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
         }
         catch (Exception ex) { HandleError(ex); }
         finally { EndWork(); }
+        await OfferSpatialInputAsync();
         if (playlist.Format == DiscFormat.Sacd) await RefreshCacheSizeAsync();
     }
 
@@ -808,7 +814,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
     {
         StopInspection();
         if (IsPlaying) { PausePlayback(); return; }
-        if (_playbackControl is { IsPaused: true, CanPause: true } held && _playbackTask is { IsCompleted: false } &&
+        if (_playbackControl is { IsPaused: true } held && (held.CanPause || held.SupportsPendingPause) && _playbackTask is { IsCompleted: false } &&
             _playback?.IsCancellationRequested == false && SamePlaybackEngine(_playbackEngineOptions, HeadphoneSession.Current.Options))
         {
             _activePlaybackMix = CurrentMix;
@@ -825,7 +831,8 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
         await StartPlaybackAsync(++_transportVersion);
     }
     private static bool SamePlaybackEngine(HeadphoneOptions? a, HeadphoneOptions b) => a is not null && a.Enabled == b.Enabled &&
-        (!a.Enabled || (a.Method == b.Method && a.Hrtf == b.Hrtf && string.Equals(a.SofaPath, b.SofaPath, StringComparison.OrdinalIgnoreCase)));
+        (!a.Enabled || (a.Method == b.Method && a.Hrtf == b.Hrtf && a.Room == b.Room && a.BrirHash == b.BrirHash &&
+            string.Equals(a.BrirPath, b.BrirPath, StringComparison.OrdinalIgnoreCase) && string.Equals(a.SofaPath, b.SofaPath, StringComparison.OrdinalIgnoreCase)));
 
     public Task PreviousTrackAsync() => MoveTrackAsync(-1);
     public Task NextTrackAsync() => MoveTrackAsync(1);
@@ -877,7 +884,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
         Volatile.Write(ref _livePreviewMix, PreviewState(mix, previewChannel));
         var start = track.StartTicks + (long)Math.Round(PreviewSeconds * 45000, MidpointRounding.AwayFromZero);
         var session = new CancellationTokenSource();
-        var control = new PreviewPlaybackControl();
+        var control = new PreviewPlaybackControl(allowPendingPause: HeadphonesEnabled || stream.Channels == 2 || StereoMixSettings.Supports(stream));
         _playbackControl = control; _playbackEngineOptions = HeadphoneSession.Current.Options;
         _playbackStartSeconds = (start - track.StartTicks) / 45000d;
         _continuousOriginTicks = track.StartTicks;
@@ -973,6 +980,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 
     public void AdvancePlaybackClock()
     {
+        RefreshAtmosProgress();
         if (!IsScrubbing && _playbackControl is { CanPause: true, HasStarted: true } deviceClock)
             UpdateContinuousPosition(_playbackStartSeconds + deviceClock.EstimatedPosition);
         else if (IsPlaying && !IsScrubbing && _playClock.IsRunning)
@@ -1126,6 +1134,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
     public async Task<bool> ConvertAsync()
     {
         if (!(SaveMixerDownmix ? CanPrepareConversion : CanConvert) || _disc is null || _loadedPlaylist is null || SelectedStream is null) return false;
+        if (SaveBinauralFlac || Tracks.Where(t => t.IsSelected).Any(t => AudioFileReader.StreamForTrack(_loadedPlaylist, t, SelectedStream).Codec == "adm")) return await ConvertAdmSelectionAsync();
         ChannelMixExport? channelMix;
         try { channelMix = SaveMixerDownmix ? CaptureMixerExport() : null; }
         catch (Exception ex) { HandleError(ex); return false; }
@@ -1220,6 +1229,8 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 
     private void UpdateActions()
     {
+        SyncAdmPlaybackScope();
+        if (_navigation.AdmMonitor.ClearIfDifferent(CurrentAdm)) NotifyAdmSolo();
         RefreshCacheControls();
         Changed(nameof(SelectedStreamNote));
         Changed(nameof(CanInspect));
@@ -1239,7 +1250,12 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
         Changed(nameof(CanDownmixStereo));
         Changed(nameof(CanChoosePreviewChannel));
         Changed(nameof(CanChoosePreviewMode));
+        Changed(nameof(CanChooseAudioStream));
+        Changed(nameof(SaveBinauralFlac)); Changed(nameof(CanChooseBinauralFlac)); Changed(nameof(BinauralFlacOptionText));
         Changed(nameof(CanSaveMultichannel));
+        Changed(nameof(CanExportAdm)); Changed(nameof(CanChooseSpatialSource)); Changed(nameof(SpatialSourceDescription));
+        RefreshAtmosPreparationDisplay();
+        Changed(nameof(HighResOptionText)); Changed(nameof(HighResHelpText));
     }
 
     private bool Set<T>(ref T target, T value, [CallerMemberName] string? name = null)

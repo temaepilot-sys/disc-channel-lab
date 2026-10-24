@@ -53,7 +53,7 @@ internal static class HeadphoneClickTests
         var session = HeadphoneSession.Current; var previous = session.Options; var factory = AudioNavigationService.HeadphoneOutputFactory;
         try
         {
-            foreach (var method in Enum.GetValues<HeadphoneMethod>())
+            foreach (var method in new[] { HeadphoneMethod.Direct, HeadphoneMethod.SteamAudio })
             {
                 session.SetOptions(new HeadphoneOptions { Enabled = true, Method = method });
                 foreach (var seek in new[] { 0L, 13781L })

@@ -7,11 +7,12 @@ using System.Windows.Media.Media3D;
 
 namespace Disc2Flac;
 
-public sealed class AdmSceneSourceRow(SpatialSource source, bool canSolo, Action<string, bool> apply) : INotifyPropertyChanged
+public sealed class AdmSceneSourceRow(SpatialSource source, string label, bool canSolo, Action<string, bool> apply) : INotifyPropertyChanged
 {
     bool solo;
     public string Id => source.Id;
     public string Name => source.Name;
+    public string Label => label;
     public SpatialSourceKind Kind => source.Kind;
     public int TrackIndex => source.TrackIndex;
     public bool IsLfe => source.IsLfe;
@@ -35,7 +36,8 @@ public partial class SpatialLabWindow
     void InitializeSceneInteraction()
     {
         sceneCamera = new((PerspectiveCamera)SceneView.Camera); sceneCamera.Reset(); RefreshSceneSolo();
-        SceneView.Camera.Changed += (_, _) => UpdateFrontGuide(); UpdateFrontGuide();
+        SceneView.Camera.Changed += (_, _) => { UpdateFrontGuide(); UpdateSourceLabels(); };
+        SceneView.SizeChanged += (_, _) => UpdateSourceLabels(); UpdateFrontGuide();
     }
     public void ShowAdmScene()
     {
@@ -62,11 +64,20 @@ public partial class SpatialLabWindow
     void ResetSourceInteraction(SpatialScene? scene)
     {
         ObjectsGrid.ItemsSource = null;
-        sourceModels.Clear(); sourceStyles.Clear(); sourceRows.Clear();
+        sourceModels.Clear(); sourceStyles.Clear(); sourceRows.Clear(); sourceLabels.Clear(); sourceLabelLinks.Clear(); SceneLabels.Children.Clear();
         if (scene is not null)
-            foreach (var source in scene.Sources)
-                sourceRows.Add(new(source, model.IsAdmPlaybackEnabled && ReferenceEquals(scene, model.CurrentAdmScene),
+        {
+            var captions = scene.Sources.Select(SourceCaption).ToArray();
+            var repeated = captions.GroupBy(c => c, StringComparer.Ordinal).Where(g => g.Count() > 1).Select(g => g.Key).ToHashSet(StringComparer.Ordinal);
+            for (int i = 0; i < scene.Sources.Length; i++)
+            {
+                var source = scene.Sources[i];
+                string caption = repeated.Contains(captions[i]) ? captions[i] + " / #" + (i + 1) : captions[i];
+                sourceRows.Add(new(source, caption, model.IsAdmPlaybackEnabled && ReferenceEquals(scene, model.CurrentAdmScene),
                     (id, value) => model.SetAdmSourceSolo(id, value)));
+                AddSourceLabel(source.Id, caption);
+            }
+        }
         ObjectsGrid.ItemsSource = scene is null ? null : sourceRows;
     }
     void RefreshSceneSolo()
@@ -85,6 +96,13 @@ public partial class SpatialLabWindow
             if (style.Diffuse.Color != color) { style.Diffuse.Color = color; style.Glow.Color = color; }
             double scale = selected ? 1.25 : 1;
             style.Scale.ScaleX = style.Scale.ScaleY = style.Scale.ScaleZ = scale;
+            if (sourceLabels.TryGetValue(id, out var label))
+            {
+                label.BorderBrush = style.Diffuse;
+                sourceLabelLinks[id].Stroke = style.Diffuse;
+                ((TextBlock)label.Child).Foreground = selected ? Brushes.Gold : Brushes.WhiteSmoke;
+                label.Opacity = ids.Count != 0 && !selected ? .6 : 1;
+            }
         }
     }
     void ClearSceneSolo_Click(object sender, RoutedEventArgs e) => model.ClearAdmSourceSolo();

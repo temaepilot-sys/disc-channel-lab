@@ -41,6 +41,7 @@ public partial class SpatialLabWindow : Window
                     FixedRoll.Text = saved.Roll.ToString(CultureInfo.InvariantCulture);
                     HrtfA.SelectedItem = library.Entries.FirstOrDefault(x => x.Id == saved.A) ?? library.Entries[0];
                     HrtfB.SelectedItem = library.Entries.FirstOrDefault(x => x.Id == saved.B) ?? library.Entries[0];
+                    ShowSceneLabels.IsChecked = saved.ShowSourceLabels;
                 }
             }
         }
@@ -52,7 +53,7 @@ public partial class SpatialLabWindow : Window
         timer.Tick += (_, _) => Tick(); timer.Start();
         Closed += (_, _) => CloseLab();
     }
-    record LabPreferences(SpatialRoomOptions Room, double Yaw, double Pitch, double Roll, string A, string B);
+    record LabPreferences(SpatialRoomOptions Room, double Yaw, double Pitch, double Roll, string A, string B, bool ShowSourceLabels = true);
     static double Value(TextBox box, double min, double max)
     {
         if (!double.TryParse(box.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out double n) || !double.IsFinite(n) || n < min || n > max)
@@ -305,7 +306,7 @@ public partial class SpatialLabWindow : Window
             MessageBox.Show(this, "Float WAV export completed.", "Spatial Lab", MessageBoxButton.OK, MessageBoxImage.Information);
         });
     }
-    void SaveSettings() { var p = Pose(); SpatialJson.Save(settingsPath, new LabPreferences(Room(), p.Yaw, p.Pitch, p.Roll, A.Id, B.Id)); }
+    void SaveSettings() { var p = Pose(); SpatialJson.Save(settingsPath, new LabPreferences(Room(), p.Yaw, p.Pitch, p.Roll, A.Id, B.Id, ShowSceneLabels.IsChecked == true)); }
     void Cancel_Click(object sender, RoutedEventArgs e) { operation?.Cancel(); StopComparison_Click(sender, e); }
     void Model_Changed(object? sender, PropertyChangedEventArgs e)
     {
@@ -391,6 +392,7 @@ public partial class SpatialLabWindow : Window
                 p.OffsetX = display.X; p.OffsetY = state.Gain == 0 ? -1000 : display.Y; p.OffsetZ = display.Z;
             }
         }
+        UpdateSourceLabels();
         SceneDetails.Text = $"{seconds:0.000}s · {active}/{displayScene.Sources.Length} active · 48 kHz · use the main timeline to seek";
     }
 }

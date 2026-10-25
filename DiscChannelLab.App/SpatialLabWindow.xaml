@@ -3,6 +3,7 @@
  Title="Spatial Lab — SOFA / Binaural / Room / ADM" Width="1080" Height="820" MinWidth="920" MinHeight="700"
  Background="{DynamicResource AppBackgroundBrush}" WindowStartupLocation="CenterOwner" PreviewKeyDown="SceneWindow_KeyDown">
  <Window.Resources>
+  <BooleanToVisibilityConverter x:Key="SceneLabelsVisibilityConverter"/>
   <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="Padding" Value="12,7"/><Setter Property="Margin" Value="0,3,7,3"/></Style>
   <Style TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}"><Setter Property="Padding" Value="6"/><Setter Property="Margin" Value="0,3,10,5"/></Style>
   <Style TargetType="ComboBox" BasedOn="{StaticResource {x:Type ComboBox}}"><Setter Property="Margin" Value="0,3,10,5"/><Setter Property="MinHeight" Value="32"/></Style>
@@ -97,6 +98,7 @@
      <TextBlock Text="Drag: orbit · Right-drag: pan · Wheel: zoom · Arrows: orbit / overhead · Home: default view" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}"/>
      <TextBlock Text="Click sphere: Solo / release · Shift+click: add/remove · Checkboxes: multiple Solo · Solo affects main preview only" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}"/>
      <DockPanel Margin="0,4"><Button x:Name="SceneSoloClear" DockPanel.Dock="Right" Content="Clear Solo" Click="ClearSceneSolo_Click" IsEnabled="False"/>
+      <CheckBox x:Name="ShowSceneLabels" DockPanel.Dock="Right" Content="Show labels" IsChecked="True" Click="SceneLabels_Click" VerticalAlignment="Center" Margin="12,0,16,0" ToolTip="Show object numbers and channel names"/>
       <TextBlock x:Name="SceneSoloText" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"/></DockPanel>
     </StackPanel>
     <Border x:Name="SceneInput" Grid.Row="2" Background="#0B111B" CornerRadius="4" Focusable="True" FocusVisualStyle="{x:Null}"
@@ -104,6 +106,7 @@
             LostMouseCapture="Scene_LostCapture" PreviewKeyDown="Scene_KeyDown">
      <Grid>
       <Viewport3D x:Name="SceneView" ClipToBounds="True"><Viewport3D.Camera><PerspectiveCamera Position="2.5,4,8" LookDirection="-2.5,-3.6,-8" UpDirection="0,1,0" FieldOfView="65"/></Viewport3D.Camera></Viewport3D>
+      <Canvas x:Name="SceneLabels" IsHitTestVisible="False" ClipToBounds="True" Visibility="{Binding IsChecked, ElementName=ShowSceneLabels, Converter={StaticResource SceneLabelsVisibilityConverter}}"/>
       <Border HorizontalAlignment="Right" VerticalAlignment="Top" Margin="12" Padding="8,6" Background="#D5101923" BorderBrush="#555B4931" BorderThickness="1" CornerRadius="9" IsHitTestVisible="False">
        <StackPanel><TextBlock Text="F R O N T" Foreground="#FFF1CE" FontSize="10" FontWeight="SemiBold" HorizontalAlignment="Center"/>
         <Canvas Width="58" Height="58">
@@ -121,7 +124,7 @@
      <DataGridTemplateColumn Header="Solo" Width="55"><DataGridTemplateColumn.CellTemplate><DataTemplate>
       <CheckBox IsChecked="{Binding IsSolo, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" IsEnabled="{Binding CanSolo}" HorizontalAlignment="Center" VerticalAlignment="Center" AutomationProperties.Name="{Binding SoloLabel}"/>
      </DataTemplate></DataGridTemplateColumn.CellTemplate></DataGridTemplateColumn>
-     <DataGridTextColumn Header="Source" Binding="{Binding Name}" Width="*"/><DataGridTextColumn Header="Kind" Binding="{Binding Kind}" Width="110"/><DataGridTextColumn Header="PCM track (zero-based)" Binding="{Binding TrackIndex}" Width="165"/><DataGridTextColumn Header="LFE" Binding="{Binding IsLfe}" Width="60"/></DataGrid.Columns></DataGrid>
+     <DataGridTextColumn Header="Label" Binding="{Binding Label}" Width="110"/><DataGridTextColumn Header="Source" Binding="{Binding Name}" Width="*"/><DataGridTextColumn Header="Kind" Binding="{Binding Kind}" Width="110"/><DataGridTextColumn Header="PCM track (zero-based)" Binding="{Binding TrackIndex}" Width="165"/><DataGridTextColumn Header="LFE" Binding="{Binding IsLfe}" Width="60"/></DataGrid.Columns></DataGrid>
     <StackPanel Grid.Row="4"><ProgressBar x:Name="SceneTime" Minimum="0" Maximum="10" Height="5" Margin="0,8"/><TextBlock x:Name="SceneDetails" TextWrapping="Wrap" Margin="0,5"/>
      <TextBlock Text="Position display follows the main player. Use its track list, Play / Pause and timeline; set head orientation in Headphones." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}"/></StackPanel>
    </Grid></TabItem>

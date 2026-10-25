@@ -72,6 +72,49 @@ internal static class AdmSceneInteractionTests
                         var p = drawnPoints[source.Id];
                         return visual.TransformToAncestor(view).Transform(new Point3D(p.OffsetX, p.OffsetY, p.OffsetZ));
                     }
+                    var labels = (Dictionary<string, Border>)Field(lab, "sourceLabels");
+                    var labelLinks = (Dictionary<string, System.Windows.Shapes.Line>)Field(lab, "sourceLabelLinks");
+                    var labelLayer = (Canvas)lab.FindName("SceneLabels");
+                    var labelledRows = ((DataGrid)lab.FindName("ObjectsGrid")).Items.Cast<AdmSceneSourceRow>().ToArray();
+                    Check(!labelLayer.IsHitTestVisible && labels.Count == sources.Length && labelledRows.All(r =>
+                        ((TextBlock)labels[r.Id].Child).Text == r.Label), "Sphere labels match the source table and never intercept camera or Solo input");
+                    var movingLabelSource = sources.Single(s => s.Kind == SpatialSourceKind.Object);
+                    var objectLabel = labels[movingLabelSource.Id];
+                    Call(lab, "UpdateScene", 0d);
+                    Check(objectLabel.Visibility == Visibility.Collapsed, "Object label hides before its source starts");
+                    Call(lab, "UpdateScene", 2d);
+                    Point LabelPosition() => new(Canvas.GetLeft(objectLabel), Canvas.GetTop(objectLabel));
+                    bool LabelFollowsSource()
+                    {
+                        lab.UpdateLayout(); var anchor = Project(movingLabelSource);
+                        var link = labelLinks[movingLabelSource.Id];
+                        bool follows = objectLabel.Visibility == Visibility.Visible && Math.Abs(link.X1 - anchor.X) < 1
+                            && Math.Abs(link.Y1 - anchor.Y) < 1 && Canvas.GetLeft(objectLabel) >= 0 && Canvas.GetTop(objectLabel) >= 0
+                            && Canvas.GetLeft(objectLabel) + objectLabel.ActualWidth <= view.ActualWidth + 1
+                            && Canvas.GetTop(objectLabel) + objectLabel.ActualHeight <= view.ActualHeight + 1;
+                        if (!follows) Console.WriteLine($"Label mismatch: anchor={anchor} label={LabelPosition()} size={objectLabel.ActualWidth},{objectLabel.ActualHeight} viewport={view.ActualWidth},{view.ActualHeight} visibility={objectLabel.Visibility}");
+                        return follows;
+                    }
+                    var labelAtTwo = LabelPosition();
+                    Check(LabelFollowsSource(), "Active object label sits beside the actual projected WPF sphere");
+                    Call(lab, "UpdateScene", 8d);
+                    Check(LabelFollowsSource() && (LabelPosition() - labelAtTwo).Length > 10, "Seeking to a moving elevated source moves its label with it");
+                    control.Orbit(35, 15); control.Zoom(1); control.Pan(15, 10, view.ActualHeight);
+                    Check(LabelFollowsSource(), "Orbit, zoom and pan immediately reproject upright object labels");
+                    lab.Width -= 110; lab.Height -= 70; lab.UpdateLayout();
+                    Check(LabelFollowsSource(), "Labels follow the resized viewport without waiting for playback");
+                    lab.Width += 110; lab.Height += 70; lab.UpdateLayout(); control.Reset();
+                    camera.LookDirection = -camera.LookDirection;
+                    Check(labels.Values.All(l => l.Visibility == Visibility.Collapsed), "Sources behind the inspection camera have no floating labels");
+                    control.Reset();
+                    Call(lab, "UpdateScene", 12d);
+                    Check(labels.Values.All(l => l.Visibility == Visibility.Collapsed), "Labels hide when every source has ended");
+                    var caption = typeof(SpatialLabWindow).GetMethod("SourceCaption", BindingFlags.NonPublic | BindingFlags.Static)!;
+                    Check((string)caption.Invoke(null, [movingLabelSource with { Name = "Object 12 · Object 12" }, 2])! == "Object 12"
+                        && (string)caption.Invoke(null, [movingLabelSource with { Name = "Object 0 · Object 0" }, 2])! == "Object 0"
+                        && (string)caption.Invoke(null, [movingLabelSource, 2])! == "#3",
+                        "Decoded object numbers survive independently of PCM order; unnamed numeric references are clearly marked");
+                    Call(lab, "UpdateScene", model.CurrentAdmSeconds);
                     var bedLeft = sources.Single(s => s.TrackIndex == 0); var bedRight = sources.Single(s => s.TrackIndex == 1);
                     double defaultCenterX = visual.TransformToAncestor(view).Transform(new Point3D(0, 0, 0)).X;
                     Check(Project(bedLeft).X < defaultCenterX && Project(bedRight).X > defaultCenterX,
@@ -133,6 +176,8 @@ internal static class AdmSceneInteractionTests
                     var styles = (System.Collections.IDictionary)Field(lab, "sourceStyles");
                     Check(styles.Count == sources.Length && ((TextBlock)lab.FindName("SceneSoloText")).Text.Contains(sources[0].Name),
                         "Scene has per-source visual feedback and identifies the active preview Solo");
+                    Check(((TextBlock)labels[sources[0].Id].Child).Foreground == Brushes.Gold && labels[sources[1].Id].Opacity < 1,
+                        "Labels highlight the Solo source and dim other sources without hiding their identities");
                     Save(lab, Path.Combine(root, "02-adm-scene-solo.png")); control.Orbit(50, 45); Save(lab, Path.Combine(root, "03-adm-scene-overhead.png"));
                     control.Reset(); model.ClearAdmSourceSolo();
 
@@ -169,6 +214,19 @@ internal static class AdmSceneInteractionTests
                     Check(model.AdmSoloSources.Count == 0 && sinks.Count == 1 && sinks[0].Finite, "Clear Solo restores all sources without restarting or generating nonfinite PCM");
                     model.StopPlayback(); await Task.Delay(150);
                     metrics.Add(new { solo220Power = left220, suppressed330Power = left330, outputSessions = sinks.Count });
+                    var numbered = wave.Scene with { Sources = sources.Select(s => s.Kind == SpatialSourceKind.Object
+                        ? s with { Name = "Object 12 · Object 12" } : s).ToArray() };
+                    Call(lab, "SetScene", numbered); Call(lab, "UpdateScene", 2d);
+                    lab.Height = 960; lab.UpdateLayout();
+                    Check(((TextBlock)labels[movingLabelSource.Id].Child).Text == "Object 12"
+                        && ((DataGrid)lab.FindName("ObjectsGrid")).Items.Cast<AdmSceneSourceRow>().Single(r => r.Id == movingLabelSource.Id).Label == "Object 12",
+                        "Numbered metadata appears on both the actual 3D overlay and the table, independent of track 3");
+                    var labelBounds = labels.Values.Where(l => l.Visibility == Visibility.Visible)
+                        .Select(l => new Rect(new Point(Canvas.GetLeft(l), Canvas.GetTop(l)), l.RenderSize)).ToArray();
+                    Check(!labelBounds.Where((r, i) => labelBounds.Skip(i + 1).Any(r.IntersectsWith)).Any(),
+                        "Nearby sphere labels remain separately readable with leaders identifying displaced labels");
+                    Save(lab, Path.Combine(root, "06-adm-object-number-labels.png"));
+                    Call(lab, "SetScene", wave.Scene);
                     model.ToggleAdmSourceSolo(sources[0].Id); lab.Close(); lab = null;
                     Check(model.AdmSoloSources.Count == 0 && SHA256.HashData(File.ReadAllBytes(demo)).SequenceEqual(originalHash),
                         "Closing the Lab clears audition Solo and leaves the ADM source unchanged");

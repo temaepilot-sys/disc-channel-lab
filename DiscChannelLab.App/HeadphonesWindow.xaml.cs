@@ -270,7 +270,10 @@ public partial class HeadphonesWindow : Window
     }
     private void Save_Click(object sender, RoutedEventArgs e)
     {
-        WriteOptions(); _session.Save(); NoteText.Text = _session.TrackerError ?? HeadphoneText.T("Headphone settings saved separately from disc metadata.");
+        WriteOptions();
+        bool saved = _session.Save();
+        NoteText.Text = _session.TrackerError ?? HeadphoneText.T("Headphone settings saved separately from disc metadata.");
+        if (saved) SaveCompletion.Show(this, "ヘッドフォン設定を保存しました。");
     }
     private void Refresh()
     {

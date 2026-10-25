@@ -157,7 +157,7 @@ internal static class MusicFolderTests
                 mixer.Show();
                 try
                 {
-                    using var dialog = new CompletionDialogProbe(mixer);
+                    using var dialog = new CompletionDialogProbe(mixer, window);
                     typeof(MixerWindow).GetMethod("Export_Click", BindingFlags.NonPublic | BindingFlags.Instance)!
                         .Invoke(mixer, [mixer, new RoutedEventArgs()]);
                     await Until(() => dialog.Messages.Count == 1);
@@ -188,25 +188,34 @@ internal static class MusicFolderTests
     }
 
     // Inspect and dismiss only message boxes owned by this test's window on its UI thread.
-    private sealed class CompletionDialogProbe : IDisposable
+    internal sealed class CompletionDialogProbe : IDisposable
     {
         public List<string> Messages { get; } = [];
         readonly DispatcherTimer timer = new() { Interval = TimeSpan.FromMilliseconds(25) };
         readonly HashSet<IntPtr> seen = [];
-        public CompletionDialogProbe(Window owner)
+        public CompletionDialogProbe(params Window[] owners)
         {
-            var ownerHandle = new System.Windows.Interop.WindowInteropHelper(owner).Handle;
+            var ownerHandles = owners.Select(owner => new System.Windows.Interop.WindowInteropHelper(owner).Handle).ToHashSet();
             var threadId = GetCurrentThreadId();
             timer.Tick += (_, _) => EnumThreadWindows(threadId, (handle, _) =>
             {
                 var name = new StringBuilder(128); GetClassName(handle, name, name.Capacity);
-                if (name.ToString() != "#32770" || GetWindow(handle, 4) != ownerHandle || !seen.Add(handle)) return true;
+                if (name.ToString() != "#32770" || !ownerHandles.Contains(GetWindow(handle, 4)) || !seen.Add(handle)) return true;
                 var message = new StringBuilder();
+                IntPtr button = IntPtr.Zero;
                 EnumChildWindows(handle, (child, _) =>
                 {
                     var text = new StringBuilder(512); GetWindowText(child, text, text.Capacity); message.AppendLine(text.ToString()); return true;
                 }, IntPtr.Zero);
-                Messages.Add(message.ToString()); PostMessage(handle, 0x0111, new IntPtr(1), IntPtr.Zero); return true;
+                EnumChildWindows(handle, (child, _) =>
+                {
+                    var kind = new StringBuilder(128); GetClassName(child, kind, kind.Capacity);
+                    if (kind.ToString() == "Button") { button = child; return false; } return true;
+                }, IntPtr.Zero);
+                Messages.Add(message.ToString());
+                // Click the real acknowledgment button; Windows can assign it ID 2 rather than IDOK.
+                if (button != IntPtr.Zero) PostMessage(button, 0x00F5, IntPtr.Zero, IntPtr.Zero);
+                return true;
             }, IntPtr.Zero);
             timer.Start();
         }

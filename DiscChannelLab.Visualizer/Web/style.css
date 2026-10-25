@@ -22,3 +22,9 @@ body.hybrid-mode #appearance .particle-sync{display:none}
 
 #scene-help{max-width:calc(100% - 280px);line-height:1.5}
 #veil-palette-label .aurora-note{margin:-4px 0 16px}
+/* Native HTML dialog keeps animation running while acknowledging an explicit save. */
+#save-complete{color:var(--fg);background:#142131;border:1px solid #465d74;border-radius:12px;padding:24px;max-width:calc(100vw - 32px);box-shadow:0 16px 60px #0008}
+#save-complete::backdrop{background:#0007}
+#save-complete h2{margin:0 0 12px;font-size:18px}
+#save-complete p{color:var(--muted);margin:0 0 20px}
+#save-complete button{display:block;margin-left:auto;min-width:80px}

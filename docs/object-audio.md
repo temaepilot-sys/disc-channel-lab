@@ -63,6 +63,8 @@ Solo is preview only. It does not affect Save ADM or FLAC exports. It clears whe
 
 Save ADM creates one full-title BW64 containing audio, positions and chapter boundaries. This explicit archival operation needs complete preparation and substantial free disk space.
 
+After a successful ADM WAV or FLAC export, a completion dialog shows the destination. Cancellation or a failed save does not show a success notification. Explicit settings, profile, evaluation and diagnostic saves also show completion; automatic preference and track-edit saves stay silent.
+
 For a BD title made from multiple clips, export starts a strict external decoder for each PlayItem, avoiding decoder state carried across incompatible boundaries. It joins explicitly mapped PCM tracks and source metadata at sample boundaries, without interpolating into the next clip. When audio ends before the video interval, source PTS and duration must establish the empty timestamp region before silence is inserted. At most one access unit extending past the requested endpoint can be trimmed; unexplained missing audio or duration differences remain errors. The `.import.json` records these adjustments. Source media and stored track edits are untouched. Metadata assembly and WAV writing run in the background.
 
 Save FLAC writes selected tracks as two rendered channels. Default quality is 16-bit / 44.1 kHz; rendered output also offers 24-bit / 48 kHz. Names distinguish [Speaker Stereo], [Headphone Direct] and [Headphone Binaural]. Speaker stereo is the same two-channel file for ordinary speakers and an amplifier with an optional subwoofer. FLAC does not retain the object position metadata.

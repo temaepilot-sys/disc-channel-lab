@@ -998,6 +998,7 @@ function setInterfaceHidden(hidden) {
 }
 $('toggle-ui').onclick = () => { setInterfaceHidden(!uiHidden); $('scene').focus(); };
 document.addEventListener('keydown', e => {
+  if ($('save-complete').open) return;
   cameraShift = !!e.shiftKey; cameraAlt = !!e.altKey;
   if (e.ctrlKey || e.metaKey) clearCameraKeys();
   if (e.code === 'KeyH' && !editingControl() && !e.ctrlKey && !e.altKey && !e.metaKey) {
@@ -1070,7 +1071,11 @@ async function settingsAction(save, startup = false) {
       const problem = await response.json();
       throw new Error(problem.error || 'Settings request failed.');
     }
-    if (save) $('settings-status').textContent = 'Saved. Restored on next start.';
+    if (save) {
+      $('settings-status').textContent = 'Saved. Restored on next start.';
+      clearCameraKeys();
+      if (!$('save-complete').open) $('save-complete').showModal();
+    }
     else {
       const result = await response.json();
       if (result.settings) applySettings(result.settings);
@@ -1106,6 +1111,7 @@ const settingsReady = (async () => {
     await settingsAction(false, true);
   }
   sessionReady = true;
+  $('save-settings').disabled = $('load-settings').disabled = false;
 })();
 function rememberSession(keepalive = false) {
   if (!sessionReady) return;

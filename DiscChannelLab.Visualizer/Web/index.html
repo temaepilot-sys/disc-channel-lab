@@ -79,4 +79,7 @@
   <div class="transport"><button id="play" class="primary" disabled>▶ Play</button><button id="stop" disabled>■</button><time id="time">0:00 / 0:00</time><input id="timeline" type="range" min="0" max="1" step="0.01" value="0" disabled aria-label="Playback position"><label class="volume">Volume <input id="volume" type="range" min="0" max="100" step="1" value="25"><output id="volume-value">25%</output></label></div>
   <div class="footnote"><span>An artistic view of audio features, not a measurement of acoustics or reverberation.</span><span id="state">Ready</span></div>
 </footer>
+<dialog id="save-complete" aria-labelledby="save-complete-title"><form method="dialog">
+  <h2 id="save-complete-title">Settings saved</h2><p>Saved settings will be restored on next start.</p><button autofocus>OK</button>
+</form></dialog>
 <script src="/spectral-veil.js"></script><script src="/spark-field.js"></script><script src="/app.js"></script></body></html>

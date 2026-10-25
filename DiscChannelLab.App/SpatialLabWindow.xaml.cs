@@ -288,6 +288,7 @@ public partial class SpatialLabWindow : Window
                 c.MetricsA.IntegratedLufs ?? -200, c.MetricsB.IntegratedLufs ?? -200, c.GainADb, c.GainBDb, ((ComboBoxItem)Verdict.SelectedItem).Content.ToString()!,
                 EvaluationNotes.Text + "\nEquipment: " + EquipmentNotes.Text, c.A.Snapshot, c.B.Snapshot));
             SpatialJson.Save(path, records); StatusText.Text = "Evaluation saved: " + path;
+            SaveCompletion.Show(this, "評価記録を保存しました。", path);
         }
         catch (Exception ex) { StatusText.Text = ex.Message; }
     }
@@ -303,7 +304,7 @@ public partial class SpatialLabWindow : Window
             var audio = await SpatialRendering.RenderAsync(input, snapshot, KeepTail.IsChecked == true, ct);
             await SpatialRendering.ExportAsync(audio, dialog.FileName, tools.Ffmpeg, false, ct);
             StatusText.Text = $"Saved {dialog.FileName}\nPeak {20 * Math.Log10(Math.Max(audio.Peak, 1e-20)):0.00} dBFS · tail {audio.TailFrames / 48000d:0.000}s";
-            MessageBox.Show(this, "Float WAV export completed.", "Spatial Lab", MessageBoxButton.OK, MessageBoxImage.Information);
+            SaveCompletion.Show(this, "バイノーラルWAVの書き出しが完了しました。", dialog.FileName);
         });
     }
     void SaveSettings() { var p = Pose(); SpatialJson.Save(settingsPath, new LabPreferences(Room(), p.Yaw, p.Pitch, p.Roll, A.Id, B.Id, ShowSceneLabels.IsChecked == true)); }

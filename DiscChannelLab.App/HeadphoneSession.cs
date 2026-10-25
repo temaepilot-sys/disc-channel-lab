@@ -150,7 +150,7 @@ public sealed class HeadphoneSession : INotifyPropertyChanged, IDisposable
         }
         catch (SocketException ex) { _error = ex.Message; }
     }
-    public void Save()
+    public bool Save()
     {
         try
         {
@@ -158,8 +158,9 @@ public sealed class HeadphoneSession : INotifyPropertyChanged, IDisposable
             var temporary = _path + ".tmp";
             File.WriteAllText(temporary, JsonSerializer.Serialize(Options with { Enabled = false }, new JsonSerializerOptions { WriteIndented = true }));
             File.Move(temporary, _path, overwrite: true);
+            return true;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { _error = ex.Message; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { _error = ex.Message; return false; }
     }
     public void Dispose() { Save(); _stop?.Cancel(); _udp?.Dispose(); _stop?.Dispose(); _stop = null; _udp = null; }
 }

@@ -10,6 +10,9 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Threading;
 
+if (args is ["save-notification-tests", var saveNotificationOutput])
+{ try { SaveNotificationTests.Run(saveNotificationOutput); return 0; } catch (Exception e) { Console.Error.WriteLine(e); return 1; } }
+
 if (args is ["adm-export-readback-tests", var admReadbackFile, var admReadbackOutput])
 { try { await AdmExportReadbackTests.Run(admReadbackFile, admReadbackOutput); return 0; } catch(Exception e) { Console.Error.WriteLine(e); return 1; } }
 

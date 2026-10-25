@@ -67,7 +67,11 @@ public partial class SpatialLabWindow
     {
         var dialog = new SaveFileDialog { Filter = "BRIR route profile|*.brir.json", FileName = "measured-room.brir.json" };
         if (dialog.ShowDialog(this) != true) return;
-        try { SpatialJson.Save(dialog.FileName, EditedBrir()); BrirStatus.Text = "Profile saved (not applied): " + dialog.FileName; }
+        try
+        {
+            SpatialJson.Save(dialog.FileName, EditedBrir()); BrirStatus.Text = "Profile saved (not applied): " + dialog.FileName;
+            SaveCompletion.Show(this, "BRIRプロファイルを保存しました。", dialog.FileName);
+        }
         catch (Exception ex) { BrirStatus.Text = ex.Message; }
     }
     async Task<PreparedBrir> PrepareEditedBrir(CancellationToken ct)

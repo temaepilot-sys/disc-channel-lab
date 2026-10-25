@@ -245,8 +245,14 @@ public partial class MainWindow : Window
     {
         CommitTrackEdits();
         var dialog = new SaveFileDialog { Title = "Save position-aware ADM — all chapters", Filter = "ADM BWF / BW64 (*.wav)|*.wav", FileName = "Position-aware-ADM.wav", OverwritePrompt = true };
-        if (dialog.ShowDialog(this) == true && await _model.ExportAdmAsync(dialog.FileName))
-            MessageBox.Show(this, LanguageService.Instance.IsJapanese ? "全曲の位置情報付きADMを保存しました。" : "Position-aware ADM saved, including all chapters.", "ADM", MessageBoxButton.OK, MessageBoxImage.Information);
+        if (dialog.ShowDialog(this) == true) await SaveAdmAsync(dialog.FileName);
+    }
+
+    private async Task<bool> SaveAdmAsync(string destination)
+    {
+        if (!await _model.ExportAdmAsync(destination)) return false;
+        SaveCompletion.Show(this, "位置情報付きADM WAVの保存が完了しました。", destination);
+        return true;
     }
 
     private async void Iso_Click(object sender, RoutedEventArgs e)
@@ -312,7 +318,8 @@ public partial class MainWindow : Window
     {
         var dialog = new SaveFileDialog { Title = LanguageService.T("診断レポートを保存"),
             Filter = "JSON (*.json)|*.json", FileName = $"DiscChannelLab-diagnostics-{DateTime.Now:yyyyMMdd-HHmmss}.json" };
-        if (dialog.ShowDialog(this) == true) await _model.SaveDiagnosticsAsync(dialog.FileName);
+        if (dialog.ShowDialog(this) == true && await _model.SaveDiagnosticsAsync(dialog.FileName))
+            SaveCompletion.Show(this, "診断レポートを保存しました。", dialog.FileName);
     }
     private void ClearSelection_Click(object sender, RoutedEventArgs e) => _model.SelectAll(false);
     private void BulkEditAll_Click(object sender, RoutedEventArgs e) => OpenBulkEditor(selectedOnly: false);
@@ -472,7 +479,7 @@ public partial class MainWindow : Window
         if (_model.SaveMixerDownmix && _mixerWindow?.CommitInputs() == false) return;
         CommitTrackEdits();
         if (await _model.ConvertAsync())
-            MessageBox.Show(this, LanguageService.T("FLACの書き出しが完了しました。"), "DiscChannelLab", MessageBoxButton.OK, MessageBoxImage.Information);
+            SaveCompletion.Show(this, "FLACの書き出しが完了しました。", _model.SavedFolder);
     }
 
     private void CommitTrackEdits()

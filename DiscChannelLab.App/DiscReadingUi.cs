@@ -86,15 +86,16 @@ public sealed partial class MainViewModel
         UpdateActions();
     }
 
-    public async Task SaveDiagnosticsAsync(string path)
+    public async Task<bool> SaveDiagnosticsAsync(string path)
     {
-        if (_disc is null) return;
+        if (_disc is null) return false;
         try
         {
             await DiscDiagnostics.SaveAsync(_disc, path, CancellationToken.None);
             Status = LanguageService.T("診断レポートを保存しました。");
+            return true;
         }
-        catch (Exception ex) { HandleError(ex); }
+        catch (Exception ex) { HandleError(ex); return false; }
     }
 }
 

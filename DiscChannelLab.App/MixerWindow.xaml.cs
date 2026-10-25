@@ -29,7 +29,7 @@ public partial class MixerWindow : Window
             DefaultExt = ".json", AddExtension = true, FileName = "mixer-preset.json", OverwritePrompt = true
         };
         if (dialog.ShowDialog(this) != true) return;
-        try { _model.CaptureMixerPreset().Save(dialog.FileName); }
+        try { _model.CaptureMixerPreset().Save(dialog.FileName); SaveCompletion.Show(this, "ミキサー設定を保存しました。", dialog.FileName); }
         catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or System.Text.Json.JsonException)
         { ShowPresetError(ex); }
     }
@@ -60,7 +60,7 @@ public partial class MixerWindow : Window
         if (!_model.CanExportMixer || !CommitInputs()) return;
         _model.SaveMixerDownmix = true;
         if (await _model.ConvertAsync())
-            MessageBox.Show(this, LanguageService.T("FLACの書き出しが完了しました。"), "DiscChannelLab", MessageBoxButton.OK, MessageBoxImage.Information);
+            SaveCompletion.Show(this, "FLACの書き出しが完了しました。", _model.SavedFolder);
     }
     public bool CommitInputs()
     {

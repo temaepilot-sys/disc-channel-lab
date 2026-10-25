@@ -22,6 +22,18 @@ The source presentation selector is always visible in both windows. It is enable
 
 Changes to source, source presentation, interval or comparison controls invalidate prepared audio. Press Prepare again. Master volume and mixer settings are captured at preparation; prepare again to compare subsequent changes.
 
+## Hear the added reflections
+
+On **3 · HRIR / Reflections**, choose **Listening Room**, enable **Reflections only**, then use Play in the main player. This isolates the added paths by muting direct sound and LFE. Disable Reflections only to restore the combined sound. **Prepare OFF / ON A/B** compares the same source and HRIR, optionally at matched loudness.
+
+Studio and Listening Room use only six first-order paths per non-LFE source. The configured −18 / −12 dB is per wall **before** distance loss and absorption. In an original independent-channel noise test, reflected/dry RMS measured about −24.7 / −21.6 dB, with excess delays of 3–13 / 4–17 ms. These figures depend on the source, HRTF and room; they are not universal levels or a listening assessment. Such short, quiet paths mainly change spatial cues and timbre rather than create a separate echo or hall reverb.
+
+For a more obvious audition, try **Listening Room → −6 dB**, then compare or isolate the reflections. Existing presets and saved settings are unchanged. Stronger settings may increase peaks; watch the clipped-sample count and reduce gain if needed. Recordings that already contain room sound may change only subtly or become less natural.
+
+**Big Room** is an additional test preset: 10 × 14 × 6 m, 0 dB per wall before distance and absorption, and low/mid/high absorption of 0.08/0.15/0.30. In the same synthesized 5.1 test, reflected/dry RMS was about −11.9 dB and the longest excess path about 41 ms, roughly 10 dB more reflected energy than Listening Room. Actual results depend on the source and HRIR. Use **Reflections only** to isolate the added sound. This still uses six first-order paths, without a church-like late reverb. Existing presets and the default OFF state are retained.
+
+Atmos **Stereo presentation** deliberately bypasses HRIR and added reflections. Applying an active room mode there is rejected before changing playback; choose **Objects** or **5.1** on tab 2 first. **Measured BRIR** is a separate room response and bypasses this added reflection model.
+
 ## Export
 
 Use the lower part of this page for fixed-pose 48 kHz float WAV export, selecting the interval or whole track. Enable **Use loaded Measured BRIR** to export that independent renderer. The main player's **Save FLAC** handles selected-track binaural FLAC when headphone rendering is enabled. A `.render.json` sidecar records the settings. Exports do not record head-tracker motion; per-track exports start with independent DSP history.

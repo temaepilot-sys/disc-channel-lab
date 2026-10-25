@@ -74,7 +74,7 @@ public partial class SpatialLabWindow : Window
         bool previous = roomUpdating; roomUpdating = true;
         try
         {
-            RoomMode.SelectedIndex = r.Mode == "Pure HRTF" ? 0 : r.Mode == "Studio" ? 1 : 2;
+            RoomMode.SelectedItem = RoomMode.Items.OfType<ComboBoxItem>().First(i => Equals(i.Content, r.Mode));
             RoomWidth.Text = r.Width.ToString(CultureInfo.InvariantCulture); RoomDepth.Text = r.Depth.ToString(CultureInfo.InvariantCulture); RoomHeight.Text = r.Height.ToString(CultureInfo.InvariantCulture);
             ListenerHeight.Text = r.ListenerHeight.ToString(CultureInfo.InvariantCulture); SpeakerRadius.Text = r.SpeakerRadius.ToString(CultureInfo.InvariantCulture);
             ReflectionDb.Text = r.ReflectionDb.ToString(CultureInfo.InvariantCulture); ReflectionLevel.Value = r.ReflectionDb;
@@ -169,12 +169,14 @@ public partial class SpatialLabWindow : Window
         {
             ActiveHrtfText.Text = "Main player: stereo presentation · HRTF bypassed";
             ActiveRoomText.Text = "Main reflections: OFF · stereo presentation";
+            RoomDiagnosticText.Text = "Stereo presentation bypasses added reflections. Choose Objects or 5.1 in Source presentation on tab 2, then select Studio or Listening Room.";
             return;
         }
         if (options.Enabled && options.Method == HeadphoneMethod.MeasuredBrir)
         {
             ActiveHrtfText.Text = "Main player: Measured BRIR · " + BrirLibrary.Name(options) + " · fixed head";
-            ActiveRoomText.Text = "Measured room response only · HRIR and added reflections bypassed"; return;
+            ActiveRoomText.Text = "Measured room response only · HRIR and added reflections bypassed";
+            RoomDiagnosticText.Text = "The measured BRIR already includes its room response; the added first-order reflection model is bypassed."; return;
         }
         ActiveHrtfText.Text = !options.Enabled ? "Main player: Stereo · HRTF off" : options.Method == HeadphoneMethod.Direct
             ? "Main player: Direct · HRTF off" : "Main player HRTF: " + (ActiveEntry()?.Name ?? Path.GetFileNameWithoutExtension(options.SofaPath));
@@ -183,6 +185,7 @@ public partial class SpatialLabWindow : Window
             (options.Room.SoloReflections ? " · REFLECTIONS ONLY (direct sound and LFE muted)" : " · direct + reflected sound")
             : "Main reflections: OFF · " + (!options.Enabled ? "Stereo" : options.Method != HeadphoneMethod.SteamAudio ? "Direct mode" : "Pure HRTF");
         if (!on) RoomDiagnosticText.Text = "No added room reflections. Choose Studio or Listening Room to hear them.";
+        else UpdateRoomDiagnostics();
     }
     void Headphone_Changed(object? sender, PropertyChangedEventArgs e)
     {
@@ -202,8 +205,7 @@ public partial class SpatialLabWindow : Window
     async void RoomMode_Changed(object sender, SelectionChangedEventArgs e)
     {
         if (closed || !ready || roomUpdating) return;
-        if (RoomMode.SelectedIndex == 1) ReadRoom(new() { Mode = "Studio" });
-        else if (RoomMode.SelectedIndex == 2) ReadRoom(new() { Mode = "Listening Room", Width = 6, Depth = 5, Height = 3.2, ReflectionDb = -12, MidAbsorption = .35, HighAbsorption = .6 });
+        if (RoomMode.SelectedIndex > 0) ReadRoom(SpatialRoomOptions.Preset(((ComboBoxItem)RoomMode.SelectedItem).Content.ToString()!));
         else { roomUpdating = true; SoloReflections.IsChecked = false; roomUpdating = false; }
         await ApplyRoomEditsAsync();
     }
@@ -257,7 +259,7 @@ public partial class SpatialLabWindow : Window
         if (!options.Enabled || options.Method != HeadphoneMethod.SteamAudio || !room.Enabled) return;
         try
         {
-            var scene = model.CurrentAdm?.Scene ?? (model.SelectedStream is { } stream ? SpatialScene.ChannelBed(HeadphoneGeometry.Channels(stream), 256, options.FrontAngle) : null);
+            var scene = model.CurrentAdmScene ?? (model.SelectedStream is { } stream ? SpatialScene.ChannelBed(HeadphoneGeometry.Channels(stream), 256, options.FrontAngle) : null);
             if (scene is null) { RoomDiagnosticText.Text = "Open audio in the main window to inspect reflection paths."; return; }
             long time = model.CurrentAdm is null ? 0 : (long)Math.Round(model.CurrentAdmSeconds * 48000);
             var paths = scene.Sources.Where(s => !s.IsLfe).Select(s => s.At(time).Position).SelectMany(p => Enumerable.Range(0, 6).Select(w => EarlyReflections.Path(p * (float)room.SpeakerRadius, room, w))).ToArray();

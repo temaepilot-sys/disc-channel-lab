@@ -10,6 +10,20 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Threading;
 
+if (args is ["adm-export-readback-tests", var admReadbackFile, var admReadbackOutput])
+{ try { await AdmExportReadbackTests.Run(admReadbackFile, admReadbackOutput); return 0; } catch(Exception e) { Console.Error.WriteLine(e); return 1; } }
+
+if (args is ["damf-playlist-tests", var damfPlaylistOutput])
+{ try { await DamfPlaylistTests.Run(damfPlaylistOutput); return 0; } catch(Exception e) { Console.Error.WriteLine(e); return 1; } }
+
+if (args is ["atmos-disc-inspect", var atmosInspectDrive, var atmosInspectOutput])
+{ try { await AtmosDiscTests.Inspect(atmosInspectDrive, atmosInspectOutput); return 0; } catch(Exception e) { Console.Error.WriteLine(e); return 1; } }
+if (args is ["atmos-disc-import", var atmosImportDrive, var atmosImportNumber, var atmosImportOutput])
+{ try { await AtmosDiscTests.Import(atmosImportDrive, int.Parse(atmosImportNumber), atmosImportOutput); return 0; } catch(Exception e) { Console.Error.WriteLine(e); return 1; } }
+
+if (args is ["room-reflection-tests", var roomOutput])
+{ try { await RoomReflectionTests.Run(roomOutput); return 0; } catch(Exception e) { Console.Error.WriteLine(e); return 1; } }
+
 if (args is ["spatial-window-tests", var windowOutput])
 { try { SpatialWindowLifecycleTests.Run(windowOutput); return 0; } catch(Exception e) { Console.Error.WriteLine(e); return 1; } }
 if (args is ["spatial-window-tests", var realWindowOutput, var windowAdm])

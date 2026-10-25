@@ -95,10 +95,22 @@ internal static class ComparisonPresentationUiTests
                 Click("ComparisonPrepareButton"); Until(() => Pages().IsEnabled, "Stereo rejection");
                 Check(Feedback().Contains("Stereo presentation bypasses") && Feedback().Contains("Use 5.1"),
                     "Stereo bypass failure also offers the working inline 5.1 recovery");
+                var beforeRoom = HeadphoneSession.Current.Options;
+                bool roomRejected = false;
+                try { Complete(model.ApplySpatialRoomAsync(new() { Mode = "Studio" })); }
+                catch (InvalidOperationException ex) { roomRejected = ex.Message.Contains("Stereo presentation") && ex.Message.Contains("5.1"); }
+                Check(roomRejected && HeadphoneSession.Current.Options == beforeRoom,
+                    "Stereo presentation cannot claim to apply inaudible reflections or change the saved renderer");
+                Check(((TextBlock)lab.FindName("RoomDiagnosticText")).Text.Contains("Stereo presentation bypasses"),
+                    "The reflection diagnostic explains stereo bypass instead of retaining stale active path counts");
                 mainCombo.SetCurrentValue(Selector.SelectedItemProperty, model.AtmosPreviewChoices.First(p => p.Value == AtmosPresentation.Objects));
                 Until(() => model.SelectedAtmosPresentation == AtmosPresentation.Objects && Equals(labCombo.SelectedItem, model.SelectedAtmosPreview), "main to lab sync");
                 Check(Button("ComparisonUse51Button").IsEnabled && model.CurrentAdmScene?.Sources.Length == 16,
                     "Main-window selection propagates back to the Lab without recursively switching or losing Objects");
+                Complete(model.ChangeAtmosPresentationAsync(model.AtmosPreviewChoices.First(p => p.Value == AtmosPresentation.Surround51)));
+                Complete(model.ApplySpatialRoomAsync(new() { Mode = "Studio" })); Pump(100);
+                Check(((TextBlock)lab.FindName("RoomDiagnosticText")).Text.Contains("Applied paths: 30"),
+                    "5.1 room diagnostics use the active five non-LFE speakers, not the sixteen-source Objects scene");
                 Complete(model.DisableAdmPlaybackAsync()); Pump(100);
                 Check(mainCombo.IsVisible && labCombo.IsVisible && !mainCombo.IsEnabled && !labCombo.IsEnabled && !Button("ComparisonUse51Button").IsEnabled,
                     "Disabling ADM keeps the controls visible with an explanation instead of hiding them");

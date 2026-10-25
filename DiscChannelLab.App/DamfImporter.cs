@@ -11,7 +11,7 @@ public sealed record AdmChapter(long StartSample, string Title, string? Artist =
 public sealed record AdmAlbumMetadata(string Album, string? Artist, string? Origin, AdmChapter[] Chapters);
 
 /// <summary>Input adapter for truehdd 0.6.2 DAMF output. No audio codec or protection processing here.</summary>
-public static class DamfImporter
+public static partial class DamfImporter
 {
     public const string Version = "truehdd-DAMF-point-source-2";
     sealed record Event(long At, Vector3 Position, float Gain, int Ramp);

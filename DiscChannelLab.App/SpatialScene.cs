@@ -73,9 +73,19 @@ public sealed record SpatialRoomOptions
     public double HighAbsorption { get; init; } = .55;
     public bool SoloReflections { get; init; }
     public bool Enabled => Mode != "Pure HRTF";
+    public static SpatialRoomOptions Preset(string mode) => mode switch
+    {
+        "Pure HRTF" => new(),
+        "Studio" => new() { Mode = mode },
+        "Listening Room" => new() { Mode = mode, Width = 6, Depth = 5, Height = 3.2, ReflectionDb = -12, MidAbsorption = .35, HighAbsorption = .6 },
+        // Deliberately audible first-order paths for comparison; not a measured hall or a late-reverberation model.
+        "Big Room" => new() { Mode = mode, Width = 10, Depth = 14, Height = 6, ListenerHeight = 1.5,
+            ReflectionDb = 0, LowAbsorption = .08, MidAbsorption = .15, HighAbsorption = .3 },
+        _ => throw new InvalidDataException("Unknown room preset.")
+    };
     public void Validate()
     {
-        if (Mode is not ("Pure HRTF" or "Studio" or "Listening Room") ||
+        if (Mode is not ("Pure HRTF" or "Studio" or "Listening Room" or "Big Room") ||
             !double.IsFinite(Width + Depth + Height + ListenerHeight + SpeakerRadius + ReflectionDb + LowAbsorption + MidAbsorption + HighAbsorption) ||
             Width is < 2 or > 30 || Depth is < 2 or > 30 || Height is < 2 or > 15 ||
             ListenerHeight <= .2 || ListenerHeight >= Height - .2 || SpeakerRadius is < .2 or > 10 ||

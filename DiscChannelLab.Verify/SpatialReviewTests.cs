@@ -62,7 +62,7 @@ internal static class SpatialReviewTests
                 async Task Until(Func<bool> done, string label)
                 {
                     var watch = Stopwatch.StartNew();
-                    while (!done()) { if (watch.Elapsed > TimeSpan.FromSeconds(20)) throw new TimeoutException(label + " / " + model?.Status); model?.AdvancePlaybackClock(); await Task.Delay(15); }
+                    while (!done()) { if (watch.Elapsed > TimeSpan.FromSeconds(20)) throw new TimeoutException(label + " / " + model?.Status + " / " + ((TextBox?)lab?.FindName("StatusText"))?.Text); model?.AdvancePlaybackClock(); await Task.Delay(15); }
                 }
                 async Task Tests()
                 {
@@ -79,8 +79,9 @@ internal static class SpatialReviewTests
                     Check(!captions.Any(c => removed.Contains(c!)) && lab.FindName("SeekSeconds") is null && lab.FindName("SourceKind") is null,
                         "Duplicate scene transport, apply/save and FLAC export controls are removed from Spatial Lab");
                     Check(lab.FindName("SceneTime") is ProgressBar, "ADM timeline is a read-only follower of the main player");
-                    await model.SeekAsync(20); await Task.Delay(150);
-                    Check(Math.Abs(((ProgressBar)lab.FindName("SceneTime")).Value - 20) < .1, "ADM inspector follows the main player's seek position");
+                    double seekTime = Math.Min(20, model.PreviewMax / 3);
+                    await model.SeekAsync(seekTime); await Task.Delay(150);
+                    Check(Math.Abs(((ProgressBar)lab.FindName("SceneTime")).Value - seekTime) < .1, "ADM inspector follows the main player's seek position");
                     pages.SelectedIndex = 2;
                     int sessions = 0; AudioNavigationService.HeadphoneOutputFactory = () => { Interlocked.Increment(ref sessions); return new SpatialLabTests.SilentDevice(); };
                     await model.TogglePlaybackAsync(); await Until(() => sessions == 1, "start real ADM output");
@@ -105,7 +106,15 @@ internal static class SpatialReviewTests
                     Check(((TextBlock)lab.FindName("RoomDiagnosticText")).Text.Contains("ms") && ((TextBlock)lab.FindName("RoomDiagnosticText")).Text.Contains("dB"),
                         "Applied reflection path delays and attenuated levels are visible");
                     Save(lab, Path.Combine(root, "early-reflections-applied.png"));
-                    mode.SelectedIndex = 0; await Until(() => sessions == 6 && !HeadphoneSession.Current.Options.Room.Enabled, "OFF apply");
+                    mode.SelectedIndex = 3; await Until(() => sessions == 6 && HeadphoneSession.Current.Options.Room.Mode == "Big Room", "Big Room preset");
+                    Check(HeadphoneSession.Current.Options.Room == SpatialRoomOptions.Preset("Big Room") && model.IsPlaying,
+                        "Big Room applies its test dimensions and reflection strength while retaining main playback");
+                    lab.Close(); lab = new SpatialLabWindow(model) { Owner = main, ShowActivated = false }; lab.Show();
+                    pages = (TabControl)lab.FindName("Pages"); mode = (ComboBox)lab.FindName("RoomMode"); pages.SelectedIndex = 2;
+                    Check(mode.SelectedIndex == 3 && ((TextBlock)lab.FindName("ActiveRoomText")).Text.Contains("Big Room"),
+                        "Reopening the Lab retains Big Room rather than relabeling it Listening Room");
+                    Save(lab, Path.Combine(root, "big-room-applied.png"));
+                    mode.SelectedIndex = 0; await Until(() => sessions == 7 && !HeadphoneSession.Current.Options.Room.Enabled, "OFF apply");
                     Check(model.IsPlaying && ((TextBlock)lab.FindName("ActiveRoomText")).Text.Contains("OFF"), "Pure HRTF removes reflections in the active playback renderer");
                     await model.TogglePlaybackAsync(); int pausedSessions = sessions;
                     mode.SelectedIndex = 1; await Until(() => HeadphoneSession.Current.Options.Room.Enabled, "paused room apply"); await Task.Delay(100);
@@ -133,7 +142,7 @@ internal static class SpatialReviewTests
                     // Verify the user-facing OFF/ON preparation route, not only the individual DSP primitives.
                     ((TextBox)lab.FindName("IntervalLength")).Text = "5";
                     ((Button)lab.FindName("RoomCompareButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-                    await Until(() => ((TextBox)lab.FindName("StatusText")).Text.StartsWith("Room comparison ready"), "room A/B preparation");
+                    await Until(() => ((Button)lab.FindName("ComparisonPlayAButton")).IsEnabled && ((Button)lab.FindName("ComparisonPlayBButton")).IsEnabled, "room A/B preparation");
                     var comparison = (ComparisonAudio)typeof(SpatialLabWindow).GetField("comparison", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(lab)!;
                     Check(!comparison.A.Snapshot.Options.Room.Enabled && comparison.B.Snapshot.Options.Room.Enabled && !comparison.B.Snapshot.Options.Room.SoloReflections,
                         "OFF/ON A/B uses dry A and direct-plus-reflections B, even after the isolation diagnostic");

@@ -34,8 +34,10 @@ public sealed partial class MainViewModel
         if (CurrentAdm is not null && !IsAdmPlaybackEnabled) throw new InvalidOperationException("Enable ADM playback in the main window first.");
         if (IsBusy) throw new InvalidOperationException("Wait for the current operation before changing reflections.");
         room.Validate();
+        if (room.Enabled && IsAtmosStreamingEnabled && SelectedAtmosPresentation == AtmosPresentation.Stereo)
+            throw new InvalidOperationException("Stereo presentation bypasses room reflections. Choose Objects or 5.1 in Source presentation on tab 2 (Compare / Export), then select the room mode again.");
         var session = HeadphoneSession.Current;
-        var scene = CurrentAdm?.Scene ?? (SelectedStream is { } stream
+        var scene = CurrentAdmScene ?? (SelectedStream is { } stream
             ? SpatialScene.ChannelBed(HeadphoneGeometry.Channels(stream), 256, session.Options.FrontAngle) : null);
         if (room.Enabled && scene is not null)
             await Task.Run(() =>

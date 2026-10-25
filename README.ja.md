@@ -67,7 +67,7 @@ Stereo／Direct／HRTFのネイティブ再生では、一時停止中もデコ�
 Spatial LabをDiscChannelLab本体に統合しました。**HRTF / room…** から、SOFAライブラリ、音量を揃えたA/B比較、初期反射、独立した実測BRIR、ADM位置表示を開けます。タブ順は **1 HRTF Library → 2 Compare / Export → 3 HRIR / Reflections → 4 Measured BRIR → 5 ADM scene** です。
 
 - 複数のSOFA HRIRを登録・検証し、頭の向きと条件を固定した同一区間（5～60秒）を比較します。Prepareで計算し、Play A/Bで試聴します。[比較の操作説明](docs/comparison.ja.md)。
-- 再生と共通の処理で、選択曲の2ch FLACや固定方向・48 kHzのfloat WAVを保存します。設定JSONも記録します。任意の初期反射は6面の一次反射モデルで、Pure HRTFも維持します。
+- 再生と共通の処理で、選択曲の2ch FLACや固定方向・48 kHzのfloat WAVを保存します。設定JSONも記録します。任意の初期反射は6面の一次反射モデルで、違いを確認しやすい **Big Room** と、反射OFFのPure HRTFも選べます。
 - **Measured BRIR** はスピーカー・左右耳の対応を指定した実測応答で再生します。測定遅延・残響を保持し、HRIRを二重適用しません。頭部方向は固定で、移動するADM Objectsには適用できません。[対応形式と制約](docs/brir.ja.md)。
 - 対応ADM BWF/BW64を読み込み、TrueHDの位置情報付き再生には利用者が用意した **truehdd 0.6.2** を使います。通常のPlay・シークで随時再生し、初回の遠いシークでは準備待ちがあります。ADM sceneでは回転・俯瞰・Solo試聴ができ、位置情報付き全曲ADMの保存も選べます。[音源を開くところからの操作説明](docs/object-audio.ja.md)。
 - Atmosの随時再生ではObjects／5.1 presentation／Stereo presentationを選べます。BRIR比較に必要な5.1へは、比較画面上部の **Use 5.1 for HRIR / BRIR** から切り替えられます。

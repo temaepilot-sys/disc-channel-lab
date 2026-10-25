@@ -18,7 +18,7 @@ Every launch starts in **2ch Stereo**, even when the previous session used headp
 | Direct | Equal-power pan from relative direction, a spherical-head shadow filter, and adjustable rear high-frequency reduction. Approximate interaural delay is optional. |
 | Steam Audio | Steam Audio 4.8.1 applies its built-in HRTF or a selected external SOFA separately to each source channel, with direction interpolation. Direct filters and additional delay are bypassed. |
 
-Neither renderer adds room reflections, wall occlusion or distance attenuation. LFE is added equally to both ears at 70% by default, without directional filtering. A 5.0 input does not acquire an LFE channel.
+By default, neither renderer adds room reflections, wall occlusion or distance attenuation. Spatial Lab can add optional first-order reflections to the HRIR path; this does not add a long reverberation tail. [How to hear and compare the effect](comparison.md#hear-the-added-reflections). LFE is added equally to both ears at 70% by default, without directional filtering. A 5.0 input does not acquire an LFE channel.
 
 ## Resetting adjustments
 

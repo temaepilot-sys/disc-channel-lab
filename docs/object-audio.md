@@ -65,7 +65,9 @@ Save ADM creates one full-title BW64 containing audio, positions and chapter bou
 
 After a successful ADM WAV or FLAC export, a completion dialog shows the destination. Cancellation or a failed save does not show a success notification. Explicit settings, profile, evaluation and diagnostic saves also show completion; automatic preference and track-edit saves stay silent.
 
-For a BD title made from multiple clips, export starts a strict external decoder for each PlayItem, avoiding decoder state carried across incompatible boundaries. It joins explicitly mapped PCM tracks and source metadata at sample boundaries, without interpolating into the next clip. When audio ends before the video interval, source PTS and duration must establish the empty timestamp region before silence is inserted. At most one access unit extending past the requested endpoint can be trimmed; unexplained missing audio or duration differences remain errors. The `.import.json` records these adjustments. Source media and stored track edits are untouched. Metadata assembly and WAV writing run in the background.
+For a BD title with one or more clips, export starts a strict external decoder for each PlayItem, avoiding decoder state carried across incompatible boundaries. It joins explicitly mapped PCM tracks and source metadata at sample boundaries, without interpolating into the next clip. When audio ends before the video interval, source PTS and duration must establish the empty timestamp region before silence is inserted. At most one access unit extending past the requested endpoint can be trimmed; unexplained missing audio or duration differences remain errors. The `.import.json` records these adjustments. Source media and stored track edits are untouched. Metadata assembly and WAV writing run in the background.
+
+Some valid MPEG-TS audio streams do not report an overall duration. In that case, export scans the selected audio stream's packet timestamps to the end of the clip with bounded memory. It accepts the first and last timestamps only after checking that all audio packets form a continuous timeline; missing timestamps, internal gaps, overlaps or corrupt packets remain errors. It does not substitute the video's duration for the audio's duration.
 
 Save FLAC writes selected tracks as two rendered channels. Default quality is 16-bit / 44.1 kHz; rendered output also offers 24-bit / 48 kHz. Names distinguish [Speaker Stereo], [Headphone Direct] and [Headphone Binaural]. Speaker stereo is the same two-channel file for ordinary speakers and an amplifier with an optional subwoofer. FLAC does not retain the object position metadata.
 
@@ -75,6 +77,7 @@ To preserve the ordinary source channels as multichannel FLAC, disable ADM and u
 
 ## Troubleshooting
 
+- Source reading interrupted: check that the disc/ISO is still mounted and the drive remains connected, then retry. FFmpeg read errors stop ADM preparation and live object decoding immediately; a partial decode is not accepted as a completed archive. Demuxer errors and selected input arguments are recorded in the local log. DiscChannelLab does not automatically unmount disc images.
 - Disabled ADM button: check that the selected title contains supported ADM or TrueHD Atmos.
 - Unexpected level: check HRTF trims, common headroom, LFE, master and OS processing. Default headphone headroom remains -12 dB. The direct stereo presentation bypasses headphone headroom as well as HRTF.
 - Slow seek: the first seek beyond Prepared must buffer. Cancel or change the source to stop preparation.

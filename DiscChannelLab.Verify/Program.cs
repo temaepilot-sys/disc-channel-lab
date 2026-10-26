@@ -10,6 +10,15 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Threading;
 
+if (args is ["atmos-read-failure-tests", var failureTransport, var failureOutput])
+{ try { await AtmosReadFailureTests.Run(failureTransport, failureOutput); return 0; } catch (Exception e) { Console.Error.WriteLine(e); return 1; } }
+
+if (args is ["single-clip-atmos-tests", var singleClipSource, var singleClipOutput])
+{ try { await SingleClipAtmosTests.Run(singleClipSource, singleClipOutput); return 0; } catch (Exception e) { Console.Error.WriteLine(e); return 1; } }
+
+if (args.Length is 2 or 3 && args[0] == "audio-timestamp-tests")
+{ try { await AudioTimestampCoverageTests.Run(args[1], args.Length == 3 ? args[2] : null); return 0; } catch (Exception e) { Console.Error.WriteLine(e); return 1; } }
+
 if (args is ["save-notification-tests", var saveNotificationOutput])
 { try { SaveNotificationTests.Run(saveNotificationOutput); return 0; } catch (Exception e) { Console.Error.WriteLine(e); return 1; } }
 

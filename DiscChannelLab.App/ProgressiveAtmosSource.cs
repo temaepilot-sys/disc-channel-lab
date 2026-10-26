@@ -181,7 +181,7 @@ public sealed class ProgressiveAtmosSource : IAsyncDisposable
                 if (!AtmosImportService.IsAtmos(stream)) throw new InvalidDataException("The selected clip is not TrueHD Atmos.");
                 long skip = clip.InTicks - (stream.StartTimeTicks ?? (clip.File is not null ? 0 : throw new InvalidDataException("Unknown clip start time.")));
                 if (skip < 0) throw new InvalidDataException("Invalid clip interval.");
-                var args = new List<string> { "-hide_banner", "-nostdin", "-v", "error" };
+                var args = new List<string> { "-hide_banner", "-nostdin", "-xerror", "-v", "error" };
                 if (skip > 0) args.AddRange(["-ss", (skip / 45000m).ToString(CultureInfo.InvariantCulture)]);
                 args.AddRange(["-i", path, "-map", $"0:{stream.Index}", "-t", ((clip.OutTicks - clip.InTicks) / 45000m).ToString(CultureInfo.InvariantCulture), "-c:a", "copy", "-f", "truehd", "pipe:1"]);
                 var extractInfo = new ProcessStartInfo(tools.Ffmpeg) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
@@ -200,7 +200,14 @@ public sealed class ProgressiveAtmosSource : IAsyncDisposable
                         await decoder.StandardInput.BaseStream.WriteAsync(bytes.AsMemory(0, n), token);
                     }
                     await extract.WaitForExitAsync(token);
-                    if (extract.ExitCode != 0) throw new FfToolException(await extractErrors);
+                    string extractDiagnostic = await extractErrors;
+                    if (!string.IsNullOrWhiteSpace(extractDiagnostic)) log.Write($"LIVE ADM DEMUX {clip.Id}: " + extractDiagnostic);
+                    if (extract.ExitCode != 0)
+                    {
+                        Kill(decoder);
+                        await decoder.WaitForExitAsync(CancellationToken.None);
+                        throw new AtmosSourceReadException(clip.Id, extractDiagnostic);
+                    }
                 }
                 finally { Kill(extract); }
             }

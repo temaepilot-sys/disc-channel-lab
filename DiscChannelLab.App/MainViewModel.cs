@@ -1191,6 +1191,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
         _log.Write($"ERROR {exception}");
         Status = exception switch
         {
+            AtmosSourceReadException => exception.Message,
             ProtectedDiscException => exception.Message,
             InvalidDataException => exception.Message,
             FileNotFoundException => exception.Message,

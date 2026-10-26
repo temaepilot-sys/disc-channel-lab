@@ -58,6 +58,7 @@ public sealed class LanguageService : INotifyPropertyChanged
         ["このタイトルには暗号化された音声・映像データが含まれるため処理できません。保護の解除は行いません。"] = "This title contains encrypted audio/video data and cannot be processed. Copy protection is not removed.",
         ["ディスクまたは音楽フォルダーを選択"] = "Select a disc or music folder",
         ["FLACの書き出しが完了しました。"] = "FLAC export completed.",
+        ["音声データを最後まで読み取れませんでした。ディスク、ISOのマウント状態、接続を確認してから再実行してください。"] = "The audio source could not be read completely. Check the disc, ISO mount and connection, then retry.",
         ["位置情報付きADM WAVの保存が完了しました。"] = "Position-aware ADM WAV export completed.",
         ["バイノーラルWAVの書き出しが完了しました。"] = "Binaural WAV export completed.",
         ["ミキサー設定を保存しました。"] = "Mixer settings saved.",

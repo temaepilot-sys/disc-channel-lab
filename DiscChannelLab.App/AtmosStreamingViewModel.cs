@@ -76,8 +76,7 @@ public sealed partial class MainViewModel
         BeginWork("Starting object-audio preview · preparing a short read-ahead…");
         try
         {
-            var tools = new ToolPaths(); var metadata = new AdmAlbumMetadata(_loadedPlaylist.TitleName, _disc.Artist, _disc.Root,
-                Tracks.Select(t => new AdmChapter(ConversionService.ToSample(t.StartTicks, 48000), t.Title, t.Artist)).ToArray());
+            var tools = new ToolPaths(); var metadata = AdmMetadataExport.FromTracks(_disc, _loadedPlaylist, Tracks.ToArray());
             var source = await ProgressiveAtmosSource.StartAsync(_disc, _loadedPlaylist, stream, tools,
                 new FfprobeService(tools, new ProcessRunner(_log)), _log, metadata, _work!.Token);
             _navigation.ProgressiveAtmos = source; _navigation.AtmosPresentation = AtmosPresentation.Objects;

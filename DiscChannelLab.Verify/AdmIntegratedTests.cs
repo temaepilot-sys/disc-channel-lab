@@ -79,7 +79,9 @@ internal static class AdmIntegratedTests
       model.ChooseSpatialInput=_=>Task.FromResult(SpatialOpenChoice.Spatial);await model.OpenAudioFilesAsync([small]);await model.EnableAdmPlaybackAsync();
       var sinks=new List<FastOutput>();AudioNavigationService.HeadphoneOutputFactory=()=>{var s=new FastOutput();sinks.Add(s);return s;};model.ContinuousPlayback=false;
       await model.TogglePlaybackAsync();await Until(()=>!model.IsPlaying,model,TimeSpan.FromSeconds(15));Check(sinks.Count==1&&sinks[0].Peak>.001&&sinks[0].Finite,"Main Play renders real Atmos-derived object audio, not a decoder guess of 16ch layout");
-      string copied=Path.Combine(root,"copied-full-title.wav");Check(await model.ExportAdmAsync(copied)&&SHA256.HashData(File.ReadAllBytes(copied)).SequenceEqual(SHA256.HashData(File.ReadAllBytes(small))),"Save ADM preserves PCM, positions and chapters byte-for-byte");
+      string copied=Path.Combine(root,"copied-full-title.wav");Check(await model.ExportAdmAsync(copied),"Save ADM completes with current track metadata");
+      var copiedWave=AdmWave.Open(copied);var sourceWave=AdmWave.Open(small);
+      Check(File.ReadAllBytes(copied).AsSpan((int)copiedWave.DataOffset,(int)copiedWave.DataBytes).SequenceEqual(File.ReadAllBytes(small).AsSpan((int)sourceWave.DataOffset,(int)sourceWave.DataBytes))&&copiedWave.Album!.Chapters.Select(c=>c.Title).SequenceEqual(model.Tracks.Select(t=>t.Title)),"Save ADM preserves PCM byte-for-byte and embeds the current track names");
       model.OutputFolder=Path.Combine(root,"flac-cd");Check(await model.ConvertAsync(),"Main FLAC button renders ADM using selected CD quality");
       var tools=new ToolPaths();var probe=new FfprobeService(tools,new ProcessRunner(new AppLog(Path.Combine(root,"logs"))));string cd=Directory.GetFiles(model.OutputFolder,"*.flac",SearchOption.AllDirectories).Single();var cdData=await probe.ProbeAudioFileAsync(cd,CancellationToken.None);
       Check(cdData.Analysis.Streams[0] is{SampleRate:44100,BitDepth:16,Channels:2},"ADM CD export is 16-bit / 44.1 kHz stereo with original track tags");

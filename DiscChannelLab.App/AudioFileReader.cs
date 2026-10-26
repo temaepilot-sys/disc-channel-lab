@@ -100,7 +100,7 @@ public sealed class AudioFileReader(FfprobeService probe, AppLog log)
                 { DetectedAudioCount = first.Data.Analysis.DetectedAudioCount, Diagnostics = items.Select(i => i.Path).Concat(skipped).ToArray() }
             });
         }
-        var albums = playlists.Select(p => Tag(p.FileAnalysis!.Tags, "album") ?? p.TitleName).Distinct().ToArray();
+        var albums = playlists.Select(p => Tag(p.FileAnalysis!.Tags, "disc_title") ?? Tag(p.FileAnalysis!.Tags, "album") ?? p.TitleName).Distinct().ToArray();
         var initial = files[0].Data.Analysis.Tags;
         var identity = string.Join('\n', files.Select(f => $"{f.Path.ToUpperInvariant()}|{f.Length}|{f.WriteTicks}"));
         return new()

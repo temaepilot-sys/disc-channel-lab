@@ -14,7 +14,12 @@ public static class AdmFileFormat
         for (int i = 0; i < values.Length; i++) chapters[i + 1] = new(values[i].Title, values[i].Artist ?? wave.Album?.Artist) { StartTicks = Ticks(values[i].StartSample) };
         var tags = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["album"] = wave.Album?.Album ?? wave.Programmes.First(p => p.Id == wave.ProgrammeId).Name, ["title"] = wave.Album?.Album ?? Path.GetFileNameWithoutExtension(wave.Path) };
         if (wave.Album?.Artist is { } artist) tags["artist"] = artist;
-        if (wave.Album?.Origin is { } origin) tags["description"] = "ADM source: " + origin;
+        if (wave.Album?.DiscTitle is { } discTitle) tags["disc_title"] = discTitle;
+        if (wave.Album?.Date is { } date) tags["date"] = date;
+        if (wave.Album?.Genre is { } genre) tags["genre"] = genre;
+        if (wave.Album?.Publisher is { } publisher) tags["publisher"] = publisher;
+        if (wave.Album?.Description is { } description) tags["description"] = description;
+        else if (wave.Album?.Origin is { } origin) tags["description"] = "ADM source: " + origin;
         return new(Ticks(wave.Scene.DurationSamples), new([stream], chapters, tags) { DetectedAudioCount = 1, Availability = AudioAvailability.Ready, Diagnostics = wave.Scene.Warnings });
     }
     public static HeadphoneOptions RenderOptions(HeadphoneOptions value) => value.Enabled ? value : value with

@@ -40,9 +40,13 @@ internal static class SaveNotificationTests
                         Check(await SaveAdm(english), "The main-window ADM save command completes successfully");
                         Check(dialog.Messages.Count == 1 && dialog.Messages[0].Contains("Position-aware ADM WAV export completed.") && dialog.Messages[0].Contains(english),
                             "Real ADM completion dialog contains the English notification and destination");
-                        Check(SHA256.HashData(File.ReadAllBytes(english)).SequenceEqual(hash) && AdmWave.Open(english).Channels == 3,
-                            "Completion is shown after the final readable ADM WAV preserves all source bytes");
-                        Check(!await SaveAdm(english) && dialog.Messages.Count == 1 && SHA256.HashData(File.ReadAllBytes(english)).SequenceEqual(hash),
+                        var saved = AdmWave.Open(english); var source = AdmWave.Open(original);
+                        Check(saved.Channels == 3 && saved.Album?.Chapters.Length == model.Tracks.Count &&
+                            File.ReadAllBytes(english).AsSpan((int)saved.DataOffset, (int)saved.DataBytes).SequenceEqual(File.ReadAllBytes(original).AsSpan((int)source.DataOffset, (int)source.DataBytes)) &&
+                            SHA256.HashData(File.ReadAllBytes(original)).SequenceEqual(hash),
+                            "Completion is shown after the readable ADM stores current chapters and preserves every PCM byte and the original source");
+                        byte[] exportedHash = SHA256.HashData(File.ReadAllBytes(english));
+                        Check(!await SaveAdm(english) && dialog.Messages.Count == 1 && SHA256.HashData(File.ReadAllBytes(english)).SequenceEqual(exportedHash),
                             "An existing destination is preserved without a false completion dialog");
                         string blocked = Path.Combine(root, "blocked"); File.WriteAllText(blocked, "keep");
                         Check(!await SaveAdm(Path.Combine(blocked, "failed.wav")) && dialog.Messages.Count == 1,

@@ -128,8 +128,7 @@ public sealed class AtmosImportService(ToolPaths paths, FfprobeService probe, Ap
                 if (Math.Abs(samples - expectedFrames) > 480) throw new InvalidDataException("Decoded Atmos timeline differs from the playlist by more than 10 ms; refusing misaligned chapter metadata.");
             }
             finally { if (!decoder.HasExited) decoder.Kill(true); stop.Cancel(); await monitor; }
-            var chapters = tracks.Select(t => new AdmChapter(ConversionService.ToSample(t.StartTicks, 48000), t.Title, t.Artist)).ToArray();
-            var album = new AdmAlbumMetadata(playlist.TitleName ?? disc.AlbumTitle, disc.Artist, disc.Root, chapters);
+            var album = AdmMetadataExport.FromTracks(disc, playlist, tracks);
             var copyProgress = new InlineProgress(p => progress?.Report(new(.7 + .3 * p.Fraction, p.Message)));
             await Task.Run(() => DamfImporter.WriteAsync(damf, target, album, copyProgress, userToken), userToken);
             return target;
@@ -238,8 +237,7 @@ public sealed class AtmosImportService(ToolPaths paths, FfprobeService probe, Ap
                 finally { KillDecoder(extract); KillDecoder(decoder); monitorStop.Cancel(); try { await monitor; } catch (OperationCanceledException) { } }
             }
             if (segments.Sum(s => s.Frames) != total) throw new InvalidDataException("The complete audio timeline differs from the playlist.");
-            var chapters = tracks.Select(t => new AdmChapter(ConversionService.ToSample(t.StartTicks, 48000), t.Title, t.Artist)).ToArray();
-            var album = new AdmAlbumMetadata(playlist.TitleName ?? disc.AlbumTitle, disc.Artist, disc.Root, chapters);
+            var album = AdmMetadataExport.FromTracks(disc, playlist, tracks);
             await Task.Run(() => DamfImporter.WritePlaylistAsync(segments, destination, album,
                 new InlineProgress(p => progress?.Report(new(.7 + .3 * p.Fraction, p.Message))), token), token);
             return destination;

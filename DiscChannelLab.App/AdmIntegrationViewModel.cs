@@ -97,25 +97,21 @@ public sealed partial class MainViewModel
     }
     public async Task<bool> ExportAdmAsync(string destination)
     {
-        if (!CanExportAdm) return false;
+        if (!CanExportAdm || _disc is null || _loadedPlaylist is null) return false;
+        var album = AdmMetadataExport.FromTracks(_disc, _loadedPlaylist, Tracks.ToArray());
         string? source = IsAtmosStreamingEnabled ? await PrepareCurrentAtmosAsync() : CurrentAdm?.Path; if (source is null) return false;
         destination = Path.GetFullPath(destination); if (File.Exists(destination)) { Status = "Choose a new ADM filename; existing files are preserved."; return false; }
-        BeginWork("Saving full-title position-aware ADM…"); string pending = destination + "." + Guid.NewGuid().ToString("N") + ".partial";
+        BeginWork("Saving full-title position-aware ADM…");
         try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-            using (var input = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read, 1024 * 1024, true))
-            using (var output = new FileStream(pending, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1024 * 1024, true))
-            {
-                byte[] bytes = new byte[1024 * 1024]; int n; long written = 0; long notified = 0;
-                while ((n = await input.ReadAsync(bytes, _work!.Token)) != 0) { await output.WriteAsync(bytes.AsMemory(0, n), _work.Token); written += n;
-                    if (written - notified >= 64 * 1024 * 1024) { notified = written; Progress = written / (double)input.Length; } }
-                await output.FlushAsync(_work.Token);
-            }
-            _work!.Token.ThrowIfCancellationRequested(); File.Move(pending, destination); SavedFolder = Path.GetDirectoryName(destination)!;
+            var progress = new Progress<ConversionProgress>(p => { Progress = p.Fraction; Status = p.Message; });
+            var token = _work!.Token;
+            await Task.Run(() => AdmMetadataExport.WriteAsync(source, destination, album,
+                progress, token), token);
+            SavedFolder = Path.GetDirectoryName(destination)!;
             Status = "Position-aware ADM saved, including all chapters."; return true;
         }
         catch (Exception ex) { HandleError(ex); return false; }
-        finally { if (File.Exists(pending)) File.Delete(pending); EndWork(); }
+        finally { EndWork(); }
     }
 }

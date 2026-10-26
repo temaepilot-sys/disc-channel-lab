@@ -10,6 +10,9 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Threading;
 
+if (args is ["adm-metadata-tests", var metadataOutput])
+{ try { AdmMetadataTests.Run(metadataOutput); return 0; } catch (Exception e) { Console.Error.WriteLine(e); return 1; } }
+
 if (args is ["atmos-read-failure-tests", var failureTransport, var failureOutput])
 { try { await AtmosReadFailureTests.Run(failureTransport, failureOutput); return 0; } catch (Exception e) { Console.Error.WriteLine(e); return 1; } }
 

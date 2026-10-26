@@ -8,7 +8,14 @@ using System.Xml;
 namespace Disc2Flac;
 
 public sealed record AdmChapter(long StartSample, string Title, string? Artist = null);
-public sealed record AdmAlbumMetadata(string Album, string? Artist, string? Origin, AdmChapter[] Chapters);
+public sealed record AdmAlbumMetadata(string Album, string? Artist, string? Origin, AdmChapter[] Chapters)
+{
+    public string? DiscTitle { get; init; }
+    public string? Date { get; init; }
+    public string? Genre { get; init; }
+    public string? Publisher { get; init; }
+    public string? Description { get; init; }
+}
 
 /// <summary>Input adapter for truehdd 0.6.2 DAMF output. No audio codec or protection processing here.</summary>
 public static partial class DamfImporter

@@ -5,6 +5,9 @@ namespace Disc2Flac;
 public sealed partial class MainViewModel
 {
     bool _saveBinauralFlac;
+    bool _saveSpatialRenderJson;
+    public bool SaveSpatialRenderJson { get => _saveSpatialRenderJson; set => Set(ref _saveSpatialRenderJson, value); }
+    public bool CanChooseSpatialRenderJson => !IsBusy && SaveBinauralFlac;
     public bool SaveBinauralFlac
     {
         get => CurrentAdm is not null || _saveBinauralFlac;
@@ -15,6 +18,7 @@ public sealed partial class MainViewModel
             else if (CurrentAdm is null && _quality == OutputQuality.HighResolution && SelectedStream?.CanMakeHighResolution != true) IsCdSelected = true;
             Changed(nameof(CanChooseHighRes)); Changed(nameof(HighResOptionText)); Changed(nameof(HighResHelpText)); Changed(nameof(SelectedStreamNote));
             Changed(nameof(CanConvert));
+            Changed(nameof(CanChooseSpatialRenderJson));
         }
     }
     public bool CanChooseBinauralFlac => !IsBusy && !IsPlaying && CurrentAdm is null && HeadphonesEnabled && HasVerifiedAudio;
@@ -26,6 +30,7 @@ public sealed partial class MainViewModel
             : AdmFileFormat.RenderOptions(HeadphoneSession.Current.Options); var pose = HeadphoneSession.Current.Pose;
         string folder = Path.Combine(OutputFolder, ConversionService.SafeName(disc.AlbumTitle)); if (GroupByChapter) folder = Path.Combine(folder, ConversionService.SafeName(playlist.TitleName));
         bool renderNormal = _saveBinauralFlac || CurrentAdm is not null;
+        bool writeRenderJson = SaveSpatialRenderJson;
         BeginWork("Rendering headphone / reflection FLAC…"); SavedFolder = "";
         try
         {
@@ -51,7 +56,7 @@ public sealed partial class MainViewModel
                     string suffix = speakerStereo ? "Speaker Stereo" : options.Method == HeadphoneMethod.MeasuredBrir ? "Headphone BRIR" : options.Method == HeadphoneMethod.Direct ? "Headphone Direct" : "Headphone Binaural";
                     var tags = new Dictionary<string, string> { ["title"] = track.Title, ["album"] = playlist.TitleName, ["track"] = track.Number.ToString(), ["artist"] = track.Artist ?? disc.Artist ?? "", ["RENDERER"] = speakerStereo ? "Stereo" : options.Method.ToString(),
                         ["OUTPUT_USE"] = suffix, ["SPATIAL_PRESENTATION"] = input.Progressive is null ? stream.Codec : input.Presentation.ToString() };
-                    await SpatialRendering.ExportAsync(audio, Path.Combine(folder, $"{track.Number:00} {ConversionService.SafeName(track.Title)} [{suffix}].flac"), tools.Ffmpeg, true, _work.Token, _quality == OutputQuality.Cd ? 44100 : 48000, _quality == OutputQuality.Cd ? 16 : 24, tags);
+                    await SpatialRendering.ExportAsync(audio, Path.Combine(folder, $"{track.Number:00} {ConversionService.SafeName(track.Title)} [{suffix}].flac"), tools.Ffmpeg, true, _work.Token, _quality == OutputQuality.Cd ? 44100 : 48000, _quality == OutputQuality.Cd ? 16 : 24, tags, writeRenderJson);
                 }
                 finally { if (audio is not null && File.Exists(audio.PcmPath)) File.Delete(audio.PcmPath); if (input.Wave is null && File.Exists(input.PcmPath)) File.Delete(input.PcmPath); }
                 Progress = (i + 1d) / tracks.Length;

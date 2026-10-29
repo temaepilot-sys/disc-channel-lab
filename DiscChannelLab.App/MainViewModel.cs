@@ -1253,6 +1253,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
         Changed(nameof(CanChoosePreviewMode));
         Changed(nameof(CanChooseAudioStream));
         Changed(nameof(SaveBinauralFlac)); Changed(nameof(CanChooseBinauralFlac)); Changed(nameof(BinauralFlacOptionText));
+        Changed(nameof(CanChooseSpatialRenderJson));
         Changed(nameof(CanSaveMultichannel));
         Changed(nameof(CanExportAdm)); Changed(nameof(CanChooseSpatialSource)); Changed(nameof(SpatialSourceDescription));
         RefreshAtmosPreparationDisplay();

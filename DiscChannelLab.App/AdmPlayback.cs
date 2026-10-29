@@ -11,7 +11,7 @@ public sealed partial class AudioNavigationService
     {
         if (ProgressiveAtmos is { } live)
         {
-            long firstLive = ConversionService.ToSample(start, 48000), count = ConversionService.ToSample(end - start, 48000);
+            var (firstLive, count) = AdmTimeline.Range(live.Wave, start, end);
             await live.EnsureAsync(firstLive, Math.Min(live.TotalFrames, firstLive + Math.Min(count, ProgressiveAtmosSource.StartupFrames)), AtmosPresentation, token);
             await PlaySpatialInputAsync(live.Input(firstLive, count, AtmosPresentation), live.Wave, start, token, started, volume,
                 playbackPosition, mixedLevels, channelLevels, visualization, transport, outputMix); return;
@@ -19,8 +19,8 @@ public sealed partial class AudioNavigationService
         var segments = PlaylistSegments.ForRange(playlist, start, end); var file = segments[0].Clip.File!; AudioFileReader.RequireUnchanged(file);
         var wave = file.Adm!;
         if (segments.Any(s => s.Clip.File?.Adm?.Path != wave.Path)) throw new InvalidOperationException("An ADM playback session cannot cross into a different source file.");
-        long first = ConversionService.ToSample(PlaylistSegments.SourceTicks(segments[0]), 48000);
-        long frames = Math.Min(wave.Scene.DurationSamples - first, ConversionService.ToSample(end - start, 48000));
+        long sourceStart = PlaylistSegments.SourceTicks(segments[0]);
+        var (first, frames) = AdmTimeline.Range(wave, sourceStart, sourceStart + end - start);
         await PlaySpatialInputAsync(SpatialInput.FromAdm(wave, first, frames), wave, start, token, started, volume,
             playbackPosition, mixedLevels, channelLevels, visualization, transport, outputMix);
     }

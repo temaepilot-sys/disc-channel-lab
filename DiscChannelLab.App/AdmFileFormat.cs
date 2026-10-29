@@ -4,7 +4,7 @@ public static class AdmFileFormat
 {
     public static AudioFileProbe Probe(AdmWave wave)
     {
-        long Ticks(long sample) => (long)Math.Round(sample * (45000m / 48000));
+        long Ticks(long sample) => AdmTimeline.ToTicks(sample);
         var stream = new AudioStreamInfo { Index = 0, Codec = "adm", Profile = $"ADM · {wave.Scene.Sources.Count(s => s.Kind == SpatialSourceKind.Object)} objects / {wave.Channels} PCM tracks → stereo",
             SampleRate = 48000, Channels = 2, ChannelLayout = "stereo", BitDepth = 24, SampleCount = wave.Scene.DurationSamples };
         // Channels describes the adapter's stereo output, never an assumed order of object PCM tracks.

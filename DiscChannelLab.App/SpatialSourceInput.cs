@@ -41,13 +41,17 @@ public sealed partial class MainViewModel
         var segment = PlaylistSegments.ForRange(playlist, first, last).First();
         if (IsAtmosStreamingEnabled && _navigation.ProgressiveAtmos is { } live)
         {
-            long from = ConversionService.ToSample(first, 48000), count = ConversionService.ToSample(last - first, 48000);
+            var (from, count) = AdmTimeline.Range(live.Wave, first, last);
             await live.EnsureAsync(from, Math.Min(live.TotalFrames, from + Math.Min(count, ProgressiveAtmosSource.StartupFrames)), SelectedAtmosPresentation, token);
             return live.Input(from, count, SelectedAtmosPresentation);
         }
         if (segment.Clip.File is { } sourceFile) AudioFileReader.RequireUnchanged(sourceFile);
         if (segment.Clip.File?.Adm is { } adm && last <= segment.Clip.PlaylistStartTicks + segment.Clip.OutTicks - segment.Clip.InTicks)
-            return SpatialInput.FromAdm(adm, ConversionService.ToSample(PlaylistSegments.SourceTicks(segment), 48000), ConversionService.ToSample(last - first, 48000));
+        {
+            long sourceStart = PlaylistSegments.SourceTicks(segment);
+            var range = AdmTimeline.Range(adm, sourceStart, sourceStart + last - first);
+            return SpatialInput.FromAdm(adm, range.First, range.Frames);
+        }
         string root = Path.Combine(AppDataPaths.Current.Root, "sacd-cache", "spatial"), path = Path.Combine(root, Guid.NewGuid().ToString("N") + ".f32");
         Directory.CreateDirectory(root);
         try

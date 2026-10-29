@@ -62,7 +62,7 @@ internal static class SpatialLabTests
             measured.Add(new { mode="5.1 Pure HRTF", stats });
         }
         string wav = Path.Combine(root, "binaural.wav"), flac = Path.Combine(root, "binaural.flac");
-        await SpatialRendering.ExportAsync(rendered, wav, paths.Ffmpeg, false, ct); await SpatialRendering.ExportAsync(rendered, flac, paths.Ffmpeg, true, ct);
+        await SpatialRendering.ExportAsync(rendered, wav, paths.Ffmpeg, false, ct, writeRenderJson: true); await SpatialRendering.ExportAsync(rendered, flac, paths.Ffmpeg, true, ct, writeRenderJson: true);
         Check(File.Exists(wav + ".render.json") && File.Exists(flac + ".render.json"), "P2: both exports retain reproducibility sidecars");
         await SpatialRendering.RunAsync(paths.Ffmpeg, ["-v","error","-i",wav,"-f","f32le",Path.Combine(root,"wav-decoded.f32")],ct);
         Check(File.ReadAllBytes(rendered.PcmPath).SequenceEqual(File.ReadAllBytes(Path.Combine(root,"wav-decoded.f32"))), "P2: float WAV round-trips exact shared DSP PCM");

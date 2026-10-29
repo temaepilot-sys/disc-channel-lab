@@ -167,15 +167,17 @@ public static class SpatialRendering
         catch { File.Delete(ra.PcmPath); if (rb is not null) File.Delete(rb.PcmPath); throw; }
     }
     public static async Task ExportAsync(RenderedAudio audio, string destination, string ffmpeg, bool flac, CancellationToken token,
-        int outputRate = 48000, int outputBits = 24, IReadOnlyDictionary<string, string>? tags = null)
+        int outputRate = 48000, int outputBits = 24, IReadOnlyDictionary<string, string>? tags = null, bool writeRenderJson = false)
     {
         if (outputRate is not (44100 or 48000) || outputBits is not (16 or 24)) throw new ArgumentOutOfRangeException(nameof(outputRate));
         if (flac && audio.Peak > 1) throw new InvalidDataException($"PCM peak is {20 * Math.Log10(audio.Peak):0.00} dBFS. Reduce gain or export float WAV. Automatic normalization is OFF.");
         destination = Path.GetFullPath(destination);
-        if (File.Exists(destination) || File.Exists(destination + ".render.json")) throw new IOException("Destination exists. Choose a new filename.");
+        string sidecar = destination + ".render.json";
+        if (File.Exists(destination) || writeRenderJson && File.Exists(sidecar)) throw new IOException("Destination exists. Choose a new filename.");
         Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
         string pending = destination + "." + Guid.NewGuid().ToString("N") + ".partial";
-        bool moved = false;
+        string pendingJson = pending + ".render.json";
+        bool moved = false, jsonMoved = false;
         try
         {
             List<string> args = ["-hide_banner", "-nostdin", "-v", "error", "-f", "f32le", "-ar", "48000", "-ac", "2", "-i", audio.PcmPath];
@@ -183,16 +185,20 @@ public static class SpatialRendering
             else args.AddRange(["-c:a", "pcm_f32le", "-rf64", "auto", "-f", "wav"]);
             if (tags is not null) foreach (var pair in tags) args.AddRange(["-metadata", pair.Key + "=" + pair.Value]);
             args.Add(pending); await RunAsync(ffmpeg, args, token);
-            var metrics = await MeasureAsync(audio, ffmpeg, token);
-            File.Move(pending, destination); moved = true;
-            SpatialJson.Save(destination + ".render.json", new { schemaVersion = 1, audio.SourceFrames, audio.TailFrames, audio.Peak, audio.ClippedSamples,
-                audio.RenderMilliseconds, audio.MaximumBlockMilliseconds, Input = new { audio.Input.SourceName, audio.Input.PcmHash, audio.Input.FirstSample, audio.Input.Frames },
-                Scene = ExportScene(audio.Input), Settings = audio.Snapshot, Metrics = metrics, Encoding = flac ? $"FLAC {outputBits}-bit / {outputRate} Hz TPDF dither" : "WAV float32; values above unity retained",
-                DspTap = "Shared DSP float bus, after mixer/master/spatial renderer, before endpoint guards/fades/clamp. Pose fixed; no tracker.",
-                Quantizer = flac ? $"FFmpeg aresample/output_sample_bits={outputBits} triangular dither; seed is encoder-managed" : "none" });
+            if (writeRenderJson)
+            {
+                var metrics = await MeasureAsync(audio, ffmpeg, token);
+                SpatialJson.Save(pendingJson, new { schemaVersion = 1, audio.SourceFrames, audio.TailFrames, audio.Peak, audio.ClippedSamples,
+                    audio.RenderMilliseconds, audio.MaximumBlockMilliseconds, Input = new { audio.Input.SourceName, audio.Input.PcmHash, audio.Input.FirstSample, audio.Input.Frames },
+                    Scene = ExportScene(audio.Input), Settings = audio.Snapshot, Metrics = metrics, Encoding = flac ? $"FLAC {outputBits}-bit / {outputRate} Hz TPDF dither" : "WAV float32; values above unity retained",
+                    DspTap = "Shared DSP float bus, after mixer/master/spatial renderer, before endpoint guards/fades/clamp. Pose fixed; no tracker.",
+                    Quantizer = flac ? $"FFmpeg aresample/output_sample_bits={outputBits} triangular dither; seed is encoder-managed" : "none" });
+            }
+            token.ThrowIfCancellationRequested(); File.Move(pending, destination); moved = true;
+            if (writeRenderJson) { File.Move(pendingJson, sidecar); jsonMoved = true; }
         }
-        catch { if (moved) File.Delete(destination); throw; }
-        finally { if (File.Exists(pending)) File.Delete(pending); }
+        catch { if (moved) File.Delete(destination); if (jsonMoved) File.Delete(sidecar); throw; }
+        finally { if (File.Exists(pending)) File.Delete(pending); if (File.Exists(pendingJson)) File.Delete(pendingJson); }
     }
     static SpatialScene ExportScene(SpatialInput input) => input.Wave is null ? input.Scene : input.Scene with
     { Sources = input.Scene.Sources.Select(s => { int first = Math.Max(0, s.BlockIndex(input.FirstSample) - 1), last = s.BlockIndex(input.FirstSample + input.Frames); return s with { Blocks = s.Blocks[first..(last + 1)] }; }).ToArray() };

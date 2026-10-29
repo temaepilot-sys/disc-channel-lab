@@ -377,6 +377,9 @@
                               Margin="0,0,0,5"/>
                     <CheckBox x:Name="BinauralFlacCheck" Content="{Binding BinauralFlacOptionText}" IsChecked="{Binding SaveBinauralFlac, Mode=TwoWay}"
                               IsEnabled="{Binding CanChooseBinauralFlac}" Margin="0,0,0,5"/>
+                    <CheckBox x:Name="SpatialRenderJsonCheck" Content="{local:Loc Key='ADM・ヘッドフォン書き出しの設定をJSONにも保存'}"
+                              IsChecked="{Binding SaveSpatialRenderJson, Mode=TwoWay}" IsEnabled="{Binding CanChooseSpatialRenderJson}"
+                              ToolTip="{local:Loc Key='FLACの再生には不要です。HRTF・ミキサー・頭の向きなどの書き出し条件を記録します。'}" Margin="0,0,0,5"/>
                     <CheckBox Content="{local:Loc Key='チャンネル別のモノラルFLACを曲ごとに保存'}"
                               IsChecked="{Binding SaveIndividualChannels, Mode=TwoWay}"
                               IsEnabled="{Binding CanDownmixStereo}" Margin="0,0,0,5"/>

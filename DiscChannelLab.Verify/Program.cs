@@ -10,6 +10,9 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Threading;
 
+if (args.Length is 2 or 3 && args[0] == "adm-flac-tests")
+{ try { AdmFlacExportTests.Run(args[1], args.Length == 3 ? args[2] : null); return 0; } catch (Exception e) { Console.Error.WriteLine(e); return 1; } }
+
 if (args is ["adm-metadata-tests", var metadataOutput])
 { try { AdmMetadataTests.Run(metadataOutput); return 0; } catch (Exception e) { Console.Error.WriteLine(e); return 1; } }
 

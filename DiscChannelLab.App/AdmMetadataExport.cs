@@ -13,8 +13,11 @@ public static class AdmMetadataExport
     {
         var original = playlist.Clips.FirstOrDefault()?.File?.Adm?.Album;
         var artists = tracks.Select(t => t.Artist).Where(a => !string.IsNullOrWhiteSpace(a)).Distinct().ToArray();
+        long Sample(TrackRow track) => playlist.Clips.Count == 1 && playlist.Clips[0].File?.Adm is { } wave
+            ? AdmTimeline.SampleAt(wave, playlist.Clips[0].InTicks + track.StartTicks - playlist.Clips[0].PlaylistStartTicks)
+            : ConversionService.ToSample(track.StartTicks, 48000);
         return new(playlist.TitleName, !string.IsNullOrWhiteSpace(disc.Artist) ? disc.Artist : artists.Length == 1 ? artists[0] : null, original?.Origin ?? disc.Root,
-            tracks.Select(t => new AdmChapter(ConversionService.ToSample(t.StartTicks, 48000), t.Title, t.Artist)).ToArray())
+            tracks.Select(t => new AdmChapter(Sample(t), t.Title, t.Artist)).ToArray())
         { DiscTitle = disc.AlbumTitle, Date = disc.Date, Genre = disc.Genre, Publisher = disc.Publisher, Description = disc.Description };
     }
 

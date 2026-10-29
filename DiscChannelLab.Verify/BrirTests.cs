@@ -101,7 +101,7 @@ internal static class BrirTests
         }
         var tools=new ToolPaths();string flac=Path.Combine(root,"brir-render.flac");
         if(File.Exists(flac))File.Delete(flac);if(File.Exists(flac+".render.json"))File.Delete(flac+".render.json");
-        await SpatialRendering.ExportAsync(rendered,flac,tools.Ffmpeg,true,CancellationToken.None);
+        await SpatialRendering.ExportAsync(rendered,flac,tools.Ffmpeg,true,CancellationToken.None,writeRenderJson:true);
         string probe=await SpatialRendering.RunAsync(tools.Ffprobe,["-v","error","-show_entries","stream=sample_rate,channels,bits_per_raw_sample","-of","json",flac],CancellationToken.None);
         Check(probe.Contains("48000")&&probe.Contains("24")&&File.ReadAllText(flac+".render.json").Contains(loaded.Hash),"Export: 48 kHz / 24-bit stereo FLAC and BRIR settings sidecar");
         var ab=await SpatialRendering.CompareAsync(inputFile with{Frames=240000},snapshot with{Options=options with{Method=HeadphoneMethod.SteamAudio},HrtfHash=HrtfEntry.BuiltIn.Hash},snapshot,tools.Ffmpeg,true,CancellationToken.None,30);

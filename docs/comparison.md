@@ -36,7 +36,7 @@ Atmos **Stereo presentation** deliberately bypasses HRIR and added reflections. 
 
 ## Export
 
-Use the lower part of this page for fixed-pose 48 kHz float WAV export, selecting the interval or whole track. Enable **Use loaded Measured BRIR** to export that independent renderer. The main player's **Save FLAC** handles selected-track binaural FLAC when headphone rendering is enabled. A `.render.json` sidecar records the settings. Exports do not record head-tracker motion; per-track exports start with independent DSP history.
+Use the lower part of this page for fixed-pose 48 kHz float WAV export, selecting the interval or whole track. Enable **Use loaded Measured BRIR** to export that independent renderer. Float WAV export retains its `.render.json` record for analysis. The main player's **Save FLAC** handles selected-track binaural FLAC when headphone rendering is enabled; its JSON sidecar is optional and OFF by default. Enable **Also save ADM / headphone render settings as JSON** in the main FLAC panel when needed. Exports do not record head-tracker motion; per-track exports start with independent DSP history.
 
 ## If preparation fails
 

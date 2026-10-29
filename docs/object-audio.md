@@ -73,7 +73,9 @@ Some valid MPEG-TS audio streams do not report an overall duration. In that case
 
 Save FLAC writes selected tracks as two rendered channels. Default quality is 16-bit / 44.1 kHz; rendered output also offers 24-bit / 48 kHz. Names distinguish [Speaker Stereo], [Headphone Direct] and [Headphone Binaural]. Speaker stereo is the same two-channel file for ordinary speakers and an amplifier with an optional subwoofer. FLAC does not retain the object position metadata.
 
-Export fixes the head pose at the start of the operation; it does not record tracker movements. A .render.json sidecar records SOFA hashes, pose, gain, LFE, reflections and other reproduction settings. Individual-track exports initialize DSP independently; continuous-album convolution history across separate files is not yet supported.
+Export fixes the head pose at the start of the operation; it does not record tracker movements. **Also save ADM / headphone render settings as JSON** is OFF by default. Enable it in the main FLAC panel to write a `.render.json` beside each FLAC, recording SOFA hashes, pose, mixer, gain, LFE, reflections and other reproduction settings. It is an optional record for reproducing the render; FLAC playback and its embedded song/artist tags do not require it. With the option OFF, export also skips the extra loudness-measurement pass used only for that record. Existing JSON files are preserved. Individual-track exports initialize DSP independently; continuous-album convolution history across separate files is not yet supported.
+
+ADM preparation, playback and track export restore the original sample-based chapter anchors and PCM endpoint after converting the displayed time. This avoids a one-sample overrun on the last track and keeps adjacent tracks contiguous. An interval genuinely outside the source remains an error.
 
 To preserve the ordinary source channels as multichannel FLAC, disable ADM and use the original-source export options. No automatic normalization is applied.
 

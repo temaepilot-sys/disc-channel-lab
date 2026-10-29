@@ -302,7 +302,7 @@ public partial class SpatialLabWindow : Window
             if (ExportBrir.IsChecked == true) snapshot = BrirSnapshot(await PrepareEditedBrir(ct), snapshot);
             var input = await Prepare(ct, ExportRange.SelectedIndex > 0);
             var audio = await SpatialRendering.RenderAsync(input, snapshot, KeepTail.IsChecked == true, ct);
-            await SpatialRendering.ExportAsync(audio, dialog.FileName, tools.Ffmpeg, false, ct);
+            await SpatialRendering.ExportAsync(audio, dialog.FileName, tools.Ffmpeg, false, ct, writeRenderJson: true);
             StatusText.Text = $"Saved {dialog.FileName}\nPeak {20 * Math.Log10(Math.Max(audio.Peak, 1e-20)):0.00} dBFS · tail {audio.TailFrames / 48000d:0.000}s";
             SaveCompletion.Show(this, "バイノーラルWAVの書き出しが完了しました。", dialog.FileName);
         });

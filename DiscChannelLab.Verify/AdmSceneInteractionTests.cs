@@ -64,6 +64,93 @@ internal static class AdmSceneInteractionTests
                     input.RaiseEvent(new KeyEventArgs(Keyboard.PrimaryDevice, PresentationSource.FromVisual(lab), 0, Key.Home) { RoutedEvent = Keyboard.PreviewKeyDownEvent });
                     Check((camera.Position - initialPosition).Length < 1e-12 && (camera.LookDirection - initialDirection).Length < 1e-12 &&
                         HeadphoneSession.Current.Pose == initialPose, "Routed Home restores the original camera without changing the listener audio pose");
+                    var session = HeadphoneSession.Current; var originalOptions = session.Options;
+                    var mode = (ComboBox)lab.FindName("SceneControlMode");
+                    var centerHead = (Button)lab.FindName("SceneHeadCenter");
+                    var tracker = (CheckBox)lab.FindName("SceneHeadTracker");
+                    void SceneKey(Key key, bool system = false)
+                    {
+                        var args = new KeyEventArgs(Keyboard.PrimaryDevice, PresentationSource.FromVisual(lab), 0, key)
+                            { RoutedEvent = Keyboard.PreviewKeyDownEvent };
+                        if (system) typeof(KeyEventArgs).GetMethod("MarkSystem", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(args, null);
+                        input.RaiseEvent(args);
+                    }
+                    Check(mode.SelectedIndex == 0, "ADM Scene starts with existing camera controls selected");
+                    SceneKey(Key.Right);
+                    Check(session.Pose == initialPose && camera.Position != initialPosition,
+                        "Camera-mode arrows change only the inspection camera");
+                    control.Reset(); mode.SelectedIndex = 1;
+                    SceneKey(Key.Right); SceneKey(Key.Up); SceneKey(Key.E);
+                    Check(session.Pose == new HeadPose(initialPose.Yaw + 5, initialPose.Pitch + 5, initialPose.Roll + 5)
+                        && camera.Position == initialPosition, "Listener-mode arrows and roll share the live audio pose without moving the camera");
+                    Call(lab, "RotateSceneListener", 25d, -15d, false);
+                    Check(session.Pose.Yaw == 30 && session.Pose.Pitch == -10,
+                        "Listener drag deltas update yaw and pitch immediately");
+                    SceneKey(Key.Right, system: true);
+                    Check(session.Pose.Yaw == 35, "WPF system-key events used by Alt-modified arrows still reach listener controls");
+                    SceneKey(Key.Left, system: true);
+                    foreach (var pose in new[] { new HeadPose(90, 0, 0), new HeadPose(-90, 35, 20), new HeadPose(150, -70, -80) })
+                    {
+                        session.SetKeyboard(pose.Yaw, pose.Pitch, pose.Roll); Call(lab, "RefreshSceneListener");
+                        var visualRotation = (QuaternionRotation3D)Field(lab, "sceneHeadRotation");
+                        var transform = new RotateTransform3D(visualRotation);
+                        foreach (var basis in new[] { System.Numerics.Vector3.UnitZ, System.Numerics.Vector3.UnitX, System.Numerics.Vector3.UnitY })
+                        {
+                            var audioDirection = System.Numerics.Vector3.Transform(basis, pose.Rotation);
+                            var actual = transform.Transform((Vector3D)AdmSceneCoordinates.ToDisplay(basis));
+                            Check((actual - (Vector3D)AdmSceneCoordinates.ToDisplay(audioDirection)).Length < 2e-6,
+                                $"Head drawing matches audio quaternion at {pose}, axis {basis}");
+                        }
+                    }
+                    var turnedPose = session.Pose; control.Orbit(40, 30); var movedCamera = camera.Position; SceneKey(Key.Home);
+                    Check(camera.Position == movedCamera && session.Pose == new HeadPose(0, 0, 0) && mode.SelectedIndex == 1,
+                        "Home in Listener mode resets all head axes without changing camera or control mode");
+                    Check(((QuaternionRotation3D)Field(lab, "sceneHeadRotation")).Quaternion.IsIdentity,
+                        "Listener Home immediately restores the 3D head's forward direction");
+                    session.SetKeyboard(turnedPose.Yaw, turnedPose.Pitch, turnedPose.Roll); mode.SelectedIndex = 0; SceneKey(Key.Home);
+                    Check(camera.Position == initialPosition && session.Pose == turnedPose,
+                        "Home in Camera mode resets the camera while preserving head orientation");
+                    mode.SelectedIndex = 1;
+                    control.Orbit(10, 0); var orbited = camera.Position;
+                    centerHead.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    Check(session.Pose == new HeadPose(0, 0, 0) && camera.Position == orbited,
+                        "Recenter head changes only the shared listener pose");
+                    control.Reset();
+                    // Exercise the actual loopback receiver, without claiming a physical tracker was connected.
+                    session.SetOptions(session.Options with { UdpPort = FreePort() });
+                    tracker.IsChecked = true; tracker.RaiseEvent(new RoutedEventArgs(CheckBox.ClickEvent));
+                    using (var udp = new System.Net.Sockets.UdpClient())
+                    {
+                        var packet = new byte[48];
+                        double[] values = [123, 456, 789, 40, 15, -10];
+                        for (int i = 0; i < values.Length; i++) BinaryPrimitives.WriteDoubleLittleEndian(packet.AsSpan(i * 8), values[i]);
+                        await udp.SendAsync(packet, new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, session.Options.UdpPort));
+                        await Until(() => session.PacketAgeSeconds < .5, "opentrack packet"); Call(lab, "RefreshSceneListener");
+                        Check(session.Pose == new HeadPose(40, 15, -10) && session.Options.UseTracker,
+                            "ADM checkbox starts the shared opentrack receiver; angular UDP data updates pose while XYZ remains unused");
+                        SceneKey(Key.Left); Call(lab, "RotateSceneListener", 20d, 10d, false);
+                        Check(session.Pose == new HeadPose(40, 15, -10), "Manual keys and dragging cannot fight active opentrack tracking");
+                        SceneKey(Key.Home);
+                        await udp.SendAsync(packet, new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, session.Options.UdpPort));
+                        await Task.Delay(100);
+                        Check(session.Pose == new HeadPose(0, 0, 0), "Listener Home also establishes the opentrack reference orientation");
+                    }
+                    tracker.IsChecked = false; tracker.RaiseEvent(new RoutedEventArgs(CheckBox.ClickEvent));
+                    Check(!session.Options.UseTracker, "ADM tracker checkbox returns control to manual input");
+                    session.SetOptions(originalOptions with { Method = HeadphoneMethod.MeasuredBrir }); Call(lab, "RefreshSceneListener");
+                    var brirPose = session.Pose; SceneKey(Key.Right);
+                    Check(!centerHead.IsEnabled && !tracker.IsEnabled && session.Pose == brirPose
+                        && ((TextBlock)lab.FindName("ScenePoseText")).Text.Contains("BRIR"),
+                        "Fixed measured BRIR disables listener rotation and explains its fixed orientation");
+                    session.SetOptions(originalOptions with { Enabled = false }); Call(lab, "RefreshSceneListener");
+                    SceneKey(Key.Right);
+                    Check(!centerHead.IsEnabled && session.Pose == brirPose,
+                        "Stereo playback does not present head rotation as audible");
+                    Check(!AdmFileFormat.UsesHeadOrientation(originalOptions, AtmosPresentation.Stereo)
+                        && AdmFileFormat.UsesHeadOrientation(originalOptions, AtmosPresentation.Surround51),
+                        "Separate Stereo presentation bypasses listener control even when global HRTF remains selected");
+                    session.SetOptions(originalOptions); session.Recenter(); Call(lab, "RefreshSceneListener");
+                    mode.SelectedIndex = 0; control.Reset();
                     var wave = model.CurrentAdm!; var sources = wave.Scene.Sources.ToArray();
                     var visual = (ModelVisual3D)view.Children[0];
                     var drawnPoints = (Dictionary<string, TranslateTransform3D>)Field(lab, "scenePoints");
@@ -152,6 +239,18 @@ internal static class AdmSceneInteractionTests
                         }
                         Check(earRatios[0] > .5 && earRatios[1] < .5,
                             method + ": the sources displayed on the left/right are louder in the matching headphone ear without swapping PCM");
+                        using (var turnedRenderer = new HeadphoneRenderer([bedLeft.Id, bedRight.Id], options, bedScene))
+                        {
+                            var impulse = new[] { new float[256], new float[256] }; impulse[0][0] = .2f;
+                            var output = new float[512]; double leftEnergy = 0, rightEnergy = 0;
+                            for (int b = 0; b < 8; b++)
+                            {
+                                turnedRenderer.Render(impulse, output, new(-120, 0, 0), options, new(StereoMixSettings.Default, null), 1);
+                                for (int f = 0; f < 256; f++) { leftEnergy += output[2 * f] * output[2 * f]; rightEnergy += output[2 * f + 1] * output[2 * f + 1]; }
+                                Array.Clear(impulse[0]);
+                            }
+                            Check(rightEnergy > leftEnergy, method + ": turning left past a fixed left source places its broadband energy in the right ear");
+                        }
                         metrics.Add(new { method = method.ToString(), leftSourceLeftEarRatio = earRatios[0], rightSourceLeftEarRatio = earRatios[1] });
                     }
                     Save(lab, Path.Combine(root, "05-adm-left-right-corrected.png"));
@@ -207,13 +306,58 @@ internal static class AdmSceneInteractionTests
                     model.ToggleAdmSourceSolo(sources[0].Id); await Task.Delay(850);
                     var onlyLeft = sinks[0].Latest(9600); double left220 = Tone(onlyLeft, 220), left330 = Tone(onlyLeft, 330);
                     Check(left220 > 1e-6 && left330 < left220 * .001, "Running main preview Solo suppresses the other real source tone in device-bound stereo PCM");
+                    var frontLeftPose = session.Pose;
+                    session.SetKeyboard(-120, 0, 0); await Task.Delay(450);
+                    var turned = sinks[0].Latest(9600); double turnedLeft = EarTone(turned, 220, 0), turnedRight = EarTone(turned, 220, 1);
+                    Check(turnedRight > turnedLeft * 1.1 && sinks.Count == 1,
+                        "Head rotation changes the actual live ADM tone's ear balance without reopening output");
+                    mode.SelectedIndex = 1; SceneKey(Key.Home); await Task.Delay(450);
+                    var restored = sinks[0].Latest(9600);
+                    double restoredLeft = EarTone(restored, 220, 0), restoredRight = EarTone(restored, 220, 1);
+                    double baselineRatio = EarTone(onlyLeft, 220, 0) / (EarTone(onlyLeft, 220, 0) + EarTone(onlyLeft, 220, 1));
+                    double restoredRatio = restoredLeft / (restoredLeft + restoredRight);
+                    Console.WriteLine($"Live pose ear fractions: baseline={baselineRatio:G8}, turned={turnedLeft / (turnedLeft + turnedRight):G8}, restored={restoredRatio:G8}");
+                    // A single low-frequency tone can sit on different ear-response notches; broadband direction is checked above.
+                    Check(Math.Abs(restoredRatio - baselineRatio) < .0001 && sinks.Count == 1,
+                        "Listener Home restores the original live audio response in the same DSP/output session");
+                    metrics.Add(new { baselineLeftEarFraction = baselineRatio, turnedLeftEarFraction = turnedLeft / (turnedLeft + turnedRight),
+                        restoredLeftEarFraction = restoredRatio, outputSessions = sinks.Count });
+                    await model.TogglePlaybackAsync(); await Task.Delay(100); var pausedCount = sinks[0].Count;
+                    mode.SelectedIndex = 1; SceneKey(Key.Right); await Task.Delay(100);
+                    Check(session.Pose.Yaw == 5 && sinks[0].Count == pausedCount,
+                        "Listener controls remain responsive while paused without advancing audio submission");
+                    session.Recenter(); await model.TogglePlaybackAsync(); await Task.Delay(250);
+                    Check(sinks.Count == 1 && sinks[0].Count > pausedCount,
+                        "Resuming after a paused head turn reuses the same output session");
+                    mode.SelectedIndex = 1; session.SetKeyboard(65, 15, -10); Call(lab, "RefreshSceneListener");
+                    Save(lab, Path.Combine(root, "07-adm-listener-turned.png"));
+                    LanguageService.Instance.Apply(true); Call(lab, "RefreshSceneListener");
+                    Check(((ComboBoxItem)mode.Items[1]).Content.ToString() == "リスナー" && centerHead.Content.ToString() == "頭を正面へ",
+                        "New listener controls switch between English and Japanese");
+                    Save(lab, Path.Combine(root, "08-adm-listener-turned-ja.png")); LanguageService.Instance.Apply(false);
+                    session.Recenter(); Call(lab, "RefreshSceneListener"); mode.SelectedIndex = 0;
                     model.ToggleAdmSourceSolo(sources[1].Id, additive: true); await Task.Delay(650);
                     var both = sinks[0].Latest(9600); Check(Tone(both, 220) > 1e-6 && Tone(both, 330) > 1e-6 && sinks.Count == 1,
                         "Adding a second Solo restores its tone within the same output/DSP session");
                     model.ClearAdmSourceSolo(); await Task.Delay(400);
                     Check(model.AdmSoloSources.Count == 0 && sinks.Count == 1 && sinks[0].Finite, "Clear Solo restores all sources without restarting or generating nonfinite PCM");
                     model.StopPlayback(); await Task.Delay(150);
-                    metrics.Add(new { solo220Power = left220, suppressed330Power = left330, outputSessions = sinks.Count });
+                    metrics.Add(new { solo220Power = left220, suppressed330Power = left330, outputSessions = sinks.Count,
+                        emptyBufferEvents = sinks[0].EmptyBufferCount });
+                    // Standard stereo must not inherit the last headphone pose on native ADM input.
+                    session.SetOptions(originalOptions with { Enabled = false }); model.ToggleAdmSourceSolo(sources[0].Id);
+                    session.Recenter(); await model.TogglePlaybackAsync(); await Until(() => sinks.Count == 2 && sinks[1].Count > 30000, "stereo neutral");
+                    var stereoNeutral = sinks[1].Latest(9600); model.StopPlayback(); await Task.Delay(100);
+                    session.SetKeyboard(80, 25, -10); await model.TogglePlaybackAsync();
+                    await Until(() => sinks.Count == 3 && sinks[2].Count > 30000, "stereo retained head pose");
+                    var stereoTurned = sinks[2].Latest(9600);
+                    double Fraction(float[] pcm) => EarTone(pcm, 220, 0) / (EarTone(pcm, 220, 0) + EarTone(pcm, 220, 1));
+                    Check(Math.Abs(Fraction(stereoNeutral) - Fraction(stereoTurned)) < .0001,
+                        "Native ADM standard stereo playback ignores a retained headphone pose");
+                    double fixedStereoRatio = Fraction(stereoTurned); session.SetKeyboard(-100, 0, 0); await Task.Delay(350);
+                    Check(Math.Abs(Fraction(sinks[2].Latest(9600)) - fixedStereoRatio) < .0001,
+                        "Headphone-window pose edits cannot rotate native ADM standard stereo during playback");
+                    model.StopPlayback(); await Task.Delay(100); model.ClearAdmSourceSolo(); session.SetOptions(originalOptions); session.Recenter();
                     var numbered = wave.Scene with { Sources = sources.Select(s => s.Kind == SpatialSourceKind.Object
                         ? s with { Name = "Object 12 · Object 12" } : s).ToArray() };
                     Call(lab, "SetScene", numbered); Call(lab, "UpdateScene", 2d);
@@ -230,6 +374,12 @@ internal static class AdmSceneInteractionTests
                     model.ToggleAdmSourceSolo(sources[0].Id); lab.Close(); lab = null;
                     Check(model.AdmSoloSources.Count == 0 && SHA256.HashData(File.ReadAllBytes(demo)).SequenceEqual(originalHash),
                         "Closing the Lab clears audition Solo and leaves the ADM source unchanged");
+                    sceneButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); await Task.Delay(100);
+                    lab = app.Windows.OfType<SpatialLabWindow>().Single();
+                    Check(((ComboBox)lab.FindName("SceneControlMode")).SelectedIndex == 0
+                        && ((Viewport3D)lab.FindName("SceneView")).Children.Count == 2,
+                        "Closing and reopening the ADM scene recreates a working listener model and camera controls");
+                    lab.Close(); lab = null;
                     await model.DisableAdmPlaybackAsync(); Pump(100);
                     Check(!model.IsAdmPlaybackEnabled && !sceneButton.IsEnabled && !model.CanExportAdm && model.CanPlay && !model.HeadphonesEnabled,
                         "Disabling ADM retains native audio with standard playback and disables ADM tools");
@@ -271,6 +421,18 @@ internal static class AdmSceneInteractionTests
         double energy = 0;
         for (int c = 0; c < 2; c++) { double re = 0, im = 0; for (int f = 0; f < samples.Length / 2; f++) { double a = 2 * Math.PI * frequency * f / 48000; re += samples[f * 2 + c] * Math.Cos(a); im += samples[f * 2 + c] * Math.Sin(a); } energy += (re * re + im * im) / Math.Pow(samples.Length / 2, 2); }
         return energy;
+    }
+    static double EarTone(float[] samples, double frequency, int channel)
+    {
+        double re = 0, im = 0;
+        for (int f = 0; f < samples.Length / 2; f++)
+        { double a = 2 * Math.PI * frequency * f / 48000; re += samples[2 * f + channel] * Math.Cos(a); im += samples[2 * f + channel] * Math.Sin(a); }
+        return re * re + im * im;
+    }
+    static int FreePort()
+    {
+        using var udp = new System.Net.Sockets.UdpClient(new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, 0));
+        return ((System.Net.IPEndPoint)udp.Client.LocalEndPoint!).Port;
     }
     static void Pump(int ms) { var frame = new DispatcherFrame(); var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(ms) }; timer.Tick += (_, _) => { timer.Stop(); frame.Continue = false; }; timer.Start(); Dispatcher.PushFrame(frame); }
     static void Save(Window window, string path) { window.UpdateLayout(); var bitmap = new RenderTargetBitmap((int)window.ActualWidth, (int)window.ActualHeight, 96, 96, PixelFormats.Pbgra32); bitmap.Render(window); var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap)); using var file = File.Create(path); encoder.Save(file); }

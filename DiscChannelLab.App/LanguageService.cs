@@ -55,6 +55,18 @@ public sealed class LanguageService : INotifyPropertyChanged
 
     private static readonly Dictionary<string, string> English = new(StringComparer.Ordinal)
     {
+        ["操作"] = "Control",
+        ["カメラ"] = "Camera",
+        ["リスナー"] = "Listener",
+        ["頭を正面へ"] = "Recenter head",
+        ["Headphones画面のUDPポートと軸設定を共用します。位置移動は使用しません。"] = "Shares the UDP port and axis settings in Headphones. Position tracking is not used.",
+        ["位置表示はメイン再生に連動します。頭の向きはHeadphones画面と共通です。リスナーの位置は中央に固定されています。"] = "Positions follow main playback. Head orientation is shared with Headphones. The listener stays at the center.",
+        ["Measured BRIRは測定時の頭の向きで固定です。頭の回転にはDirectまたはHRTFを選んでください。"] = "Measured BRIR uses its fixed measured head orientation. Select Direct or HRTF for head rotation.",
+        ["頭の向きを音に反映するには、メイン画面でDirectまたはHRTF再生を選んでください。"] = "Select Direct or HRTF playback in the main window to hear changes in head orientation.",
+        ["Stereo presentationでは頭の向きは音に反映されません。Objectsまたは5.1 presentationを選んでください。"] = "Stereo presentation does not follow head orientation. Select Objects or 5.1 presentation.",
+        ["opentrackで頭を操作中です。手動操作するにはopentrackをオフにしてください。Home：頭を正面へ。"] = "opentrack controls the head. Turn opentrack off for manual control. Home: recenter head.",
+        ["リスナー：ドラッグ／矢印で左右・上下、右ドラッグ／Q・Eで傾き。Shift：大きく、Alt：微調整。Home：頭を正面へ。"] = "Listener: drag / arrows for yaw and pitch, right-drag / Q / E for roll. Shift: faster. Alt: finer. Home: recenter head.",
+        ["カメラ：ドラッグ／矢印で回転、右ドラッグで移動、ホイールでズーム。Home：カメラ復帰。Shift：大きく、Alt：微調整。"] = "Camera: drag / arrows to orbit, right-drag to pan, wheel to zoom. Home: reset camera. Shift: faster. Alt: finer.",
         ["ADM・ヘッドフォン書き出しの設定をJSONにも保存"] = "Also save ADM / headphone render settings as JSON",
         ["FLACの再生には不要です。HRTF・ミキサー・頭の向きなどの書き出し条件を記録します。"] = "Not required for FLAC playback. Records export conditions including HRTF, mixer and head orientation.",
         ["このタイトルには暗号化された音声・映像データが含まれるため処理できません。保護の解除は行いません。"] = "This title contains encrypted audio/video data and cannot be processed. Copy protection is not removed.",

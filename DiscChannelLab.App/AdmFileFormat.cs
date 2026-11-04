@@ -24,4 +24,6 @@ public static class AdmFileFormat
     }
     public static HeadphoneOptions RenderOptions(HeadphoneOptions value) => value.Enabled ? value : value with
     { Enabled = true, Method = HeadphoneMethod.Direct, Hrtf = HeadphoneHrtf.BuiltIn, SofaPath = "", ShadowStrength = 0, RearCutDb = 0, InterauralDelay = false, Room = new() };
+    public static bool UsesHeadOrientation(HeadphoneOptions value, AtmosPresentation presentation = AtmosPresentation.Objects) =>
+        value.Enabled && value.Method != HeadphoneMethod.MeasuredBrir && presentation != AtmosPresentation.Stereo;
 }

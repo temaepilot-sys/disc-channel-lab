@@ -80,6 +80,8 @@ internal static class AdmFlacExportTests
                         "The final CD FLAC has the exact one-second PCM length, stereo format and entered song/artist tags");
                     jsonCheck.IsChecked = true;
                     Check(model.SaveSpatialRenderJson, "Checking the visible JSON option reaches the real export setting");
+                    var headOptions = HeadphoneSession.Current.Options;
+                    HeadphoneSession.Current.SetKeyboard(30, 10, -5);
                     model.OutputFolder = Path.Combine(root, "hires-with-json"); model.IsHighResSelected = true;
                     Check(await model.ConvertAsync(), "Opt-in JSON export also completes at 24-bit / 48 kHz");
                     string[] high = Directory.GetFiles(model.OutputFolder, "*.flac", SearchOption.AllDirectories).Order().ToArray();
@@ -90,6 +92,20 @@ internal static class AdmFlacExportTests
                     var highData = await probe.ProbeAudioFileAsync(high[1], CancellationToken.None);
                     Check(highData.Analysis.Streams[0] is { Channels: 2, SampleRate: 48000, BitDepth: 24, SampleCount: 48000 },
                         "The final high-resolution FLAC has exactly the original requested 48000 samples");
+                    using (var json = JsonDocument.Parse(File.ReadAllText(high[1] + ".render.json")))
+                        Check(json.RootElement.GetProperty("Settings").GetProperty("Pose").GetProperty("Yaw").GetDouble() == 30,
+                            "Headphone FLAC export retains the explicitly selected fixed head orientation");
+                    HeadphoneSession.Current.SetOptions(headOptions with { Enabled = false });
+                    HeadphoneSession.Current.SetKeyboard(80, 25, -10); model.OutputFolder = Path.Combine(root, "stereo-neutral-head");
+                    Check(await model.ConvertAsync(), "Standard stereo ADM FLAC export succeeds after headphone head rotation");
+                    var neutral = Directory.GetFiles(model.OutputFolder, "*.render.json", SearchOption.AllDirectories).First();
+                    using (var json = JsonDocument.Parse(File.ReadAllText(neutral)))
+                    {
+                        var pose = json.RootElement.GetProperty("Settings").GetProperty("Pose");
+                        Check(pose.GetProperty("Yaw").GetDouble() == 0 && pose.GetProperty("Pitch").GetDouble() == 0 && pose.GetProperty("Roll").GetDouble() == 0,
+                            "Standard stereo ADM FLAC uses a neutral head rather than inheriting the headphone pose");
+                    }
+                    HeadphoneSession.Current.SetOptions(headOptions); HeadphoneSession.Current.Recenter();
                     jsonCheck.IsChecked = false; LanguageService.Instance.SetJapanese(true);
                     Check(!model.SaveSpatialRenderJson && jsonCheck.Content.ToString()!.Contains("JSONにも保存"), "The JSON control can be turned off and switches correctly to Japanese");
                     var snapshot = new SpatialRenderSnapshot(new() { Enabled = true, Method = HeadphoneMethod.SteamAudio }, new(0, 0, 0),

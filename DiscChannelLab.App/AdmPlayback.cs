@@ -33,12 +33,14 @@ public sealed partial class AudioNavigationService
             : AdmFileFormat.RenderOptions(ReferenceEquals(SpatialAdmWave, wave) ? session.Options : session.Options with { Enabled = false });
         var settings = Options(); string hash = settings.Method == HeadphoneMethod.MeasuredBrir ? settings.BrirHash : settings.Hrtf == HeadphoneHrtf.Sofa
             ? Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(settings.SofaPath))) : HrtfEntry.BuiltIn.Hash;
-        var snapshot = new SpatialRenderSnapshot(settings, session.Pose, new(StereoMixSettings.Default, null), volume?.Invoke() ?? 1, hash);
+        bool followHead = (input.Progressive is not null || ReferenceEquals(SpatialAdmWave, wave))
+            && AdmFileFormat.UsesHeadOrientation(session.Options, input.Presentation);
+        var snapshot = new SpatialRenderSnapshot(settings, followHead ? session.Pose : new(0, 0, 0), new(StereoMixSettings.Default, null), volume?.Invoke() ?? 1, hash);
         bool own = transport is null; transport ??= new(allowPendingPause: true);
         bool announced = false;
         try
         {
-            var stats = await SpatialPcmPlayer.PlayAsync(input, snapshot, transport, token, livePose: true,
+            var stats = await SpatialPcmPlayer.PlayAsync(input, snapshot, transport, token, livePose: followHead,
                 liveOptions: Options, liveMaster: volume, liveOutputMix: outputMix,
                 liveSourceMix: () => AdmMonitor.For(wave), observe: frame =>
                 {

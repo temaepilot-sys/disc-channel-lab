@@ -38,6 +38,7 @@ public partial class SpatialLabWindow
         sceneCamera = new((PerspectiveCamera)SceneView.Camera); sceneCamera.Reset(); RefreshSceneSolo();
         SceneView.Camera.Changed += (_, _) => { UpdateFrontGuide(); UpdateSourceLabels(); };
         SceneView.SizeChanged += (_, _) => UpdateSourceLabels(); UpdateFrontGuide();
+        InitializeSceneListener();
     }
     public void ShowAdmScene()
     {
@@ -128,7 +129,9 @@ public partial class SpatialLabWindow
             if (pointerDragged)
             {
                 var delta = point - pointerLast;
-                if (pointerButton == MouseButton.Left) sceneCamera.Orbit(delta.X * .35 * SceneInputScale, delta.Y * .35 * SceneInputScale);
+                if (ListenerControlSelected) RotateSceneListener(delta.X * .35 * SceneInputScale,
+                    -delta.Y * .35 * SceneInputScale, pointerButton == MouseButton.Right);
+                else if (pointerButton == MouseButton.Left) sceneCamera.Orbit(delta.X * .35 * SceneInputScale, delta.Y * .35 * SceneInputScale);
                 else sceneCamera.Pan(delta.X * SceneInputScale, delta.Y * SceneInputScale, SceneView.ActualHeight);
             }
             pointerLast = point; e.Handled = true; return;
@@ -153,20 +156,28 @@ public partial class SpatialLabWindow
     }
     void SceneWindow_KeyDown(object sender, KeyEventArgs e)
     {
-        if (!ReferenceEquals(Pages.SelectedItem, AdmSceneTab) || !model.IsAdmPlaybackEnabled || e.Key != Key.Home) return;
-        sceneCamera.Reset(); e.Handled = true;
+        var key = e.Key == Key.System ? e.SystemKey : e.Key;
+        if (!ReferenceEquals(Pages.SelectedItem, AdmSceneTab) || !model.IsAdmPlaybackEnabled || key != Key.Home) return;
+        ResetSceneControl(); e.Handled = true;
+    }
+    void ResetSceneControl()
+    {
+        if (ListenerControlSelected) SceneHeadCenter_Click(SceneInput, new RoutedEventArgs());
+        else sceneCamera.Reset();
     }
     void Scene_KeyDown(object sender, KeyEventArgs e)
     {
         if (!model.IsAdmPlaybackEnabled) return;
+        var key = e.Key == Key.System ? e.SystemKey : e.Key; // Alt-modified keys arrive as Key.System in WPF.
         double step = 5 * SceneInputScale;
-        switch (e.Key)
+        if (ListenerControlSelected && SceneListenerKey(key, step)) { e.Handled = true; return; }
+        switch (key)
         {
             case Key.Left: sceneCamera.Orbit(-step, 0); break;
             case Key.Right: sceneCamera.Orbit(step, 0); break;
             case Key.Up: sceneCamera.Orbit(0, step); break;
             case Key.Down: sceneCamera.Orbit(0, -step); break;
-            case Key.Home: sceneCamera.Reset(); break;
+            case Key.Home: ResetSceneControl(); break;
             case Key.Escape: model.ClearAdmSourceSolo(); break;
             default: return;
         }

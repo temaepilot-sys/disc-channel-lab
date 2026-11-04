@@ -43,11 +43,13 @@ Changing presentation retains the track and position, with a brief renderer rest
 
 ## Inspect positions and use Solo
 
-The amber floor arrow and the FRONT guide mark the source space's front. Rotating the diagram changes only the inspection camera, not the audio listener's orientation.
+The amber floor arrow and the FRONT guide mark the source space's front. **Control: Camera** rotates only the inspection camera. **Control: Listener** rotates the head at the center, using the same live pose as Headphones and opentrack. Source positions and the FRONT guide remain fixed.
 
-The default view looks forward from behind the listener, so left and right sources match the listener's sides. Looking back from in front of the listener naturally reverses their screen positions. Home restores the default rear view; it does not change the headphone pose.
+The default view looks forward from behind the listener, so left and right sources match the listener's sides. Looking back from in front of the listener naturally reverses their screen positions. In Camera mode, Home restores the default rear view without changing the headphone pose.
 
-Left drag / arrow keys: orbit and overhead view. Right drag: pan. Wheel: zoom. Home: restore the default view.
+In Camera mode, left drag / arrow keys orbit and tilt; right drag pans. In Listener mode, left drag / arrows change yaw and pitch; right drag / Q / E change roll. Shift increases the step; Alt makes it finer. Wheel zooms the camera in either mode. **Home resets the selected control: Camera restores the view; Listener recenters the head**, including its opentrack reference. The control mode stays selected. **Recenter head** also resets head orientation in either mode. Click the 3D area before using keys.
+
+The amber face arrow shows where the listener is looking. Turning the head changes Direct / HRTF playback without restarting the decoder or output device. The opentrack checkbox shares the receiver, port and inversion settings in Headphones; manual rotation is held while tracking is active. Measured BRIR retains its measured head orientation and disables these controls. Ordinary stereo does not follow head rotation. Listener position remains fixed; opentrack XYZ translation is not used. A/B comparisons and saved renders continue to use their explicitly configured fixed head orientation.
 
 Each sphere has a readable label that follows its position and matches the table's Label column. Decoded `Object 12` names retain their original number; speaker beds show their channel name. Other ADM names use a `#` reference from the source list. Labels hide with inactive or off-screen sources.
 

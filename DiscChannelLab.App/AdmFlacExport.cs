@@ -27,7 +27,9 @@ public sealed partial class MainViewModel
     {
         var disc = _disc!; var playlist = _loadedPlaylist!; var preferred = SelectedStream!; var tracks = Tracks.Where(t => t.IsSelected).ToArray();
         var options = IsAtmosStreamingEnabled ? ProgressiveAtmosSource.Options(HeadphoneSession.Current.Options, SelectedAtmosPresentation)
-            : AdmFileFormat.RenderOptions(HeadphoneSession.Current.Options); var pose = HeadphoneSession.Current.Pose;
+            : AdmFileFormat.RenderOptions(HeadphoneSession.Current.Options);
+        var pose = AdmFileFormat.UsesHeadOrientation(HeadphoneSession.Current.Options,
+            IsAtmosStreamingEnabled ? SelectedAtmosPresentation : AtmosPresentation.Objects) ? HeadphoneSession.Current.Pose : new(0, 0, 0);
         string folder = Path.Combine(OutputFolder, ConversionService.SafeName(disc.AlbumTitle)); if (GroupByChapter) folder = Path.Combine(folder, ConversionService.SafeName(playlist.TitleName));
         bool renderNormal = _saveBinauralFlac || CurrentAdm is not null;
         bool writeRenderJson = SaveSpatialRenderJson;

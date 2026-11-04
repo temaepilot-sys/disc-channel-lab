@@ -342,7 +342,7 @@ public partial class SpatialLabWindow : Window
     void Tick()
     {
         if (closed) return;
-        UpdateComparisonPosition();
+        UpdateComparisonPosition(); RefreshSceneListener();
         if (transport is { CanPause: true } t) UpdateScene((displayInput?.FirstSample / 48000d ?? 0) + t.EstimatedPosition);
         else if (operation is null && model.IsAdmPlaybackEnabled && model.CurrentAdm is not null)
         { if (model.CurrentAdmScene is { } scene && !ReferenceEquals(displayScene, scene)) SetScene(scene); UpdateScene(model.CurrentAdmSeconds); }
@@ -353,7 +353,6 @@ public partial class SpatialLabWindow : Window
         displayScene = scene; ResetSourceInteraction(scene); SceneTime.Maximum = scene.DurationSamples / 48000d;
         scenePoints.Clear(); SceneView.Children.Clear(); var group = new Model3DGroup();
         group.Children.Add(new AmbientLight(Color.FromRgb(130, 130, 130))); group.Children.Add(new DirectionalLight(Colors.White, new Vector3D(-1, -2, 1)));
-        group.Children.Add(Sphere(Colors.Gray, .13, new TranslateTransform3D()));
         for (int i = -4; i <= 4; i++) { group.Children.Add(GridLine(i * .5, true)); group.Children.Add(GridLine(i * .5, false)); }
         group.Children.Add(FrontFloorGuide());
         foreach (var source in scene.Sources)
@@ -361,7 +360,8 @@ public partial class SpatialLabWindow : Window
             var p = new TranslateTransform3D(); scenePoints.Add(source.Id, p);
             group.Children.Add(SourceSphere(source, p));
         }
-        SceneView.Children.Add(new ModelVisual3D { Content = group }); UpdateScene(0); RefreshSceneSolo();
+        SceneView.Children.Add(new ModelVisual3D { Content = group });
+        SceneView.Children.Add(CreateSceneListener()); RefreshSceneListener(); UpdateScene(0); RefreshSceneSolo();
     }
     static GeometryModel3D GridLine(double p, bool x)
     {

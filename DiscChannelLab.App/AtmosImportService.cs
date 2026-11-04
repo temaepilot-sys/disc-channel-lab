@@ -147,16 +147,60 @@ public sealed class AtmosImportService(ToolPaths paths, FfprobeService probe, Ap
         var segments = new List<DamfSegment>(); long total = ConversionService.ToSample(playlist.DurationTicks, 48000);
         try
         {
+            var streams = new Dictionary<string, AudioStreamInfo>(StringComparer.Ordinal);
+            string? silentTail = null;
+            async Task<T> Inspect<T>(string clipId, Func<Task<T>> action)
+            {
+                try { return await action(); }
+                catch (Exception ex) when (FfprobeService.IsRecoverable(ex))
+                { throw new InvalidDataException($"Clip {clipId}: cannot verify source audio. {ex.Message}", ex); }
+            }
+            // Resolve the entire title before expensive decoding. Report a missing track with
+            // its clip ID, and never replace real/unknown audio with generated silence.
+            foreach (var clip in playlist.Clips.DistinctBy(c => c.Id))
+            {
+                token.ThrowIfCancellationRequested();
+                string source = SacdService.ClipPath(disc, clip);
+                progress?.Report(new(0, $"Checking audio in clip {clip.Id} before ADM export…"));
+                if (selected.IsSilentTail(playlist, clip))
+                {
+                    if (!await Inspect(clip.Id, () => probe.VerifySilentTailAsync(source, playlist, clip, selected, token)))
+                        throw new InvalidDataException($"Clip {clip.Id}: the previously detected video-only tail could not be verified. Refusing to discard possible audio.");
+                    silentTail = clip.Id;
+                    log.Write($"ADM VERIFIED VIDEO-ONLY TAIL title={playlist.DisplayNumber} clip={clip.Id}: full packet scan confirms no audio.");
+                    continue;
+                }
+                var available = clip.File?.Streams ?? await Inspect(clip.Id, () => probe.ProbeClipAsync(source, token));
+                AudioStreamInfo actual;
+                try { actual = AudioStreamMatcher.Resolve(selected, available); }
+                catch (InvalidDataException ex)
+                {
+                    string Describe(AudioStreamInfo s) => $"id={s.TransportId} codec={s.Codec} profile={s.Profile} channels={s.Channels} layout={s.ChannelLayout}";
+                    throw new InvalidDataException($"Clip {clip.Id}: {ex.Message} Selected: {Describe(selected)}. Available: " +
+                        (available.Count == 0 ? "none" : string.Join("; ", available.Select(Describe))), ex);
+                }
+                if (!IsAtmos(actual)) throw new InvalidDataException($"Clip {clip.Id}: the selected audio is not TrueHD Atmos.");
+                streams.Add(clip.Id, actual);
+            }
             for (int i = 0; i < playlist.Clips.Count; i++)
             {
                 var clip = playlist.Clips[i]; token.ThrowIfCancellationRequested();
                 long first = ConversionService.ToSample(clip.PlaylistStartTicks, 48000);
                 long last = i + 1 == playlist.Clips.Count ? total : ConversionService.ToSample(playlist.Clips[i + 1].PlaylistStartTicks, 48000);
                 long frames = last - first; if (frames <= 0) throw new InvalidDataException("Non-contiguous Atmos playlist timeline.");
+                if (clip.Id == silentTail && selected.IsSilentTail(playlist, clip))
+                {
+                    if (segments.Count == 0) throw new InvalidDataException("A silent tail cannot replace a title's audio.");
+                    var previous = segments[^1];
+                    // Reuse the exact-sample silence path in the existing ADM writer. Every
+                    // original PCM sample and object event keeps its original timeline position.
+                    segments[^1] = previous with { Frames = checked(previous.Frames + frames),
+                        TrailingSilenceFrames = checked(previous.TrailingSilenceFrames + frames) };
+                    log.Write($"ADM SILENT TAIL title={playlist.DisplayNumber} clip={clip.Id}: preserve {frames} samples after decoded audio.");
+                    continue;
+                }
                 string basename = Path.Combine(work, $"clip-{i:000}-{clip.Id}"), source = SacdService.ClipPath(disc, clip);
-                var available = clip.File?.Streams ?? await probe.ProbeClipAsync(source, token);
-                var actual = AudioStreamMatcher.Resolve(selected, available);
-                if (!IsAtmos(actual)) throw new InvalidDataException("The selected clip is not TrueHD Atmos.");
+                var actual = streams[clip.Id];
                 long seek = clip.InTicks - (actual.StartTimeTicks ?? (clip.File is not null ? 0 : throw new InvalidDataException("Unknown source start time.")));
                 seek = Math.Max(0, seek); // An audio stream may legitimately start after the play item's video in-point.
                 progress?.Report(new(.7 * first / total, $"Decoding clip {i + 1}/{playlist.Clips.Count} ({clip.Id}) independently…"));

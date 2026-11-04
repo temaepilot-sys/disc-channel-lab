@@ -56,6 +56,15 @@ public sealed partial class FfprobeService
         return parsed;
     }
 
+    public async Task<bool> VerifySilentTailAsync(string path, PlaylistInfo playlist, ClipInfo clip,
+        AudioStreamInfo selected, CancellationToken token)
+    {
+        if (playlist.Format != DiscFormat.BluRay || !selected.IsSilentTail(playlist, clip)) return false;
+        // Recheck the current file rather than trusting a previous inspection if it changed.
+        // A shallow empty probe, unknown codec or damaged input never proves silence.
+        return (await ProbeClipDetailedAsync(path, token, deep: true)).ConfirmedShortVideoOnly;
+    }
+
     public async Task<PlaylistProbeResult> ProbePlaylistAsync(string root, PlaylistInfo playlist, CancellationToken token,
         bool deep = false)
     {

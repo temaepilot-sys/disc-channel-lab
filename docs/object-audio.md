@@ -55,7 +55,7 @@ Each sphere has a readable label that follows its position and matches the table
 
 Use **Show labels** beside **Clear Solo** to show or hide the labels and their leader lines. The choice is remembered when Spatial Lab closes. Labels are enabled by default.
 
-Click a sphere to Solo that source, and click again to release it. Shift-click or the table checkboxes select multiple Solo sources. Clear Solo / Esc releases all.
+Click a sphere to Solo that source, and click again to release it. Shift-click or the table checkboxes select multiple Solo sources. Clear Solo / Esc releases all. Esc also cancels an unfinished camera/listener drag. Switching away from the window, minimizing or hiding it cancels the drag; a missed mouse-up is checked periodically so the scene releases stale mouse capture.
 
 A decoded spatial source is not necessarily an isolated instrument, voice or original studio stem. Multiple sounds may be coded together. Displayed positions are not a physical room simulation or a guarantee of perceived localization.
 

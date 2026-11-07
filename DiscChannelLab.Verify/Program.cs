@@ -87,6 +87,9 @@ if (args is ["atmos-stream-tests", var atmosStreamOutput, var atmosStreamRaw, va
 { try { await AtmosStreamingTests.Run(atmosStreamOutput, atmosStreamRaw, atmosStreamReference); return 0; } catch(Exception e) { Console.Error.WriteLine(e); return 1; } }
 if (args is ["adm-scene-tests", var admSceneOutput, var admSceneTrueHd])
 { try { AdmSceneInteractionTests.Run(admSceneOutput, admSceneTrueHd); return 0; } catch(Exception e) { Console.Error.WriteLine(e); return 1; } }
+
+if (args is ["adm-resource-tests", var resourceOutput, var resourceAdm, var resourceMode])
+{ try { AdmResourceTests.Run(resourceOutput, resourceAdm, resourceMode == "baseline"); return 0; } catch (Exception e) { Console.Error.WriteLine(e); return 1; } }
 if (args is ["spatial-review-tests", var spatialReviewOutput, var spatialReviewAdm])
 { try { SpatialReviewTests.Run(spatialReviewOutput, spatialReviewAdm); return 0; } catch(Exception e) { Console.Error.WriteLine(e); return 1; } }
 if (args is ["spatial-hrtf-switch-tests", var hrtfSwitchOutput, var hrtfSwitchFixtures])

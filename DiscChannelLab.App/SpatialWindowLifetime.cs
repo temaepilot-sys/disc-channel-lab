@@ -55,7 +55,7 @@ public partial class SpatialLabWindow
             }
         }
         Cleanup(() => CancelRequest(operation)); Cleanup(() => CancelRequest(comparisonStop)); Cleanup(CancelPendingSettings);
-        Cleanup(() => { if (SceneInput.IsMouseCaptured) SceneInput.ReleaseMouseCapture(); });
+        Cleanup(CancelScenePointer);
         Cleanup(model.ClearAdmSourceSolo); Cleanup(SaveSettings);
     }
     void QueueMainSourceRefresh()

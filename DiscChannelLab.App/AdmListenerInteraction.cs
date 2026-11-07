@@ -79,7 +79,7 @@ public partial class SpatialLabWindow
     {
         if (ScenePoseText is null) return;
         // End the current drag before changing what it controls. Mode changes never recenter either pose.
-        SceneInput.ReleaseMouseCapture(); RefreshSceneListener(); SceneInput.Focus();
+        CancelScenePointer(); RefreshSceneListener(); SceneInput.Focus();
     }
 
     void RotateSceneListener(double horizontal, double vertical, bool roll)

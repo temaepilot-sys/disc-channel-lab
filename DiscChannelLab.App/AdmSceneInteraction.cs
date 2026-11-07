@@ -38,7 +38,29 @@ public partial class SpatialLabWindow
         sceneCamera = new((PerspectiveCamera)SceneView.Camera); sceneCamera.Reset(); RefreshSceneSolo();
         SceneView.Camera.Changed += (_, _) => { UpdateFrontGuide(); UpdateSourceLabels(); };
         SceneView.SizeChanged += (_, _) => UpdateSourceLabels(); UpdateFrontGuide();
+        Deactivated += Scene_Deactivated;
+        IsVisibleChanged += (_, e) => { if (e.NewValue is false) CancelScenePointer(); };
+        StateChanged += (_, _) => { if (WindowState == WindowState.Minimized) CancelScenePointer(); };
         InitializeSceneListener();
+    }
+    void Scene_Deactivated(object? sender, EventArgs e) => CancelScenePointer();
+    void CancelScenePointer()
+    {
+        // Clear managed state first: releasing capture can synchronously raise LostMouseCapture.
+        pointerButton = null; pointerSource = null; pointerDragged = false;
+        if (SceneInput.IsMouseCaptured) SceneInput.ReleaseMouseCapture();
+    }
+    void CheckScenePointer()
+    {
+        if (pointerButton is null && !SceneInput.IsMouseCaptured) return;
+        bool released = pointerButton switch
+        {
+            MouseButton.Left => Mouse.LeftButton == MouseButtonState.Released,
+            MouseButton.Right => Mouse.RightButton == MouseButtonState.Released,
+            _ => true
+        };
+        // A missed mouse-up must not leave this view holding clicks intended for another window.
+        if (released || !IsVisible || WindowState == WindowState.Minimized) CancelScenePointer();
     }
     public void ShowAdmScene()
     {
@@ -117,11 +139,13 @@ public partial class SpatialLabWindow
         if (!model.IsAdmPlaybackEnabled || operation is not null || e.ChangedButton is not (MouseButton.Left or MouseButton.Right)) return;
         SceneInput.Focus(); pointerDown = pointerLast = e.GetPosition(SceneView); pointerButton = e.ChangedButton;
         pointerDragged = false; pointerSource = e.ChangedButton == MouseButton.Left ? PickSceneSource(pointerDown) : null;
-        SceneInput.CaptureMouse(); e.Handled = true;
+        if (!SceneInput.CaptureMouse()) CancelScenePointer();
+        e.Handled = true;
     }
     static double SceneInputScale => (Keyboard.Modifiers & ModifierKeys.Alt) != 0 ? .2 : (Keyboard.Modifiers & ModifierKeys.Shift) != 0 ? 3 : 1;
     void Scene_MouseMove(object sender, MouseEventArgs e)
     {
+        CheckScenePointer();
         var point = e.GetPosition(SceneView);
         if (pointerButton is not null)
         {
@@ -144,7 +168,7 @@ public partial class SpatialLabWindow
     {
         if (pointerButton != e.ChangedButton) return;
         string? clicked = !pointerDragged && e.ChangedButton == MouseButton.Left ? pointerSource : null;
-        pointerButton = null; pointerSource = null; SceneInput.ReleaseMouseCapture();
+        CancelScenePointer();
         if (clicked is not null) model.ToggleAdmSourceSolo(clicked, (Keyboard.Modifiers & ModifierKeys.Shift) != 0);
         e.Handled = true;
     }
@@ -157,11 +181,15 @@ public partial class SpatialLabWindow
     void SceneWindow_KeyDown(object sender, KeyEventArgs e)
     {
         var key = e.Key == Key.System ? e.SystemKey : e.Key;
-        if (!ReferenceEquals(Pages.SelectedItem, AdmSceneTab) || !model.IsAdmPlaybackEnabled || key != Key.Home) return;
+        if (!ReferenceEquals(Pages.SelectedItem, AdmSceneTab) || !model.IsAdmPlaybackEnabled) return;
+        if (key == Key.Escape && (pointerButton is not null || SceneInput.IsMouseCaptured))
+        { CancelScenePointer(); model.ClearAdmSourceSolo(); e.Handled = true; return; }
+        if (key != Key.Home) return;
         ResetSceneControl(); e.Handled = true;
     }
     void ResetSceneControl()
     {
+        CancelScenePointer();
         if (ListenerControlSelected) SceneHeadCenter_Click(SceneInput, new RoutedEventArgs());
         else sceneCamera.Reset();
     }
@@ -178,7 +206,7 @@ public partial class SpatialLabWindow
             case Key.Up: sceneCamera.Orbit(0, step); break;
             case Key.Down: sceneCamera.Orbit(0, -step); break;
             case Key.Home: ResetSceneControl(); break;
-            case Key.Escape: model.ClearAdmSourceSolo(); break;
+            case Key.Escape: CancelScenePointer(); model.ClearAdmSourceSolo(); break;
             default: return;
         }
         e.Handled = true;

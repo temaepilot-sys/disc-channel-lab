@@ -342,6 +342,7 @@ public partial class SpatialLabWindow : Window
     void Tick()
     {
         if (closed) return;
+        CheckScenePointer();
         UpdateComparisonPosition(); RefreshSceneListener();
         if (transport is { CanPause: true } t) UpdateScene((displayInput?.FirstSample / 48000d ?? 0) + t.EstimatedPosition);
         else if (operation is null && model.IsAdmPlaybackEnabled && model.CurrentAdm is not null)
